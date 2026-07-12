@@ -8,6 +8,9 @@ import { GRID } from '../config.js';
 // different unit sizes), and hands out clones ready to render.
 // norm: { h } scale to world height | { fp } scale to XZ footprint
 //       | { tile: true } use the tower-defense kit tile factor
+//       | { raw: true } keep authored origin & scale — hand props
+//         are authored with the grip exactly at the origin, so
+//         they can be parented straight onto an arm bone
 // ============================================================
 
 const M = (url, norm) => ({ url: `models/${url}`, norm });
@@ -35,24 +38,32 @@ const MANIFEST = {
   'ammo-arrow': M('ammo/arrow.glb', { tile: true }),
   'ammo-cannonball': M('ammo/cannonball.glb', { tile: true }),
   'ammo-boulder': M('ammo/boulder.glb', { tile: true }),
-  // hand props
-  'prop-sword': M('props/sword.glb', { h: 0.65 }),
-  'prop-shield': M('props/shield.glb', { h: 0.55 }),
-  'prop-staff': M('props/staff.glb', { h: 0.95 }),
-  'prop-crystal': M('props/crystal-small.glb', { h: 0.3 }),
+  // hand props (raw: grip at origin, sized for the mini characters)
+  'prop-sword': M('props/sword.glb', { raw: true }),
+  'prop-shield': M('props/shield.glb', { raw: true }),
+  'prop-staff': M('props/staff.glb', { raw: true }),
+  'prop-crystal': M('props/crystal-small.glb', { raw: true }),
   // obstacles — big and chunky so they read as impassable
   'obstacle-barrel': M('obstacles/barrel.glb', { fp: 1.6 }),
   'obstacle-rocks': M('env/rocks-tall.glb', { h: 1.5 }),
   // environment
   'env-tile': M('env/tile.glb', { tile: true }),
   'env-tile-dirt': M('env/tile-dirt.glb', { tile: true }),
-  'env-spawn': M('env/spawn.glb', { fp: 1.9 }),
   'env-crystal': M('env/crystal.glb', { h: 2.7 }),
   'env-fire': M('env/fire-basket.glb', { h: 1.15 }),
   'env-pine': M('env/pine.glb', { h: 3.4 }),
   'env-pine-crooked': M('env/pine-crooked.glb', { h: 2.9 }),
   'env-rocks-tall': M('env/rocks-tall.glb', { h: 1.6 }),
   'env-lantern': M('env/lantern.glb', { h: 1.5 }),
+  // sanctuary — stone ruins & fountains around the crystal
+  'env-altar': M('env/altar-stone.glb', { fp: 2.3 }),
+  'env-bowl': M('env/bowl.glb', { fp: 1.5 }),
+  'env-pillar-small': M('env/pillar-small.glb', { h: 0.95 }),
+  'env-wall-curve': M('env/stone-wall-curve.glb', { fp: 3.6 }),
+  'env-column': M('env/column.glb', { h: 2.7 }),
+  'env-column-damaged': M('env/column-damaged.glb', { h: 1.9 }),
+  'env-statue': M('env/statue.glb', { h: 2.3 }),
+  'env-obelisk': M('env/obelisk.glb', { h: 2.5 }),
 };
 
 const templates = {};
@@ -82,6 +93,10 @@ export async function loadAssets(onProgress) {
 
 function prepare(gltf, norm, tileFactor) {
   const scene = gltf.scene;
+  const group = new THREE.Group();
+  group.add(scene);
+  if (norm.raw) return { group, animations: gltf.animations, factor: 1 };
+
   const box = new THREE.Box3().setFromObject(scene);
   const size = box.getSize(new THREE.Vector3());
   let s = 1;
@@ -97,8 +112,6 @@ function prepare(gltf, norm, tileFactor) {
   scene.position.z -= c.z;
   scene.position.y -= box2.min.y;
 
-  const group = new THREE.Group();
-  group.add(scene);
   return { group, animations: gltf.animations, factor: s };
 }
 

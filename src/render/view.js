@@ -14,15 +14,78 @@ import { sfx } from '../audio.js';
 const PL = { ID: 0, CLS: 1, X: 2, Z: 3, YAW: 4, HP: 5, MHP: 6, LVL: 7, XP: 8, XPN: 9, MOV: 10, DEAD: 11, RESP: 12, OBST: 13, KILLS: 14, NAME: 15 };
 const EN = { ID: 0, KIND: 1, X: 2, Z: 3, YAW: 4, HP: 5, MHP: 6, SCALE: 7, BOSS: 8, MOV: 9 };
 
+// Hand props live in BONE space: raw Kenney units, grip at the origin.
+// The hand sits ~0.14 units down the arm bone; rot compensates the
+// arm's resting tilt so weapons read upright and stay visible.
 const CLASS_PROPS = {
-  berserker: [{ key: 'prop-sword', bone: 'arm-right', pos: [0.05, -0.22, 0.12], rot: [1.35, 0, 0] }],
+  berserker: [{ key: 'prop-sword', bone: 'arm-right', pos: [0, -0.13, 0.04], rot: [0.85, 0, -0.4], scale: 1.3 }],
   tanker: [
-    { key: 'prop-sword', bone: 'arm-right', pos: [0.05, -0.22, 0.12], rot: [1.35, 0, 0] },
-    { key: 'prop-shield', bone: 'arm-left', pos: [-0.1, -0.28, 0.3], rot: [-0.15, 0, 0] },
+    { key: 'prop-sword', bone: 'arm-right', pos: [0, -0.13, 0.04], rot: [0.85, 0, -0.4], scale: 1.05 },
+    { key: 'prop-shield', bone: 'arm-left', pos: [0.05, -0.1, 0.05], rot: [0.15, 0.35, 0], scale: 1.15 },
   ],
-  archer: [{ key: 'ammo-arrow', bone: 'arm-right', pos: [0.03, -0.25, 0.2], rot: [Math.PI / 2, 0, 0], scale: 0.55 }],
-  mage: [{ key: 'prop-staff', bone: 'arm-right', pos: [0.02, -0.28, 0.1], rot: [-0.1, 0, 0], crystalTip: true }],
+  archer: [
+    { gen: makeBow, bone: 'arm-right', pos: [0, -0.14, 0.02], rot: [0.15, -0.5, -0.55], scale: 1.35 },
+    { gen: makeQuiver, bone: 'torso', pos: [-0.05, 0.05, -0.1], rot: [0.25, 0, 0.35] },
+  ],
+  mage: [{ key: 'prop-staff', bone: 'arm-right', pos: [0, -0.08, 0.03], rot: [0, Math.PI, Math.PI], scale: 1.2, crystalTip: true }],
 };
+
+// stylized low-poly bow (raw units: grip at origin, curve toward +Z)
+function makeBow() {
+  const g = new THREE.Group();
+  const wood = new THREE.MeshStandardMaterial({ color: 0x7a4f2a, roughness: 0.9, flatShading: true });
+  const curve = new THREE.CubicBezierCurve3(
+    new THREE.Vector3(0, -0.23, 0.02),
+    new THREE.Vector3(0, -0.13, 0.12),
+    new THREE.Vector3(0, 0.13, 0.12),
+    new THREE.Vector3(0, 0.23, 0.02)
+  );
+  g.add(new THREE.Mesh(new THREE.TubeGeometry(curve, 16, 0.016, 6), wood));
+  const grip = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.024, 0.024, 0.085, 6),
+    new THREE.MeshStandardMaterial({ color: 0x4a3320, roughness: 1, flatShading: true })
+  );
+  grip.position.set(0, 0, 0.083);
+  g.add(grip);
+  const str = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.006, 0.006, 0.46, 4),
+    new THREE.MeshStandardMaterial({ color: 0xe8e2d0, roughness: 0.8 })
+  );
+  str.position.set(0, 0, 0.02);
+  g.add(str);
+  for (const c of g.children) c.position.z -= 0.083; // grip to origin
+  return g;
+}
+
+// back quiver with a couple of arrows peeking out
+function makeQuiver() {
+  const g = new THREE.Group();
+  const leather = new THREE.MeshStandardMaterial({ color: 0x5a3a22, roughness: 1, flatShading: true });
+  const tube = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.038, 0.24, 7), leather);
+  g.add(tube);
+  const rim = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.049, 0.049, 0.03, 7),
+    new THREE.MeshStandardMaterial({ color: 0x7a5433, roughness: 1, flatShading: true })
+  );
+  rim.position.y = 0.105;
+  g.add(rim);
+  for (const [dx, dz, tilt] of [[-0.014, 0, 0.09], [0.016, 0.008, -0.06]]) {
+    const shaft = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.006, 0.006, 0.2, 4),
+      new THREE.MeshStandardMaterial({ color: 0xcfa76a, roughness: 1 })
+    );
+    shaft.position.set(dx, 0.16, dz);
+    shaft.rotation.z = tilt;
+    g.add(shaft);
+    const flet = new THREE.Mesh(
+      new THREE.ConeGeometry(0.016, 0.045, 4),
+      new THREE.MeshStandardMaterial({ color: 0xd85a4a, roughness: 1, flatShading: true })
+    );
+    flet.position.set(dx * 1.6, 0.245, dz);
+    g.add(flet);
+  }
+  return g;
+}
 
 const CLASS_TINT = {
   berserker: 0xff6a4d, tanker: 0x6a9cff, archer: 0x7de87d, mage: 0xc07dff,
@@ -186,19 +249,26 @@ export class GameView {
     for (const spec of CLASS_PROPS[cls] || []) {
       const bone = actor.group.getObjectByName(spec.bone);
       if (!bone) continue;
-      const prop = instantiate(spec.key, { shadows: false });
       const holder = new THREE.Group();
-      holder.add(prop.group);
+      holder.add(spec.gen ? spec.gen() : instantiate(spec.key, { shadows: false }).group);
       if (spec.crystalTip) {
-        const tip = instantiate('prop-crystal', { shadows: false }).group;
-        tip.position.y = 0.92;
+        // glowing crystal floating over the staff's hook
+        const tip = instantiate('prop-crystal', { shadows: false, cloneMaterials: true }).group;
+        tip.scale.setScalar(0.4);
+        tip.position.set(0, 0.02, -0.13); // pre-rotation: ends up above the forward-facing hook
+        tip.rotation.x = Math.PI;         // counter the holder flip so the crystal points up
+        tip.traverse((o) => {
+          if (o.isMesh && o.material.emissive) {
+            o.material.emissive.set(0x8a2be2);
+            o.material.emissiveIntensity = 0.7;
+          }
+        });
         holder.add(tip);
       }
-      // props were normalized in world units; bones inherit the
-      // character's scale, so compensate
-      const inv = 1 / actor.factor;
-      holder.scale.setScalar(inv * (spec.scale || 1));
-      holder.position.set(spec.pos[0], spec.pos[1], spec.pos[2]).multiplyScalar(inv);
+      // raw props: bone space == raw model units, and the bone already
+      // carries the character's scale, so placement is direct
+      holder.scale.setScalar(spec.scale || 1);
+      holder.position.set(spec.pos[0], spec.pos[1], spec.pos[2]);
       holder.rotation.set(spec.rot[0], spec.rot[1], spec.rot[2]);
       bone.add(holder);
     }

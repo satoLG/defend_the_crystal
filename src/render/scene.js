@@ -5,8 +5,11 @@ import { instantiate } from './assets.js';
 
 // ============================================================
 // Static world: renderer, portrait-friendly camera that always
-// frames the whole board, moody night lighting, terrain tiles,
-// spawn pads, the crystal, and campfire decor.
+// frames the whole board, moody night lighting, and the set
+// dressing — enemies emerge from a fog-choked forest at the top,
+// the board is a clearing whose floor blends dirt and grass, and
+// the bottom settles into a stone sanctuary with fountains
+// around the crystal.
 // ============================================================
 
 const { COLS, ROWS, CELL, SPAWNS, BUILD_ROW_MIN, BUILD_ROW_MAX } = GRID;
@@ -21,8 +24,8 @@ export class GameScene {
     this.renderer.toneMappingExposure = 1.35;
 
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(0x1a1530);
-    this.scene.fog = new THREE.Fog(0x1a1530, 42, 95);
+    this.scene.background = new THREE.Color(0x151128);
+    this.scene.fog = new THREE.Fog(0x151128, 34, 80);
 
     this.camera = new THREE.PerspectiveCamera(50, 1, 0.5, 200);
     this.lookTarget = new THREE.Vector3(0, 0, 0.8);
@@ -32,11 +35,17 @@ export class GameScene {
     this.raycaster = new THREE.Raycaster();
     this.groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
     this.time = 0;
+    this.waters = [];
+    this.flames = [];
+    this.fireLights = [];
+    this.fogSprites = [];
 
     this.buildLights();
     this.buildTerrain();
+    this.buildSanctuary();
     this.buildCrystal();
-    this.buildDecor();
+    this.buildForest();
+    this.buildPenumbra();
     this.buildOverlay();
 
     window.addEventListener('resize', () => this.resize());
@@ -59,73 +68,246 @@ export class GameScene {
     this.scene.add(moon);
 
     this.crystalLight = new THREE.PointLight(0x66e0ff, 30, 14, 1.8);
-    this.crystalLight.position.set(CRYSTAL_POS.x, 2.2, CRYSTAL_POS.z);
+    this.crystalLight.position.set(CRYSTAL_POS.x, 2.6, CRYSTAL_POS.z);
     this.scene.add(this.crystalLight);
-
-    this.fireLight = new THREE.PointLight(0xff8c3a, 18, 10, 1.9);
-    this.fireLight.position.set(CRYSTAL_POS.x - 2.2, 1.4, CRYSTAL_POS.z + 1.4);
-    this.scene.add(this.fireLight);
   }
 
   buildTerrain() {
-    // one instanced mesh per tile variant, checkerboard tinting via instance color
-    const tile = instantiate('env-tile', { shadows: false });
-    let tileGeo = null, tileMat = null;
-    tile.group.updateMatrixWorld(true);
-    tile.group.traverse((o) => {
-      if (o.isMesh && !tileGeo) {
-        tileGeo = o.geometry.clone();
-        tileGeo.applyMatrix4(o.matrixWorld);
-        tileMat = o.material;
-      }
-    });
-    // sink the tiles so their TOP surface is exactly y=0 — actors,
-    // range rings and grid overlays all live relative to that plane
-    tileGeo.computeBoundingBox();
-    const tileTop = tileGeo.boundingBox.max.y;
-    const count = COLS * ROWS;
-    const inst = new THREE.InstancedMesh(tileGeo, tileMat, count);
-    inst.receiveShadow = true;
-    const m = new THREE.Matrix4();
-    const colA = new THREE.Color(1.0, 1.0, 1.0);
-    const colB = new THREE.Color(0.82, 0.86, 0.78);
-    const colSpawn = new THREE.Color(0.85, 0.7, 0.85);
-    let i = 0;
+    // grab geometry+material from both tile variants
+    const grabTile = (key) => {
+      const t = instantiate(key, { shadows: false });
+      let geo = null, mat = null;
+      t.group.updateMatrixWorld(true);
+      t.group.traverse((o) => {
+        if (o.isMesh && !geo) {
+          geo = o.geometry.clone();
+          geo.applyMatrix4(o.matrixWorld);
+          mat = o.material;
+        }
+      });
+      geo.computeBoundingBox();
+      return { geo, mat, top: geo.boundingBox.max.y };
+    };
+    const grass = grabTile('env-tile');
+    const dirt = grabTile('env-tile-dirt');
+    const tileTop = grass.top;
+
+    // decide per cell: dirt trails wander from both spawns down to the
+    // crystal, the forest edge is bare earth, everything else is grass
+    const rng = mulberry32(12);
+    const lattice = [];
+    for (let i = 0; i < (COLS + 2) * (ROWS + 2); i++) lattice.push(rng());
+    const noise = (x, y) => {
+      const xi = Math.floor(x), yi = Math.floor(y);
+      const fx = x - xi, fy = y - yi;
+      const s = (a, b, t) => a + (b - a) * (t * t * (3 - 2 * t));
+      const at = (c, r) => lattice[((r % (ROWS + 2)) * (COLS + 2)) + (c % (COLS + 2))];
+      return s(
+        s(at(xi, yi), at(xi + 1, yi), fx),
+        s(at(xi, yi + 1), at(xi + 1, yi + 1), fx),
+        fy
+      );
+    };
+
+    const kinds = [];   // 0 grass, 1 dirt
+    const colors = [];
+    const GRASS_TONES = [
+      [0.72, 0.85, 0.6], [0.85, 0.97, 0.7], [0.97, 1.05, 0.8],
+      [1.02, 1.02, 0.86], [0.64, 0.8, 0.6],
+    ];
+    const DIRT_TONES = [
+      [1.0, 0.94, 0.86], [0.88, 0.83, 0.78], [0.97, 0.88, 0.78], [0.8, 0.76, 0.74],
+    ];
     for (let r = 0; r < ROWS; r++) {
       for (let c = 0; c < COLS; c++) {
         const w = cellToWorld(c, r);
-        m.makeTranslation(w.x, -tileTop, w.z);
-        inst.setMatrixAt(i, m);
-        const spawnish = r < BUILD_ROW_MIN;
-        inst.setColorAt(i, spawnish ? colSpawn : (c + r) % 2 ? colA : colB);
-        i++;
+        const t = r / (ROWS - 1);
+        // the two spawn trails bend toward the crystal as they go south
+        let lane = Infinity;
+        for (const s of SPAWNS) {
+          const sx = cellToWorld(s.c, s.r).x;
+          const wob = Math.sin(t * 5.2 + sx) * 0.8;
+          const lx = (sx + (CRYSTAL_POS.x - sx) * t * t) + wob;
+          lane = Math.min(lane, Math.abs(w.x - lx));
+        }
+        const n = noise(c * 0.62 + 0.3, r * 0.62 + 0.3);
+        const score = n * 0.52
+          + Math.max(0, 1 - lane / (CELL * 1.15)) * 0.62
+          + (r <= 1 ? 0.3 : 0);
+        const isDirt = score > 0.58;
+        kinds.push(isDirt ? 1 : 0);
+
+        const tones = isDirt ? DIRT_TONES : GRASS_TONES;
+        const tone = tones[Math.min(tones.length - 1, Math.floor(rng() * tones.length))];
+        const jit = 0.9 + rng() * 0.18;
+        let cr = tone[0] * jit, cg = tone[1] * jit, cb = tone[2] * jit;
+        // penumbra: the forest swallows the top rows
+        if (r <= 3) {
+          const dark = 0.42 + r * 0.16;
+          cr *= dark; cg *= dark; cb *= dark * 1.08;
+        }
+        // sanctuary: cool stone cast on the bottom rows
+        if (r >= ROWS - 2) { cr *= 0.88; cg *= 0.92; cb *= 1.0; }
+        colors.push([cr, cg, cb]);
       }
     }
-    inst.instanceColor.needsUpdate = true;
-    this.scene.add(inst);
+
+    const m = new THREE.Matrix4();
+    for (const kind of [0, 1]) {
+      const src = kind ? dirt : grass;
+      const count = kinds.filter((k) => k === kind).length;
+      if (!count) continue;
+      const inst = new THREE.InstancedMesh(src.geo, src.mat, count);
+      inst.receiveShadow = true;
+      let i = 0, ci = 0;
+      for (let r = 0; r < ROWS; r++) {
+        for (let c = 0; c < COLS; c++, ci++) {
+          if (kinds[ci] !== kind) continue;
+          const w = cellToWorld(c, r);
+          m.makeTranslation(w.x, -tileTop, w.z);
+          inst.setMatrixAt(i, m);
+          inst.setColorAt(i, new THREE.Color(...colors[ci]));
+          i++;
+        }
+      }
+      inst.instanceColor.needsUpdate = true;
+      this.scene.add(inst);
+    }
 
     // dark base plane under everything
     const base = new THREE.Mesh(
-      new THREE.PlaneGeometry(140, 140),
-      new THREE.MeshStandardMaterial({ color: 0x131020, roughness: 1 })
+      new THREE.PlaneGeometry(160, 160),
+      new THREE.MeshStandardMaterial({ color: 0x100d1e, roughness: 1 })
     );
     base.rotation.x = -Math.PI / 2;
     base.position.y = -tileTop - 0.02;
     base.receiveShadow = true;
     this.scene.add(base);
+  }
 
-    // spawn pads
-    for (const s of SPAWNS) {
-      const w = cellToWorld(s.c, s.r);
-      const pad = instantiate('env-spawn', { shadows: false }).group;
-      pad.position.set(w.x, 0.02, w.z);
-      this.scene.add(pad);
+  // stone ruins, fountains and paving that gather around the crystal
+  buildSanctuary() {
+    const cz = CRYSTAL_POS.z;
+
+    // circular paving under the crystal
+    const paving = new THREE.Mesh(
+      new THREE.CylinderGeometry(2.65, 2.8, 0.09, 28),
+      new THREE.MeshStandardMaterial({ color: 0x565c72, roughness: 0.95 })
+    );
+    paving.position.set(0, 0.0, cz);
+    paving.receiveShadow = true;
+    this.scene.add(paving);
+    const pavingRing = new THREE.Mesh(
+      new THREE.RingGeometry(2.8, 3.35, 28),
+      new THREE.MeshStandardMaterial({ color: 0x3c4054, roughness: 1 })
+    );
+    pavingRing.rotation.x = -Math.PI / 2;
+    pavingRing.position.set(0, 0.02, cz);
+    pavingRing.receiveShadow = true;
+    this.scene.add(pavingRing);
+
+    // pedestal the crystal hovers over
+    const altar = instantiate('env-altar').group;
+    altar.position.set(0, 0.05, cz);
+    this.scene.add(altar);
+    const altarBox = new THREE.Box3().setFromObject(altar);
+    this.crystalBaseY = altarBox.max.y - 0.06;
+
+    // twin fountains flanking the crystal
+    for (const sx of [-1, 1]) this.makeFountain(sx * 3.6, cz + 0.9);
+
+    // curved walls wrap the sanctuary's southern corners
+    // (the piece is a quarter arc: rotY 0 opens NE, rotY π/2 opens NW)
+    for (const [sx, ry] of [[-1, 0], [1, Math.PI / 2]]) {
+      const wall = instantiate('env-wall-curve').group;
+      wall.position.set(sx * 4.3, 0, HALF_H + 0.4);
+      wall.rotation.y = ry;
+      wall.scale.setScalar(0.9);
+      this.scene.add(wall);
     }
+
+    // columns mark the sanctuary gateway, statues watch the entrance
+    for (const sx of [-1, 1]) {
+      const col = instantiate('env-column').group;
+      col.position.set(sx * 6.9, 0, cz + 2.6);
+      this.scene.add(col);
+
+      const statue = instantiate('env-statue').group;
+      statue.position.set(sx * 5.4, 0, cz + 1.4);
+      statue.rotation.y = Math.PI + sx * 0.4; // face the battlefield
+      this.scene.add(statue);
+
+      const fire = instantiate('env-fire').group;
+      fire.position.set(sx * 1.9, 0, cz + 1.7);
+      this.scene.add(fire);
+      const flame = new THREE.Mesh(
+        new THREE.ConeGeometry(0.16, 0.5, 6),
+        new THREE.MeshBasicMaterial({ color: 0xffa040, transparent: true, opacity: 0.95 })
+      );
+      flame.position.set(sx * 1.9, 1.05, cz + 1.7);
+      this.scene.add(flame);
+      this.flames.push(flame);
+      const fl = new THREE.PointLight(0xff8c3a, 11, 9, 1.9);
+      fl.position.set(sx * 1.9, 1.4, cz + 1.7);
+      this.scene.add(fl);
+      this.fireLights.push(fl);
+    }
+
+    // lanterns at the bottom corners of the clearing
+    for (const sx of [-1, 1]) {
+      const lt = instantiate('env-lantern').group;
+      lt.position.set(sx * (HALF_W + 0.9), 0, HALF_H - 2);
+      this.scene.add(lt);
+      const gl = new THREE.PointLight(0xffc06a, 6, 6, 2);
+      gl.position.set(sx * (HALF_W + 0.9), 1.4, HALF_H - 2);
+      this.scene.add(gl);
+    }
+  }
+
+  makeFountain(x, z) {
+    const g = new THREE.Group();
+    const base = instantiate('env-pillar-small').group;
+    g.add(base);
+    const baseTop = new THREE.Box3().setFromObject(base).max.y;
+    const bowl = instantiate('env-bowl').group;
+    bowl.position.y = baseTop - 0.04;
+    g.add(bowl);
+    const bowlBox = new THREE.Box3().setFromObject(bowl);
+
+    const water = new THREE.Mesh(
+      new THREE.CircleGeometry(0.52, 20),
+      new THREE.MeshStandardMaterial({
+        color: 0x5fc8e8, emissive: 0x1e6e8c, emissiveIntensity: 0.6,
+        transparent: true, opacity: 0.9, roughness: 0.15,
+      })
+    );
+    water.rotation.x = -Math.PI / 2;
+    water.position.y = bowlBox.max.y - 0.08;
+    g.add(water);
+
+    const jet = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.05, 0.028, 0.42, 6),
+      new THREE.MeshBasicMaterial({
+        color: 0x9fdcf0, transparent: true, opacity: 0.4,
+        blending: THREE.AdditiveBlending, depthWrite: false,
+      })
+    );
+    jet.position.y = water.position.y + 0.2;
+    g.add(jet);
+
+    // faint cool glow so the water reads as water from afar
+    const glow = new THREE.PointLight(0x66c8e8, 4, 4, 2);
+    glow.position.y = water.position.y + 0.5;
+    g.add(glow);
+
+    g.position.set(x, 0, z);
+    this.scene.add(g);
+    this.waters.push({ water, jet, phase: x * 1.7 });
   }
 
   buildCrystal() {
     this.crystal = instantiate('env-crystal').group;
-    this.crystal.position.set(CRYSTAL_POS.x, 0, CRYSTAL_POS.z);
+    this.crystal.position.set(CRYSTAL_POS.x, this.crystalBaseY || 0, CRYSTAL_POS.z);
     this.scene.add(this.crystal);
     this.crystalMats = [];
     this.crystal.traverse((o) => {
@@ -137,50 +319,161 @@ export class GameScene {
       }
     });
     this.crystalHurt = 0;
-
-    const fire = instantiate('env-fire').group;
-    fire.position.set(CRYSTAL_POS.x - 2.2, 0, CRYSTAL_POS.z + 1.4);
-    this.scene.add(fire);
-
-    // fake flame: glowing cone
-    this.flame = new THREE.Mesh(
-      new THREE.ConeGeometry(0.16, 0.5, 6),
-      new THREE.MeshBasicMaterial({ color: 0xffa040, transparent: true, opacity: 0.95 })
-    );
-    this.flame.position.set(CRYSTAL_POS.x - 2.2, 1.05, CRYSTAL_POS.z + 1.4);
-    this.scene.add(this.flame);
   }
 
-  buildDecor() {
+  // the clearing is hemmed in by forest: a dense, dark tree wall to the
+  // north (where enemies pour out), thinning woods along the flanks that
+  // gradually give way to sanctuary stonework near the bottom
+  buildForest() {
     const rng = mulberry32(7);
-    const spots = [];
-    for (let i = 0; i < 46; i++) {
+
+    const placeTree = (x, z, scale, darkness, crooked) => {
+      const key = crooked ? 'env-pine-crooked' : 'env-pine';
+      const d = instantiate(key, { cloneMaterials: darkness < 0.96 }).group;
+      d.position.set(x, 0, z);
+      d.rotation.y = rng() * Math.PI * 2;
+      d.scale.setScalar(scale);
+      if (darkness < 0.96) {
+        d.traverse((o) => { if (o.isMesh && o.material) o.material.color.multiplyScalar(darkness); });
+      }
+      this.scene.add(d);
+    };
+
+    // --- north wall of trees, several rows deep, darker the deeper
+    const spawnXs = SPAWNS.map((s) => cellToWorld(s.c, s.r).x);
+    for (let i = 0; i < 90; i++) {
+      const x = -HALF_W - 7 + rng() * (COLS * CELL + 14);
+      const depth = rng();
+      const z = -HALF_H - 0.4 - depth * 6.2;
+      // leave shadowy trail mouths where the spawns are
+      if (depth < 0.3 && spawnXs.some((sx) => Math.abs(x - sx) < 1.5)) continue;
+      const darkness = 0.9 - depth * 0.55;
+      placeTree(x, z, 0.75 + rng() * 0.95, darkness, rng() < 0.3);
+    }
+    // a few trees leaning INTO the top corners of the board
+    for (const [x, z, s] of [[-HALF_W + 0.6, -HALF_H + 1.1, 0.85], [HALF_W - 0.5, -HALF_H + 0.8, 0.75], [HALF_W - 2.2, -HALF_H + 0.4, 0.6]]) {
+      placeTree(x, z, s, 0.62, true);
+    }
+
+    // --- flanking woods, thinning toward the sanctuary
+    for (let i = 0; i < 55; i++) {
       const side = rng() < 0.5 ? -1 : 1;
-      const x = side * (HALF_W + 1.2 + rng() * 7);
-      const z = -HALF_H - 2 + rng() * (ROWS * CELL + 6);
-      spots.push({ x, z, r: rng() });
+      const z = -HALF_H - 1 + rng() * 22;
+      const p = (z + HALF_H + 1) / 22; // 0 north → 1 south
+      if (rng() < p * 0.75) continue;  // forest thins going south
+      const x = side * (HALF_W + 0.9 + rng() * 6.5);
+      if (rng() < 0.22) {
+        const rock = instantiate('env-rocks-tall').group;
+        rock.position.set(x, 0, z);
+        rock.rotation.y = rng() * Math.PI * 2;
+        rock.scale.setScalar(0.6 + rng() * 0.8);
+        this.scene.add(rock);
+      } else {
+        placeTree(x, z, 0.65 + rng() * 0.85, 0.7 + p * 0.28, rng() < 0.4);
+      }
     }
-    for (let i = 0; i < 12; i++) {
-      spots.push({ x: -HALF_W + rng() * COLS * CELL, z: -HALF_H - 2 - rng() * 5, r: rng() });
+
+    // --- far scatter so wide screens never stare into the void:
+    // a loose ring of dark trees beyond the flanks and behind the sanctuary
+    for (let i = 0; i < 46; i++) {
+      const south = rng() < 0.4;
+      let x, z;
+      if (south) {
+        x = -HALF_W - 12 + rng() * (COLS * CELL + 24);
+        z = HALF_H + 1.5 + rng() * 9;
+        if (Math.abs(x) < 6.5) continue; // keep the sanctuary gate clear
+      } else {
+        const side = rng() < 0.5 ? -1 : 1;
+        x = side * (HALF_W + 7 + rng() * 11);
+        z = -HALF_H - 4 + rng() * 26;
+      }
+      placeTree(x, z, 0.8 + rng() * 1.1, 0.5 + rng() * 0.25, rng() < 0.35);
     }
-    for (const s of spots) {
-      const key = s.r < 0.42 ? 'env-pine' : s.r < 0.7 ? 'env-pine-crooked' : 'env-rocks-tall';
+
+    // --- stone takes over on the southern flanks (forest → sanctuary)
+    const stones = [
+      ['env-obelisk', -HALF_W - 1.7, 5.4, 0.9, 0.3],
+      ['env-obelisk', HALF_W + 2.1, 7.6, 1.05, -0.5],
+      ['env-column-damaged', -HALF_W - 2.6, 8.8, 1, 0.7],
+      ['env-column-damaged', HALF_W + 1.4, 11.2, 0.9, 2.3],
+      ['env-pillar-small', -HALF_W - 1.2, 11.6, 1.1, 0],
+      ['env-obelisk', -HALF_W - 3.4, 13.2, 0.8, 1.2],
+      ['env-column', HALF_W + 3.1, 13.8, 0.85, 0],
+    ];
+    for (const [key, x, z, s, ry] of stones) {
       const d = instantiate(key).group;
-      d.position.set(s.x, 0, s.z);
-      d.rotation.y = s.r * Math.PI * 2;
-      const sc = 0.7 + s.r * 0.7;
-      d.scale.setScalar(sc);
+      d.position.set(x, 0, z);
+      d.rotation.y = ry;
+      d.scale.setScalar(s);
       this.scene.add(d);
     }
-    // lanterns at the board's bottom corners
-    for (const sx of [-1, 1]) {
-      const lt = instantiate('env-lantern').group;
-      lt.position.set(sx * (HALF_W + 0.9), 0, HALF_H - 2);
-      this.scene.add(lt);
-      const gl = new THREE.PointLight(0xffc06a, 6, 6, 2);
-      gl.position.set(sx * (HALF_W + 0.9), 1.4, HALF_H - 2);
-      this.scene.add(gl);
-    }
+  }
+
+  // layered darkness where the enemies come from + drifting fog
+  buildPenumbra() {
+    const gradTex = (stops, vertical = true) => {
+      const cv = document.createElement('canvas');
+      cv.width = cv.height = 128;
+      const ctx = cv.getContext('2d');
+      const gr = vertical ? ctx.createLinearGradient(0, 0, 0, 128) : ctx.createLinearGradient(0, 0, 128, 0);
+      for (const [at, col] of stops) gr.addColorStop(at, col);
+      ctx.fillStyle = gr;
+      ctx.fillRect(0, 0, 128, 128);
+      const tex = new THREE.CanvasTexture(cv);
+      tex.colorSpace = THREE.SRGBColorSpace;
+      return tex;
+    };
+
+    // vertical curtain of darkness behind the tree wall (matches the
+    // scene background so its edges dissolve on wide screens)
+    const curtain = new THREE.Mesh(
+      new THREE.PlaneGeometry(110, 14),
+      new THREE.MeshBasicMaterial({
+        map: gradTex([[0, 'rgba(21,17,40,1)'], [0.5, 'rgba(19,15,36,0.9)'], [1, 'rgba(19,15,36,0)']]),
+        transparent: true, depthWrite: false, fog: false,
+      })
+    );
+    curtain.position.set(0, 5.4, -HALF_H - 7.6);
+    this.scene.add(curtain);
+
+    // shadow spilling out of the woods onto the spawn rows
+    const spill = new THREE.Mesh(
+      new THREE.PlaneGeometry(56, 9.5),
+      new THREE.MeshBasicMaterial({
+        map: gradTex([[0, 'rgba(8,6,20,0.95)'], [0.45, 'rgba(8,6,20,0.55)'], [1, 'rgba(8,6,20,0)']]),
+        transparent: true, depthWrite: false,
+      })
+    );
+    spill.rotation.x = -Math.PI / 2;
+    spill.position.set(0, 0.035, -HALF_H - 1 + 9.5 / 2);
+    spill.renderOrder = 2;
+    this.scene.add(spill);
+
+    // soft fog banks drifting between the trunks
+    const fogCv = document.createElement('canvas');
+    fogCv.width = fogCv.height = 128;
+    const fctx = fogCv.getContext('2d');
+    const fg = fctx.createRadialGradient(64, 64, 6, 64, 64, 62);
+    fg.addColorStop(0, 'rgba(154,160,216,0.55)');
+    fg.addColorStop(1, 'rgba(154,160,216,0)');
+    fctx.fillStyle = fg;
+    fctx.fillRect(0, 0, 128, 128);
+    const fogTex = new THREE.CanvasTexture(fogCv);
+    const mkFog = (x, y, z, sx, sy, op) => {
+      const spr = new THREE.Sprite(new THREE.SpriteMaterial({
+        map: fogTex, transparent: true, opacity: op, depthWrite: false,
+      }));
+      spr.position.set(x, y, z);
+      spr.scale.set(sx, sy, 1);
+      this.scene.add(spr);
+      this.fogSprites.push({ spr, x0: x, amp: 1.5 + Math.random() * 2, speed: 0.08 + Math.random() * 0.07, phase: Math.random() * 6.28 });
+    };
+    mkFog(-4.5, 1.0, -HALF_H - 1.6, 9, 3.2, 0.30);
+    mkFog(4, 1.2, -HALF_H - 2.6, 10, 3.6, 0.26);
+    mkFog(0, 0.8, -HALF_H + 0.6, 8, 2.4, 0.22);
+    mkFog(-8, 1.4, -HALF_H - 4, 11, 4, 0.20);
+    mkFog(-10.5, 0.9, -4, 6, 2.2, 0.10);
+    mkFog(11, 0.9, 2, 6, 2.2, 0.10);
   }
 
   buildOverlay() {
@@ -295,6 +588,7 @@ export class GameScene {
       new THREE.Vector3(-HALF_W - 0.8, 0, HALF_H + 0.6),
       new THREE.Vector3(HALF_W + 0.8, 0, HALF_H + 0.6),
       new THREE.Vector3(0, 2.6, -HALF_H),
+      new THREE.Vector3(0, 1.3, HALF_H + 1.4),
     ];
     let lo = 8, hi = 130;
     for (let it = 0; it < 22; it++) {
@@ -327,9 +621,9 @@ export class GameScene {
 
   update(dt) {
     this.time += dt;
-    // crystal idle: bob + spin + pulse
+    // crystal idle: bob + spin + pulse over its pedestal
     this.crystal.rotation.y += dt * 0.5;
-    this.crystal.position.y = Math.sin(this.time * 1.6) * 0.12 + 0.05;
+    this.crystal.position.y = this.crystalBaseY + Math.sin(this.time * 1.6) * 0.12 + 0.05;
     const pulse = 0.55 + Math.sin(this.time * 2.2) * 0.18;
     this.crystalHurt = Math.max(this.crystalHurt - dt * 2, 0);
     for (const m of this.crystalMats) {
@@ -338,10 +632,29 @@ export class GameScene {
     }
     this.crystalLight.intensity = 26 + Math.sin(this.time * 2.2) * 7 + this.crystalHurt * 40;
 
-    // campfire flicker
-    this.fireLight.intensity = 15 + Math.sin(this.time * 11) * 2.5 + Math.sin(this.time * 23) * 1.5;
-    this.flame.scale.y = 1 + Math.sin(this.time * 13) * 0.2;
-    this.flame.rotation.y += dt * 2;
+    // brazier flicker
+    for (let i = 0; i < this.flames.length; i++) {
+      const f = this.flames[i];
+      f.scale.y = 1 + Math.sin(this.time * 13 + i * 2.1) * 0.2;
+      f.rotation.y += dt * 2;
+      if (this.fireLights[i]) {
+        this.fireLights[i].intensity = 9 + Math.sin(this.time * 11 + i * 2.1) * 1.8 + Math.sin(this.time * 23 + i) * 1.1;
+      }
+    }
+
+    // fountain water: shimmering surface + pulsing jet
+    for (const w of this.waters) {
+      w.water.material.emissiveIntensity = 0.55 + Math.sin(this.time * 2.4 + w.phase) * 0.2;
+      w.water.rotation.z += dt * 0.4;
+      const k = 1 + Math.sin(this.time * 5 + w.phase) * 0.12;
+      w.jet.scale.set(1, k, 1);
+      w.jet.material.opacity = 0.32 + Math.sin(this.time * 5 + w.phase) * 0.1;
+    }
+
+    // fog banks drift slowly between the trees
+    for (const f of this.fogSprites) {
+      f.spr.position.x = f.x0 + Math.sin(this.time * f.speed + f.phase) * f.amp;
+    }
 
     // camera shake decay
     if (this.shake > 0.001) {
