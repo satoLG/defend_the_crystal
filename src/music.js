@@ -142,7 +142,7 @@ export const music = {
     volume = Math.max(0, Math.min(v, 1));
     if (master) master.gain.value = volume * 0.9;
     if (volume <= 0.001) this.stop();
-    else if (!playing && ctx) this.start();
+    else if (!playing) this.start(); // start() creates the AudioContext itself
   },
   isPlaying: () => playing,
 };

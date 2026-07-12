@@ -77,10 +77,11 @@ export const TOWERS = {
     model: 'tower-cannon', ammo: 'cannonball',
   },
 };
-export const TOWER_LEVEL_MAX = 3;
+// 6 levels: grey → blue → green → red → purple → gold
+export const TOWER_LEVEL_MAX = 6;
 export const TOWER_UPGRADE = {
-  dmgMult: 1.55, rangeAdd: 0.4, rateMult: 1.15,
-  costMult: [0, 0.9, 1.5],  // upgrade to lvl2 = cost*0.9, to lvl3 = cost*1.5
+  dmgMult: 1.45, rangeAdd: 0.35, rateMult: 1.12,
+  costMult: [0, 0.9, 1.4, 2.0, 2.8, 3.8], // upgrade cost = base * costMult[currentLvl]
   sellRefund: 0.6,
 };
 

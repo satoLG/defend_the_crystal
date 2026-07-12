@@ -36,6 +36,12 @@ html, body {
 .ico svg { width: 100%; height: 100%; }
 .cls-icon .ico { width: 1.6rem; height: 1.6rem; color: var(--gold); }
 .bc-icon .ico { width: 1.5rem; height: 1.5rem; }
+.entity-img { width: 2.3rem; height: 2.3rem; object-fit: contain; display: block; }
+.bc-icon .entity-img { width: 2rem; height: 2rem; }
+.pl-cls .entity-img { width: 2.1rem; height: 2.1rem; }
+#pb-class .entity-img { width: 30px; height: 30px; }
+#upg-title { display: flex; align-items: center; justify-content: center; gap: 8px; }
+#upg-title .entity-img { width: 1.9rem; height: 1.9rem; }
 .corner-btn { position: absolute; top: 12px; right: 12px; }
 
 /* ---------- screens & panels ---------- */

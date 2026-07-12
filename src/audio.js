@@ -46,6 +46,8 @@ export const sfx = {
   click: () => ready && throttled('click', 30, () => tiks.click()),
   hover: () => ready && throttled('hover', 60, () => tiks.hover()),
   place: () => ready && throttled('place', 60, () => tiks.pop()),
+  placeTower: () => ready && throttled('placeT', 80, () => { tiks.pop(); tiks.success(); }),
+  waveClear: () => ready && throttled('waveClr', 400, () => { tiks.success(); tiks.notify(); }),
   coin: () => ready && throttled('coin', 90, () => tiks.pop()),
   hit: () => ready && throttled('hit', 90, () => tiks.click()),
   shoot: () => ready && throttled('shoot', 120, () => tiks.swoosh()),
