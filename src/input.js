@@ -46,13 +46,17 @@ export class Input {
 
   pointerDown(e) {
     if (e.pointerType === 'touch' && !this.buildModeCheck()) {
-      // virtual joystick anywhere on the board
+      // start the virtual joystick tentatively — a short touch with
+      // barely any movement is treated as a TAP on release instead
+      // (that's how towers/blocks get selected on mobile)
       if (this.joy.active) return;
       this.joy.active = true;
       this.joy.id = e.pointerId;
       this.joy.ox = e.clientX;
       this.joy.oy = e.clientY;
       this.joy.dx = 0; this.joy.dy = 0;
+      this.joy.startT = performance.now();
+      this.joy.maxMove = 0;
       this.joyEl.classList.remove('hidden');
       this.joyBase.style.left = `${e.clientX}px`;
       this.joyBase.style.top = `${e.clientY}px`;
@@ -68,6 +72,7 @@ export class Input {
       let dx = e.clientX - this.joy.ox;
       let dy = e.clientY - this.joy.oy;
       const d = Math.hypot(dx, dy);
+      this.joy.maxMove = Math.max(this.joy.maxMove, d);
       if (d > max) { dx = (dx / d) * max; dy = (dy / d) * max; }
       this.joy.dx = dx / max;
       this.joy.dy = dy / max;
@@ -79,9 +84,12 @@ export class Input {
 
   pointerUp(e) {
     if (this.joy.active && e.pointerId === this.joy.id) {
+      const wasTap =
+        performance.now() - this.joy.startT < 280 && this.joy.maxMove < 12;
       this.joy.active = false;
       this.joy.dx = 0; this.joy.dy = 0;
       this.joyEl.classList.add('hidden');
+      if (wasTap) this.onTap?.(this.joy.ox, this.joy.oy, 'touch', 0);
     }
   }
 

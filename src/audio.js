@@ -7,6 +7,7 @@ import { tiks } from '@rexa-developer/tiks';
 // ============================================================
 
 let ready = false;
+let sfxVolume = 0.45;
 const lastPlayed = {};
 
 export function initAudio() {
@@ -14,10 +15,17 @@ export function initAudio() {
   try {
     tiks.init();
     tiks.setTheme('arcade');
-    tiks.setVolume(0.45);
+    tiks.setVolume(sfxVolume);
     ready = true;
   } catch (err) {
     console.warn('[audio] init failed', err);
+  }
+}
+
+export function setSfxVolume(v) {
+  sfxVolume = Math.max(0, Math.min(v, 1));
+  if (ready) {
+    try { tiks.setVolume(sfxVolume); } catch { /* ok */ }
   }
 }
 
@@ -38,9 +46,12 @@ export const sfx = {
   click: () => ready && throttled('click', 30, () => tiks.click()),
   hover: () => ready && throttled('hover', 60, () => tiks.hover()),
   place: () => ready && throttled('place', 60, () => tiks.pop()),
+  placeTower: () => ready && throttled('placeT', 80, () => { tiks.pop(); tiks.success(); }),
+  waveClear: () => ready && throttled('waveClr', 400, () => { tiks.success(); tiks.notify(); }),
   coin: () => ready && throttled('coin', 90, () => tiks.pop()),
   hit: () => ready && throttled('hit', 90, () => tiks.click()),
   shoot: () => ready && throttled('shoot', 120, () => tiks.swoosh()),
+  melee: () => ready && throttled('melee', 140, () => tiks.swoosh()),
   boom: () => ready && throttled('boom', 150, () => tiks.warning()),
   hurt: () => ready && throttled('hurt', 200, () => tiks.error()),
   levelUp: () => ready && throttled('lvl', 200, () => tiks.success()),

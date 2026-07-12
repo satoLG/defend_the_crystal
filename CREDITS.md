@@ -18,6 +18,10 @@ CC0 means the content can be used for personal, educational and commercial
 purposes. Crediting Kenney is not required, but very much deserved —
 consider donating at https://www.kenney.nl/donate.
 
+UI icons are from [Lucide](https://lucide.dev) (ISC license), inlined in
+`src/icons.js`. Class/tower thumbnails in `public/img/` are the preview
+renders that ship with the Kenney packs above (CC0).
+
 ## Libraries
 
 - [three.js](https://github.com/mrdoob/three.js) — 3D rendering

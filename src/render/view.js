@@ -3,6 +3,7 @@ import { instantiate } from './assets.js';
 import { CLASSES, TOWERS } from '../config.js';
 import { cellToWorld, CRYSTAL_POS } from '../sim/grid.js';
 import { lerp, angleLerp } from '../utils.js';
+import { sfx } from '../audio.js';
 
 // ============================================================
 // Turns simulation snapshots + one-shot events into moving,
@@ -26,6 +27,10 @@ const CLASS_PROPS = {
 const CLASS_TINT = {
   berserker: 0xff6a4d, tanker: 0x6a9cff, archer: 0x7de87d, mage: 0xc07dff,
 };
+
+// tower base color per upgrade level: grey→blue→green→red→purple→gold
+const TOWER_LEVEL_COLORS = [0x9aa1ab, 0x4a86e8, 0x3fbf5f, 0xe0503a, 0x9a4ae0, 0xe8b84b];
+const TOWERS_MAX_VISUAL = 6;
 
 export class GameView {
   constructor(gameScene) {
@@ -124,21 +129,20 @@ export class GameView {
 
   makeNameLabel(name, lvl, tint) {
     const canvas = document.createElement('canvas');
-    canvas.width = 256; canvas.height = 56;
+    canvas.width = 384; canvas.height = 84;
     const ctx = canvas.getContext('2d');
-    ctx.font = 'bold 34px "Trebuchet MS", sans-serif';
+    ctx.font = 'bold 52px "Trebuchet MS", sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillStyle = '#000';
-    ctx.globalAlpha = 0.4;
-    const text = `${name}  ⬥${lvl}`;
-    ctx.fillText(text, 130, 42);
-    ctx.globalAlpha = 1;
+    const text = `${name}  Lv${lvl}`;
+    ctx.lineWidth = 8;
+    ctx.strokeStyle = 'rgba(0,0,0,0.75)';
+    ctx.strokeText(text, 192, 60);
     ctx.fillStyle = '#' + new THREE.Color(tint).getHexString();
-    ctx.fillText(text, 128, 40);
+    ctx.fillText(text, 192, 60);
     const tex = new THREE.CanvasTexture(canvas);
     tex.colorSpace = THREE.SRGBColorSpace;
     const spr = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthWrite: false }));
-    spr.scale.set(1.9, 0.42, 1);
+    spr.scale.set(3.1, 0.68, 1);
     spr.renderOrder = 11;
     return spr;
   }
@@ -241,25 +245,43 @@ export class GameView {
     const w = cellToWorld(c, r);
     const group = new THREE.Group();
     group.position.set(w.x, 0, w.z);
-    const base = instantiate('tower-base').group;
+
+    // base tinted by level: grey→blue→green→red→purple→gold, with a soft glow
+    const lvlColor = TOWER_LEVEL_COLORS[Math.min(lvl, TOWER_LEVEL_COLORS.length) - 1];
+    const base = instantiate('tower-base', { cloneMaterials: true }).group;
+    base.traverse((o) => {
+      if (o.isMesh && o.material) {
+        o.material.color.set(lvlColor);
+        if (o.material.emissive) {
+          o.material.emissive.set(lvlColor);
+          o.material.emissiveIntensity = 0.12 + lvl * 0.06;
+        }
+      }
+    });
     group.add(base);
+
     const weapon = instantiate(TOWERS[kind]?.model || 'tower-ballista').group;
     weapon.position.y = 0.55;
-    weapon.scale.setScalar(1 + (lvl - 1) * 0.13);
+    weapon.scale.setScalar(1 + (lvl - 1) * 0.07);
     group.add(weapon);
-    if (lvl >= 3) {
+    if (lvl >= TOWERS_MAX_VISUAL) {
       const deco = instantiate('tower-crystals', { shadows: false }).group;
       deco.position.y = 0.05;
       group.add(deco);
     }
-    // level pips
-    for (let i = 0; i < lvl - 1; i++) {
-      const pip = new THREE.Mesh(
-        new THREE.SphereGeometry(0.09, 8, 8),
-        new THREE.MeshBasicMaterial({ color: 0xe8b84b })
+    // matching colored ring on the ground from level 2 up
+    if (lvl >= 2) {
+      const ring = new THREE.Mesh(
+        new THREE.RingGeometry(0.92, 1.12, 40),
+        new THREE.MeshBasicMaterial({
+          color: lvlColor,
+          transparent: true, opacity: 0.85, depthWrite: false, side: THREE.DoubleSide,
+        })
       );
-      pip.position.set(-0.55 + i * 0.35, 0.12, 0.95);
-      group.add(pip);
+      ring.rotation.x = -Math.PI / 2;
+      ring.position.y = 0.05;
+      ring.renderOrder = 3;
+      group.add(ring);
     }
     this.scene.add(group);
     a = { group, weapon, lvl, kind, c, r, rot: Math.PI };
@@ -388,6 +410,15 @@ export class GameView {
         if (typeof ev.tx === 'number') {
           a.group.rotation.y = Math.atan2(ev.tx - a.group.position.x, ev.tz - a.group.position.z);
         }
+        // melee swings get a visible slash arc + swing sound
+        const isMelee = a.cls ? (a.cls === 'berserker' || a.cls === 'tanker') : true;
+        if (isMelee) {
+          this.spawnSlash(
+            a.group.position.x, a.group.position.z, a.group.rotation.y,
+            a.cls ? 0xffe9a8 : 0xff9a8a
+          );
+          sfx.melee();
+        }
         break;
       }
       case 'shoot': this.spawnProjectile(ev); break;
@@ -448,7 +479,55 @@ export class GameView {
     this.corpses.push({ actor: a, t: 0 });
   }
 
+  // quick swipe arc that sweeps in front of a melee attacker
+  spawnSlash(x, z, yaw, color) {
+    const arc = new THREE.Mesh(
+      new THREE.RingGeometry(0.55, 1.2, 24, 1, -Math.PI / 3.2, Math.PI / 1.6),
+      new THREE.MeshBasicMaterial({
+        color, transparent: true, opacity: 0.9,
+        depthWrite: false, side: THREE.DoubleSide,
+        blending: THREE.AdditiveBlending,
+      })
+    );
+    arc.rotation.x = -Math.PI / 2;
+    arc.position.set(x, 0.75, z);
+    arc.renderOrder = 8;
+    const holder = new THREE.Group();
+    holder.add(arc);
+    holder.position.set(x, 0, z);
+    arc.position.set(0, 0.75, 0);
+    // ring theta 0 is +X; rotate so the arc opens toward the facing direction
+    holder.rotation.y = yaw - Math.PI / 2;
+    this.scene.add(holder);
+    this.effects.push({ mesh: holder, inner: arc, t: 0, dur: 0.22, type: 'slash', baseYaw: holder.rotation.y });
+  }
+
   spawnProjectile(ev) {
+    if (ev.k === 'magic') {
+      // glowing bolt from the mage's staff
+      const bolt = new THREE.Group();
+      const core = new THREE.Mesh(
+        new THREE.SphereGeometry(0.16, 10, 10),
+        new THREE.MeshBasicMaterial({ color: 0xe6c4ff })
+      );
+      const halo = new THREE.Mesh(
+        new THREE.SphereGeometry(0.3, 10, 10),
+        new THREE.MeshBasicMaterial({
+          color: 0xa050ff, transparent: true, opacity: 0.45,
+          blending: THREE.AdditiveBlending, depthWrite: false,
+        })
+      );
+      bolt.add(core, halo);
+      this.scene.add(bolt);
+      this.projectiles.push({
+        mesh: bolt,
+        from: new THREE.Vector3(...ev.f),
+        to: new THREE.Vector3(...ev.to),
+        ft: Math.max(ev.ft, 0.05),
+        t: 0, lob: false, kind: 'magic',
+      });
+      return;
+    }
     const key = { arrow: 'ammo-arrow', cannonball: 'ammo-cannonball', boulder: 'ammo-boulder' }[ev.k] || 'ammo-arrow';
     const mesh = instantiate(key, { shadows: false }).group;
     if (ev.k === 'boulder') mesh.scale.setScalar(1.5);
@@ -545,7 +624,14 @@ export class GameView {
             if (m.emissive) { m.emissive.setRGB(k, k * 0.9, k * 0.8); m.emissiveIntensity = 1; }
           }
         }
-        if (a.hpBar) a.hpBar.quaternion.copy(camera.quaternion);
+        if (a.hpBar) {
+          // true billboard: cancel the actor's rotation first, so the
+          // bar faces the camera even when the model walks away from it
+          a.hpBar.quaternion
+            .copy(a.group.quaternion)
+            .invert()
+            .multiply(camera.quaternion);
+        }
       }
     }
 
@@ -601,6 +687,11 @@ export class GameView {
         e.mesh.material.opacity = 0.85 * (1 - k);
       } else if (e.type === 'warn') {
         e.mesh.material.opacity = 0.22 + Math.sin(this.time * 10) * 0.08;
+      } else if (e.type === 'slash') {
+        // sweep the arc across the front and fade it out
+        e.mesh.rotation.y = e.baseYaw - 0.55 + easeOut(k) * 1.2;
+        e.inner.material.opacity = 0.9 * (1 - k * k);
+        e.inner.scale.setScalar(1 + k * 0.25);
       }
     }
 

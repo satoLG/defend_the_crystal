@@ -6,9 +6,11 @@ import { Grid, worldToCell, cellToWorld } from './sim/grid.js';
 import { Net, selfId } from './net.js';
 import { Input } from './input.js';
 import { UI } from './ui.js';
-import { armAudioOnFirstGesture, sfx } from './audio.js';
+import { armAudioOnFirstGesture, sfx, setSfxVolume } from './audio.js';
 import { CLASSES, PLAYER, NET, SIM_DT, TOWERS, TOWER_UPGRADE, GRID } from './config.js';
 import { makeRoomCode, clamp, dist2d } from './utils.js';
+import { settings } from './settings.js';
+import { music } from './music.js';
 
 // ============================================================
 // Bootstraps everything and runs the two game loops:
@@ -45,6 +47,13 @@ let gs, view, ui, input;
 
 async function boot() {
   armAudioOnFirstGesture();
+  setSfxVolume(settings.get('sfxVol'));
+  const startMusicOnce = () => {
+    music.setVolume(settings.get('musicVol'));
+    window.removeEventListener('pointerdown', startMusicOnce);
+  };
+  window.addEventListener('pointerdown', startMusicOnce);
+
   const canvas = document.getElementById('game-canvas');
 
   ui = new UI({
@@ -53,6 +62,7 @@ async function boot() {
     onStartMatch: startMatch,
     onAction: sendAction,
     onBuildMode: (on) => { gs.setBuildMode(on); if (!on) view.clearGhost(); },
+    onPanelClose: () => gs.hideRange(),
     onExit: () => location.reload(),
   });
 
@@ -64,6 +74,12 @@ async function boot() {
 
   await loadAssets((f) => ui.loadProgress(f));
   gs = new GameScene(canvas);
+  gs.shakeEnabled = settings.get('shake');
+  gs.setShadows(settings.get('shadows'));
+  settings.onChange((k, v) => {
+    if (k === 'shake') gs.shakeEnabled = v;
+    if (k === 'shadows') gs.setShadows(v);
+  });
   view = new GameView(gs);
   ui.showMenu();
   requestAnimationFrame(frame);
@@ -215,9 +231,11 @@ function onCanvasTap(x, y, pointerType, button) {
   if (!state.started) return;
   if (button === 2) return; // right-click cancels via contextmenu
   const cell = cellFromPointer(x, y);
-  if (!cell) return;
+  const offBoard = !cell ||
+    cell.c < 0 || cell.c >= GRID.COLS || cell.r < 0 || cell.r >= GRID.ROWS;
 
   if (ui.selectedItem) {
+    if (offBoard) { ui.selectItem(null); return; }
     const ok = canPlaceLocal(ui.selectedItem, cell.c, cell.r);
     if (pointerType === 'touch') {
       // two-tap confirm so fat fingers don't waste points
@@ -241,6 +259,7 @@ function onCanvasTap(x, y, pointerType, button) {
   }
 
   // no build card selected: tap a structure to manage it
+  if (offBoard) { ui.closePanel(); gs.hideRange(); return; }
   const snap = snapForUi();
   if (!snap) return;
   const tower = snap.tw.find((t) => t[2] === cell.c && t[3] === cell.r);
@@ -294,14 +313,14 @@ function handleEvent(ev) {
       if (!ev.to || ev.to === selfId) ui.toast(ev.msg, ev.kind || '');
       break;
     case 'wave':
-      ui.toast(`🌊 Wave ${ev.n}!`, 'gold');
+      ui.toast(`Wave ${ev.n}!`, 'gold');
       sfx.wave();
       break;
     case 'phase':
-      if (ev.ph === 'build' && ev.n > 1) sfx.success();
+      if (ev.ph === 'build' && ev.n > 1) sfx.waveClear();
       break;
     case 'heal':
-      ui.toast(`⛺ Checkpoint! +${ev.bonus} points, everyone healed`, 'gold');
+      ui.toast(`Checkpoint! +${ev.bonus} points, everyone healed`, 'gold');
       sfx.levelUp();
       break;
     case 'shoot': sfx.shoot(); break;
@@ -310,9 +329,9 @@ function handleEvent(ev) {
     case 'die':
       if (ev.player) {
         if (ev.id === selfId) { sfx.hurt(); state.self.dead = true; }
-        ui.toast('☠️ A defender has fallen!', 'error');
+        ui.toast('A defender has fallen!', 'error');
       } else if (ev.boss) {
-        ui.toast('👑 Boss defeated!', 'gold');
+        ui.toast('Boss defeated!', 'gold');
         sfx.success();
       }
       break;
@@ -327,13 +346,16 @@ function handleEvent(ev) {
       if (ev.id === selfId) { state.self.kbx += ev.dx; state.self.kbz += ev.dz; }
       break;
     case 'lvl':
-      if (ev.id === selfId) { ui.toast(`✨ Level ${ev.lvl}!`, 'gold'); sfx.levelUp(); }
+      if (ev.id === selfId) { ui.toast(`Level ${ev.lvl}!`, 'gold'); sfx.levelUp(); }
       break;
     case 'breach':
       sfx.breach();
-      ui.toast('💥 The crystal was hit!', 'error');
+      ui.toast('The crystal was hit!', 'error');
       break;
-    case 'place': sfx.place(); break;
+    case 'place':
+      if (ev.item === 'obstacle') sfx.place();
+      else sfx.placeTower();
+      break;
     case 'upgrade': sfx.success(); break;
     case 'unplace': sfx.place(); break;
     case 'over':
@@ -347,7 +369,7 @@ function handleEvent(ev) {
       ui.hideGameOver();
       view.reset();
       syncSelfFromSim();
-      ui.toast('⚔️ New defense begins!', 'gold');
+      ui.toast('New defense begins!', 'gold');
       break;
   }
 }

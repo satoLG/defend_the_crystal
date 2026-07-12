@@ -40,10 +40,9 @@ const MANIFEST = {
   'prop-shield': M('props/shield.glb', { h: 0.55 }),
   'prop-staff': M('props/staff.glb', { h: 0.95 }),
   'prop-crystal': M('props/crystal-small.glb', { h: 0.3 }),
-  // obstacles
-  'obstacle-barrel': M('obstacles/barrel.glb', { fp: 1.35 }),
-  'obstacle-rocks': M('obstacles/rocks.glb', { fp: 1.75 }),
-  'obstacle-wall': M('obstacles/wall.glb', { fp: 1.9 }),
+  // obstacles — big and chunky so they read as impassable
+  'obstacle-barrel': M('obstacles/barrel.glb', { fp: 1.6 }),
+  'obstacle-rocks': M('env/rocks-tall.glb', { h: 1.5 }),
   // environment
   'env-tile': M('env/tile.glb', { tile: true }),
   'env-tile-dirt': M('env/tile-dirt.glb', { tile: true }),

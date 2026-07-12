@@ -360,7 +360,16 @@ export class Sim {
   damageEnemy(e, dmg, kbx, kbz, killerId) {
     if (e.hp <= 0) return;
     e.hp -= dmg;
-    e.kbx += kbx; e.kbz += kbz;
+    // knockback always throws enemies BACKWARD (away from the crystal),
+    // never toward it — only the magnitude of the hit matters
+    const mag = Math.hypot(kbx, kbz);
+    if (mag > 0) {
+      const pos = e.vehicle.position;
+      const dx = pos.x - CRYSTAL_POS.x, dz = pos.z - CRYSTAL_POS.z;
+      const d = Math.hypot(dx, dz) || 1;
+      e.kbx += (dx / d) * mag;
+      e.kbz += (dz / d) * mag;
+    }
     this.emit({ t: 'hit', id: e.id });
     if (e.hp <= 0) {
       const pos = e.vehicle.position;
@@ -502,6 +511,10 @@ export class Sim {
         }});
       } else if (p.cls === 'mage') {
         const cx = tp.x, cz = tp.z, dmg = p.atk, r = p.aoe, pid = p.id, kb = p.kbPower;
+        this.emit({
+          t: 'shoot', k: 'magic',
+          f: [rnd2(p.x), 1.15, rnd2(p.z)], to: [rnd2(cx), 0.5, rnd2(cz)], ft: 0.35,
+        });
         this.emit({ t: 'aoe', x: rnd2(cx), z: rnd2(cz), r, k: 'mage', ft: 0.35 });
         this.pending.push({ at: this.time + 0.35, fn: () => {
           for (const e of [...this.enemies.entities]) {
@@ -528,10 +541,15 @@ export class Sim {
     for (const e of this.enemies) {
       const pos = e.vehicle.position;
 
-      // knockback impulses decay quickly
+      // knockback impulses decay quickly; ground units can't be
+      // pushed through walls/obstacles (ghosts fly over them)
       if (e.kbx || e.kbz) {
         pos.x += e.kbx * dt * 6;
         pos.z += e.kbz * dt * 6;
+        if (!e.flying) {
+          const fixed = this.grid.resolveCircle(pos.x, pos.z, ENEMY.RADIUS);
+          pos.x = fixed.x; pos.z = fixed.z;
+        }
         const decay = Math.exp(-PLAYER.KB_DECAY * dt);
         e.kbx *= decay; e.kbz *= decay;
         if (Math.abs(e.kbx) < 0.02) e.kbx = 0;
@@ -607,6 +625,11 @@ export class Sim {
       pos.x = clamp(pos.x, -HALF_W + 0.3, HALF_W - 0.3);
       pos.z = clamp(pos.z, -HALF_H + 0.3, HALF_H - 0.3);
       pos.y = 0;
+      // steering/separation can nudge ground units into blocked cells
+      if (!e.flying) {
+        const fixed = this.grid.resolveCircle(pos.x, pos.z, ENEMY.RADIUS * 0.8);
+        pos.x = fixed.x; pos.z = fixed.z;
+      }
       const v = e.vehicle.velocity;
       const sp = Math.hypot(v.x, v.z);
       if (sp > 0.25) e.yaw = Math.atan2(v.x, v.z);

@@ -1,8 +1,15 @@
 import { CLASSES, TOWERS, TOWER_LEVEL_MAX, TOWER_UPGRADE, CRYSTAL_BREACH_LIMIT } from './config.js';
-import { sfx } from './audio.js';
+import { sfx, setSfxVolume } from './audio.js';
 import { normalizeRoomCode } from './utils.js';
+import { icon, mountIcons } from './icons.js';
+import { settings } from './settings.js';
+import { music } from './music.js';
 
 const $ = (id) => document.getElementById(id);
+
+// real render of the 3D model (Kenney preview) instead of a generic glyph
+const entityImg = (name) =>
+  `<img class="entity-img" src="${import.meta.env.BASE_URL || './'}img/${name}.png" alt="">`;
 
 // ============================================================
 // All DOM: screens, HUD, build cards, panels, toasts.
@@ -18,10 +25,12 @@ export class UI {
     this.lastSnap = null;
     this.isHost = false;
 
+    mountIcons();
     this.bindMenu();
     this.bindLobby();
     this.bindHud();
     this.bindOverlays();
+    this.bindSettings();
   }
 
   // ---------------- helpers ----------------
@@ -143,7 +152,7 @@ export class UI {
     for (const p of players) {
       const li = document.createElement('li');
       const cls = CLASSES[p.cls];
-      li.innerHTML = `<span class="pl-cls">${cls?.icon || '❔'}</span>
+      li.innerHTML = `<span class="pl-cls">${entityImg('class-' + p.cls)}</span>
         <span class="pl-name"></span>
         <span class="pl-tag">${cls?.name || ''}${p.host ? ' · Host' : ''}${p.id === selfId ? ' · You' : ''}</span>`;
       li.querySelector('.pl-name').textContent = p.name;
@@ -160,6 +169,8 @@ export class UI {
         card.dataset.item === this.selectedItem ? null : card.dataset.item
       ));
     }
+    // the hint bar doubles as a big cancel button
+    $('build-hint').addEventListener('click', () => this.selectItem(null));
     for (const [key, def] of Object.entries(TOWERS)) {
       const el = document.querySelector(`[data-cost="${key}"]`);
       if (el) el.textContent = def.cost;
@@ -207,9 +218,9 @@ export class UI {
     const hint = $('build-hint');
     if (item) {
       hint.classList.remove('hidden');
-      hint.textContent = item === 'obstacle'
-        ? 'Place a block — you cannot fully seal the path'
-        : `Place ${TOWERS[item].name} (🪙${TOWERS[item].cost})`;
+      hint.innerHTML = `<span class="hint-x">${icon('x')}</span>` + (item === 'obstacle'
+        ? 'Place a block — tap here to cancel'
+        : `Place ${TOWERS[item].name} (${icon('coin')}${TOWERS[item].cost}) — tap here to cancel`);
     } else {
       hint.classList.add('hidden');
     }
@@ -227,19 +238,30 @@ export class UI {
     if (info.type === 'tower') {
       const def = TOWERS[info.kind];
       const lvl = info.lvl;
-      const dmg = Math.round(def.dmg * Math.pow(TOWER_UPGRADE.dmgMult, lvl - 1));
-      $('upg-title').textContent = `${def.icon} ${def.name} — level ${lvl}`;
-      $('upg-stats').textContent =
-        `Damage ${dmg} · Range ${(def.range + TOWER_UPGRADE.rangeAdd * (lvl - 1)).toFixed(1)}` +
-        (def.aoe ? ` · Area ${def.aoe}` : '');
+      const stat = (mult, add = 0) => (base) => base * Math.pow(mult, lvl - 1) + add * (lvl - 1);
+      const dmg = Math.round(stat(TOWER_UPGRADE.dmgMult)(def.dmg));
+      const rng = (def.range + TOWER_UPGRADE.rangeAdd * (lvl - 1)).toFixed(1);
+      const spd = (def.rate * Math.pow(TOWER_UPGRADE.rateMult, lvl - 1)).toFixed(2);
+      $('upg-title').innerHTML = `${entityImg('tower-' + info.kind)} ${def.name} — level ${lvl}`;
       const maxed = lvl >= TOWER_LEVEL_MAX;
+      if (maxed) {
+        $('upg-stats').textContent =
+          `Damage ${dmg} · Range ${rng} · Speed ${spd}/s` + (def.aoe ? ` · Area ${def.aoe}` : '');
+      } else {
+        const nDmg = Math.round(def.dmg * Math.pow(TOWER_UPGRADE.dmgMult, lvl));
+        const nRng = (def.range + TOWER_UPGRADE.rangeAdd * lvl).toFixed(1);
+        const nSpd = (def.rate * Math.pow(TOWER_UPGRADE.rateMult, lvl)).toFixed(2);
+        $('upg-stats').textContent =
+          `Damage ${dmg} ➜ ${nDmg}\nRange ${rng} ➜ ${nRng}\nSpeed ${spd}/s ➜ ${nSpd}/s` +
+          (def.aoe ? `\nArea ${def.aoe}` : '');
+      }
       const cost = maxed ? 0 : Math.round(def.cost * TOWER_UPGRADE.costMult[lvl]);
-      $('upg-btn').textContent = maxed ? 'Max level' : `Upgrade 🪙${cost}`;
+      $('upg-btn').innerHTML = maxed ? 'Max level' : `Upgrade ${icon('coin')}${cost}`;
       $('upg-btn').disabled = maxed || (this.lastSnap && this.lastSnap.pts < cost);
       $('sell-btn').classList.remove('hidden');
       $('sell-btn').textContent = 'Sell';
     } else {
-      $('upg-title').textContent = '🪨 Block';
+      $('upg-title').innerHTML = `${entityImg('block')} Block`;
       $('upg-stats').textContent = 'Reclaim it to get a block back in your stock.';
       $('upg-btn').textContent = 'Remove';
       $('upg-btn').disabled = false;
@@ -251,6 +273,7 @@ export class UI {
   closePanel() {
     this.panelCell = null;
     this.hide('upgrade-panel');
+    this.cb.onPanelClose?.();
   }
 
   // called every frame with the freshest snapshot
@@ -285,7 +308,10 @@ export class UI {
     const me = snap.pl.find((r) => r[0] === selfId);
     if (me) {
       const [, cls, , , , hp, mhp, lvl, xp, xpn, , dead, resp, obst] = me;
-      $('pb-class').textContent = CLASSES[cls]?.icon || '❔';
+      if (this._pbCls !== cls) {
+        this._pbCls = cls;
+        $('pb-class').innerHTML = entityImg('class-' + cls);
+      }
       $('pb-hp').style.width = `${(hp / mhp) * 100}%`;
       $('pb-hp-text').textContent = `${hp}/${mhp}`;
       $('pb-xp').style.width = `${(xp / xpn) * 100}%`;
@@ -296,10 +322,13 @@ export class UI {
       ro.classList.toggle('hidden', dead !== 1);
       if (dead === 1) $('respawn-timer').textContent = `${Math.ceil(resp)}s`;
 
+      // never disable the currently selected card — otherwise you
+      // couldn't tap it again to unselect when resources run out
       const obstCard = document.querySelector('[data-item="obstacle"]');
-      obstCard.disabled = obst < 1;
+      obstCard.disabled = obst < 1 && this.selectedItem !== 'obstacle';
       for (const [key, def] of Object.entries(TOWERS)) {
-        document.querySelector(`[data-item="${key}"]`).disabled = snap.pts < def.cost;
+        document.querySelector(`[data-item="${key}"]`).disabled =
+          snap.pts < def.cost && this.selectedItem !== key;
       }
     }
 
@@ -336,7 +365,7 @@ export class UI {
     if (ev.wave > best) localStorage.setItem('dtc-best-wave', String(ev.wave));
     const lines = [`Survived to wave ${ev.wave}${ev.wave > best ? ' — new best!' : ''}`, ''];
     for (const s of Object.values(ev.kills || {})) {
-      lines.push(`⚔️ ${s.name} — ${s.kills} kills · level ${s.lvl}`);
+      lines.push(`${s.name} — ${s.kills} kills · level ${s.lvl}`);
     }
     $('go-stats').textContent = lines.join('\n');
     $('restart-btn').classList.toggle('hidden', !isHost);
@@ -346,4 +375,33 @@ export class UI {
 
   hideGameOver() { this.hide('gameover'); }
   showHostLost() { this.show('host-lost'); }
+
+  // ---------------- settings ----------------
+
+  bindSettings() {
+    const openPanel = () => {
+      sfx.click();
+      $('set-music').value = Math.round(settings.get('musicVol') * 100);
+      $('set-sfx').value = Math.round(settings.get('sfxVol') * 100);
+      $('set-shake').checked = settings.get('shake');
+      $('set-shadows').checked = settings.get('shadows');
+      this.show('settings-panel');
+    };
+    $('menu-settings').addEventListener('click', openPanel);
+    $('hud-settings').addEventListener('click', openPanel);
+    $('settings-close').addEventListener('click', () => { sfx.click(); this.hide('settings-panel'); });
+
+    $('set-music').addEventListener('input', (e) => {
+      const v = Number(e.target.value) / 100;
+      settings.set('musicVol', v);
+      music.setVolume(v);
+    });
+    $('set-sfx').addEventListener('input', (e) => {
+      const v = Number(e.target.value) / 100;
+      settings.set('sfxVol', v);
+      setSfxVolume(v);
+    });
+    $('set-shake').addEventListener('change', (e) => settings.set('shake', e.target.checked));
+    $('set-shadows').addEventListener('change', (e) => settings.set('shadows', e.target.checked));
+  }
 }
