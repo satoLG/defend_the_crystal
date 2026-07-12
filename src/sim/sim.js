@@ -502,6 +502,10 @@ export class Sim {
         }});
       } else if (p.cls === 'mage') {
         const cx = tp.x, cz = tp.z, dmg = p.atk, r = p.aoe, pid = p.id, kb = p.kbPower;
+        this.emit({
+          t: 'shoot', k: 'magic',
+          f: [rnd2(p.x), 1.15, rnd2(p.z)], to: [rnd2(cx), 0.5, rnd2(cz)], ft: 0.35,
+        });
         this.emit({ t: 'aoe', x: rnd2(cx), z: rnd2(cz), r, k: 'mage', ft: 0.35 });
         this.pending.push({ at: this.time + 0.35, fn: () => {
           for (const e of [...this.enemies.entities]) {

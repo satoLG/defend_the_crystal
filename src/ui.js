@@ -1,6 +1,9 @@
 import { CLASSES, TOWERS, TOWER_LEVEL_MAX, TOWER_UPGRADE, CRYSTAL_BREACH_LIMIT } from './config.js';
-import { sfx } from './audio.js';
+import { sfx, setSfxVolume } from './audio.js';
 import { normalizeRoomCode } from './utils.js';
+import { icon, mountIcons } from './icons.js';
+import { settings } from './settings.js';
+import { music } from './music.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -18,10 +21,12 @@ export class UI {
     this.lastSnap = null;
     this.isHost = false;
 
+    mountIcons();
     this.bindMenu();
     this.bindLobby();
     this.bindHud();
     this.bindOverlays();
+    this.bindSettings();
   }
 
   // ---------------- helpers ----------------
@@ -143,7 +148,7 @@ export class UI {
     for (const p of players) {
       const li = document.createElement('li');
       const cls = CLASSES[p.cls];
-      li.innerHTML = `<span class="pl-cls">${cls?.icon || '❔'}</span>
+      li.innerHTML = `<span class="pl-cls">${icon(cls?.icon || 'gem')}</span>
         <span class="pl-name"></span>
         <span class="pl-tag">${cls?.name || ''}${p.host ? ' · Host' : ''}${p.id === selfId ? ' · You' : ''}</span>`;
       li.querySelector('.pl-name').textContent = p.name;
@@ -346,4 +351,33 @@ export class UI {
 
   hideGameOver() { this.hide('gameover'); }
   showHostLost() { this.show('host-lost'); }
+
+  // ---------------- settings ----------------
+
+  bindSettings() {
+    const openPanel = () => {
+      sfx.click();
+      $('set-music').value = Math.round(settings.get('musicVol') * 100);
+      $('set-sfx').value = Math.round(settings.get('sfxVol') * 100);
+      $('set-shake').checked = settings.get('shake');
+      $('set-shadows').checked = settings.get('shadows');
+      this.show('settings-panel');
+    };
+    $('menu-settings').addEventListener('click', openPanel);
+    $('hud-settings').addEventListener('click', openPanel);
+    $('settings-close').addEventListener('click', () => { sfx.click(); this.hide('settings-panel'); });
+
+    $('set-music').addEventListener('input', (e) => {
+      const v = Number(e.target.value) / 100;
+      settings.set('musicVol', v);
+      music.setVolume(v);
+    });
+    $('set-sfx').addEventListener('input', (e) => {
+      const v = Number(e.target.value) / 100;
+      settings.set('sfxVol', v);
+      setSfxVolume(v);
+    });
+    $('set-shake').addEventListener('change', (e) => settings.set('shake', e.target.checked));
+    $('set-shadows').addEventListener('change', (e) => settings.set('shadows', e.target.checked));
+  }
 }

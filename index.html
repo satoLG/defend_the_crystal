@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <meta name="theme-color" content="#141021" />
   <title>Defend the Crystal</title>
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💎</text></svg>" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2366e0ff' stroke-width='2' stroke-linejoin='round'%3E%3Cpath d='M7 4h10l4 5-9 11L3 9z'/%3E%3Cpath d='M3 9h18M12 20L8.5 9l3.5-5 3.5 5z'/%3E%3C/svg%3E" />
   <link rel="stylesheet" href="./src/style.css" />
 </head>
 <body>
@@ -24,6 +24,7 @@
     <!-- ============ MAIN MENU ============ -->
     <div id="menu" class="screen hidden">
       <div class="panel menu-panel">
+        <button id="menu-settings" class="btn small corner-btn" title="Settings"><i data-icon="gear"></i></button>
         <h1 class="title">Defend<br/>the Crystal</h1>
         <div id="best-wave" class="muted"></div>
 
@@ -33,28 +34,28 @@
         <div class="field-label">Choose your class</div>
         <div id="class-grid">
           <button class="class-card selected" data-cls="berserker">
-            <span class="cls-icon">🪓</span><span class="cls-name">Berserker</span>
+            <span class="cls-icon"><i data-icon="axe"></i></span><span class="cls-name">Berserker</span>
             <span class="cls-desc">Huge damage up close</span>
             <span class="stat-rows">
               <i style="--v:.95">ATK</i><i style="--v:.55">DEF</i><i style="--v:.2">RNG</i><i style="--v:.6">SPD</i>
             </span>
           </button>
           <button class="class-card" data-cls="tanker">
-            <span class="cls-icon">🛡️</span><span class="cls-name">Tanker</span>
+            <span class="cls-icon"><i data-icon="shield"></i></span><span class="cls-name">Tanker</span>
             <span class="cls-desc">Unbreakable wall</span>
             <span class="stat-rows">
               <i style="--v:.5">ATK</i><i style="--v:.95">DEF</i><i style="--v:.2">RNG</i><i style="--v:.4">SPD</i>
             </span>
           </button>
           <button class="class-card" data-cls="archer">
-            <span class="cls-icon">🏹</span><span class="cls-name">Archer</span>
+            <span class="cls-icon"><i data-icon="bow"></i></span><span class="cls-name">Archer</span>
             <span class="cls-desc">Fast &amp; far shooter</span>
             <span class="stat-rows">
               <i style="--v:.5">ATK</i><i style="--v:.25">DEF</i><i style="--v:.8">RNG</i><i style="--v:.95">SPD</i>
             </span>
           </button>
           <button class="class-card" data-cls="mage">
-            <span class="cls-icon">🔮</span><span class="cls-name">Mage</span>
+            <span class="cls-icon"><i data-icon="orb"></i></span><span class="cls-name">Mage</span>
             <span class="cls-desc">Area damage from afar</span>
             <span class="stat-rows">
               <i style="--v:.5">ATK</i><i style="--v:.5">DEF</i><i style="--v:1">RNG</i><i style="--v:.6">SPD</i>
@@ -63,7 +64,7 @@
         </div>
 
         <div class="menu-actions">
-          <button id="host-btn" class="btn primary big">⚔️ Host a match</button>
+          <button id="host-btn" class="btn primary big"><i data-icon="swords"></i> Host a match</button>
           <div class="join-row">
             <input id="join-code" maxlength="5" placeholder="CODE" autocomplete="off" />
             <button id="join-btn" class="btn big">Join</button>
@@ -80,8 +81,8 @@
         <div class="muted">Share this code with your allies</div>
         <div class="code-row">
           <div id="room-code" class="room-code">·····</div>
-          <button id="copy-code" class="btn small" title="Copy code">📋</button>
-          <button id="share-code" class="btn small" title="Share link">🔗</button>
+          <button id="copy-code" class="btn small" title="Copy code"><i data-icon="copy"></i></button>
+          <button id="share-code" class="btn small" title="Share link"><i data-icon="share"></i></button>
         </div>
         <div id="lobby-status" class="muted"></div>
         <ul id="player-list"></ul>
@@ -96,15 +97,16 @@
     <!-- ============ HUD ============ -->
     <div id="hud" class="hidden">
       <div id="hud-top">
-        <div class="hud-chip" id="wave-chip">🌊 <span id="wave-label">–</span></div>
-        <div class="hud-chip gold" id="points-chip">🪙 <span id="points-label">0</span></div>
-        <div class="hud-chip" id="crystal-chip">💎 <span id="crystal-hp">10</span></div>
-        <div class="hud-chip subtle" id="room-chip" title="Room code — allies can join mid-match">🔗 <span id="room-label"></span></div>
+        <div class="hud-chip" id="wave-chip"><i data-icon="wave"></i> <span id="wave-label">–</span></div>
+        <div class="hud-chip gold" id="points-chip"><i data-icon="coin"></i> <span id="points-label">0</span></div>
+        <div class="hud-chip" id="crystal-chip"><i data-icon="gem"></i> <span id="crystal-hp">10</span></div>
+        <div class="hud-chip subtle" id="room-chip" title="Room code — allies can join mid-match"><i data-icon="link"></i> <span id="room-label"></span></div>
+        <button class="hud-chip subtle" id="hud-settings" title="Settings"><i data-icon="gear"></i></button>
       </div>
 
       <div id="player-bar">
         <div class="pb-row">
-          <span id="pb-class">🪓</span>
+          <span id="pb-class"><i data-icon="axe"></i></span>
           <div class="pb-bars">
             <div class="bar hp"><div id="pb-hp"></div><span id="pb-hp-text"></span></div>
             <div class="bar xp"><div id="pb-xp"></div></div>
@@ -113,24 +115,24 @@
         </div>
       </div>
 
-      <div id="build-hint" class="hidden"></div>
+      <button id="build-hint" class="hidden"></button>
 
       <div id="hud-bottom">
         <button class="build-card" data-item="obstacle">
-          <span class="bc-icon">🪨</span><span class="bc-name">Block</span>
+          <span class="bc-icon"><i data-icon="rock"></i></span><span class="bc-name">Block</span>
           <span class="bc-cost" id="obst-stock">×0</span>
         </button>
         <button class="build-card" data-item="ballista">
-          <span class="bc-icon">🏹</span><span class="bc-name">Ballista</span>
-          <span class="bc-cost">🪙<span data-cost="ballista"></span></span>
+          <span class="bc-icon"><i data-icon="ballista"></i></span><span class="bc-name">Ballista</span>
+          <span class="bc-cost"><i data-icon="coin"></i><span data-cost="ballista"></span></span>
         </button>
         <button class="build-card" data-item="catapult">
-          <span class="bc-icon">🪃</span><span class="bc-name">Catapult</span>
-          <span class="bc-cost">🪙<span data-cost="catapult"></span></span>
+          <span class="bc-icon"><i data-icon="catapult"></i></span><span class="bc-name">Catapult</span>
+          <span class="bc-cost"><i data-icon="coin"></i><span data-cost="catapult"></span></span>
         </button>
         <button class="build-card" data-item="cannon">
-          <span class="bc-icon">💣</span><span class="bc-name">Cannon</span>
-          <span class="bc-cost">🪙<span data-cost="cannon"></span></span>
+          <span class="bc-icon"><i data-icon="cannon"></i></span><span class="bc-name">Cannon</span>
+          <span class="bc-cost"><i data-icon="coin"></i><span data-cost="cannon"></span></span>
         </button>
         <button id="startwave-btn" class="btn primary">
           <span id="startwave-label">Start<br/>wave</span>
@@ -143,12 +145,12 @@
         <div class="upg-actions">
           <button id="upg-btn" class="btn primary">Upgrade</button>
           <button id="sell-btn" class="btn danger">Sell</button>
-          <button id="close-upg" class="btn subtle">✕</button>
+          <button id="close-upg" class="btn subtle"><i data-icon="x"></i></button>
         </div>
       </div>
 
       <div id="respawn-overlay" class="hidden">
-        <div>☠️ You fell…</div>
+        <div class="resp-title"><i data-icon="skull"></i> You fell…</div>
         <div id="respawn-timer"></div>
       </div>
 
@@ -159,10 +161,34 @@
       <div id="toasts"></div>
     </div>
 
+    <!-- ============ SETTINGS ============ -->
+    <div id="settings-panel" class="screen overlay hidden">
+      <div class="panel center-panel">
+        <h2><i data-icon="gear"></i> Settings</h2>
+        <div class="setting-row">
+          <label for="set-music"><i data-icon="music"></i> Music</label>
+          <input type="range" id="set-music" min="0" max="100" />
+        </div>
+        <div class="setting-row">
+          <label for="set-sfx"><i data-icon="speaker"></i> Sound effects</label>
+          <input type="range" id="set-sfx" min="0" max="100" />
+        </div>
+        <div class="setting-row toggle">
+          <label for="set-shake">Camera shake</label>
+          <input type="checkbox" id="set-shake" />
+        </div>
+        <div class="setting-row toggle">
+          <label for="set-shadows">Shadows</label>
+          <input type="checkbox" id="set-shadows" />
+        </div>
+        <button id="settings-close" class="btn primary big">Done</button>
+      </div>
+    </div>
+
     <!-- ============ CHECKPOINT ============ -->
     <div id="checkpoint" class="screen overlay hidden">
       <div class="panel center-panel">
-        <h2>⛺ Checkpoint</h2>
+        <h2><i data-icon="tent"></i> Checkpoint</h2>
         <p>Wave <span id="cp-wave"></span> cleared! Everyone is healed.<br/>Catch your breath, then push on.</p>
         <div id="cp-status" class="muted"></div>
         <button id="cont-btn" class="btn primary big">Keep going ➜</button>
@@ -172,7 +198,7 @@
     <!-- ============ GAME OVER ============ -->
     <div id="gameover" class="screen overlay hidden">
       <div class="panel center-panel">
-        <h2>💔 The crystal shattered</h2>
+        <h2><i data-icon="gemcrack"></i> The crystal shattered</h2>
         <div id="go-stats"></div>
         <div class="menu-actions">
           <button id="restart-btn" class="btn primary big hidden">Try again</button>

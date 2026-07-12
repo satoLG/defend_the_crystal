@@ -130,7 +130,7 @@ export class GameView {
     ctx.textAlign = 'center';
     ctx.fillStyle = '#000';
     ctx.globalAlpha = 0.4;
-    const text = `${name}  ⬥${lvl}`;
+    const text = `${name}  Lv${lvl}`;
     ctx.fillText(text, 130, 42);
     ctx.globalAlpha = 1;
     ctx.fillStyle = '#' + new THREE.Color(tint).getHexString();
@@ -251,6 +251,20 @@ export class GameView {
       const deco = instantiate('tower-crystals', { shadows: false }).group;
       deco.position.y = 0.05;
       group.add(deco);
+    }
+    // level indicator: colored ring under the tower (silver lvl2, gold lvl3)
+    if (lvl >= 2) {
+      const ring = new THREE.Mesh(
+        new THREE.RingGeometry(0.92, 1.12, 40),
+        new THREE.MeshBasicMaterial({
+          color: lvl >= 3 ? 0xe8b84b : 0xb9c8dd,
+          transparent: true, opacity: 0.9, depthWrite: false, side: THREE.DoubleSide,
+        })
+      );
+      ring.rotation.x = -Math.PI / 2;
+      ring.position.y = 0.05;
+      ring.renderOrder = 3;
+      group.add(ring);
     }
     // level pips
     for (let i = 0; i < lvl - 1; i++) {
@@ -388,6 +402,14 @@ export class GameView {
         if (typeof ev.tx === 'number') {
           a.group.rotation.y = Math.atan2(ev.tx - a.group.position.x, ev.tz - a.group.position.z);
         }
+        // melee swings get a visible slash arc in front of the attacker
+        const isMelee = a.cls ? (a.cls === 'berserker' || a.cls === 'tanker') : true;
+        if (isMelee) {
+          this.spawnSlash(
+            a.group.position.x, a.group.position.z, a.group.rotation.y,
+            a.cls ? 0xffe9a8 : 0xff9a8a
+          );
+        }
         break;
       }
       case 'shoot': this.spawnProjectile(ev); break;
@@ -448,7 +470,55 @@ export class GameView {
     this.corpses.push({ actor: a, t: 0 });
   }
 
+  // quick swipe arc that sweeps in front of a melee attacker
+  spawnSlash(x, z, yaw, color) {
+    const arc = new THREE.Mesh(
+      new THREE.RingGeometry(0.55, 1.2, 24, 1, -Math.PI / 3.2, Math.PI / 1.6),
+      new THREE.MeshBasicMaterial({
+        color, transparent: true, opacity: 0.9,
+        depthWrite: false, side: THREE.DoubleSide,
+        blending: THREE.AdditiveBlending,
+      })
+    );
+    arc.rotation.x = -Math.PI / 2;
+    arc.position.set(x, 0.75, z);
+    arc.renderOrder = 8;
+    const holder = new THREE.Group();
+    holder.add(arc);
+    holder.position.set(x, 0, z);
+    arc.position.set(0, 0.75, 0);
+    // ring theta 0 is +X; rotate so the arc opens toward the facing direction
+    holder.rotation.y = yaw - Math.PI / 2;
+    this.scene.add(holder);
+    this.effects.push({ mesh: holder, inner: arc, t: 0, dur: 0.22, type: 'slash', baseYaw: holder.rotation.y });
+  }
+
   spawnProjectile(ev) {
+    if (ev.k === 'magic') {
+      // glowing bolt from the mage's staff
+      const bolt = new THREE.Group();
+      const core = new THREE.Mesh(
+        new THREE.SphereGeometry(0.16, 10, 10),
+        new THREE.MeshBasicMaterial({ color: 0xe6c4ff })
+      );
+      const halo = new THREE.Mesh(
+        new THREE.SphereGeometry(0.3, 10, 10),
+        new THREE.MeshBasicMaterial({
+          color: 0xa050ff, transparent: true, opacity: 0.45,
+          blending: THREE.AdditiveBlending, depthWrite: false,
+        })
+      );
+      bolt.add(core, halo);
+      this.scene.add(bolt);
+      this.projectiles.push({
+        mesh: bolt,
+        from: new THREE.Vector3(...ev.f),
+        to: new THREE.Vector3(...ev.to),
+        ft: Math.max(ev.ft, 0.05),
+        t: 0, lob: false, kind: 'magic',
+      });
+      return;
+    }
     const key = { arrow: 'ammo-arrow', cannonball: 'ammo-cannonball', boulder: 'ammo-boulder' }[ev.k] || 'ammo-arrow';
     const mesh = instantiate(key, { shadows: false }).group;
     if (ev.k === 'boulder') mesh.scale.setScalar(1.5);
@@ -601,6 +671,11 @@ export class GameView {
         e.mesh.material.opacity = 0.85 * (1 - k);
       } else if (e.type === 'warn') {
         e.mesh.material.opacity = 0.22 + Math.sin(this.time * 10) * 0.08;
+      } else if (e.type === 'slash') {
+        // sweep the arc across the front and fade it out
+        e.mesh.rotation.y = e.baseYaw - 0.55 + easeOut(k) * 1.2;
+        e.inner.material.opacity = 0.9 * (1 - k * k);
+        e.inner.scale.setScalar(1 + k * 0.25);
       }
     }
 

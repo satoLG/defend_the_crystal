@@ -6,9 +6,11 @@ import { Grid, worldToCell, cellToWorld } from './sim/grid.js';
 import { Net, selfId } from './net.js';
 import { Input } from './input.js';
 import { UI } from './ui.js';
-import { armAudioOnFirstGesture, sfx } from './audio.js';
+import { armAudioOnFirstGesture, sfx, setSfxVolume } from './audio.js';
 import { CLASSES, PLAYER, NET, SIM_DT, TOWERS, TOWER_UPGRADE, GRID } from './config.js';
 import { makeRoomCode, clamp, dist2d } from './utils.js';
+import { settings } from './settings.js';
+import { music } from './music.js';
 
 // ============================================================
 // Bootstraps everything and runs the two game loops:
@@ -45,6 +47,13 @@ let gs, view, ui, input;
 
 async function boot() {
   armAudioOnFirstGesture();
+  setSfxVolume(settings.get('sfxVol'));
+  const startMusicOnce = () => {
+    music.setVolume(settings.get('musicVol'));
+    window.removeEventListener('pointerdown', startMusicOnce);
+  };
+  window.addEventListener('pointerdown', startMusicOnce);
+
   const canvas = document.getElementById('game-canvas');
 
   ui = new UI({
@@ -64,6 +73,12 @@ async function boot() {
 
   await loadAssets((f) => ui.loadProgress(f));
   gs = new GameScene(canvas);
+  gs.shakeEnabled = settings.get('shake');
+  gs.setShadows(settings.get('shadows'));
+  settings.onChange((k, v) => {
+    if (k === 'shake') gs.shakeEnabled = v;
+    if (k === 'shadows') gs.setShadows(v);
+  });
   view = new GameView(gs);
   ui.showMenu();
   requestAnimationFrame(frame);

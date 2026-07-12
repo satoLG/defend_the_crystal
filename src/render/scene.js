@@ -47,6 +47,7 @@ export class GameScene {
     this.scene.add(new THREE.HemisphereLight(0x9aa0d8, 0x35284a, 1.15));
 
     const moon = new THREE.DirectionalLight(0xcdd6ff, 1.8);
+    this.moon = moon;
     moon.position.set(-10, 24, -6);
     moon.castShadow = true;
     moon.shadow.mapSize.set(1024, 1024);
@@ -78,6 +79,10 @@ export class GameScene {
         tileMat = o.material;
       }
     });
+    // sink the tiles so their TOP surface is exactly y=0 — actors,
+    // range rings and grid overlays all live relative to that plane
+    tileGeo.computeBoundingBox();
+    const tileTop = tileGeo.boundingBox.max.y;
     const count = COLS * ROWS;
     const inst = new THREE.InstancedMesh(tileGeo, tileMat, count);
     inst.receiveShadow = true;
@@ -89,7 +94,7 @@ export class GameScene {
     for (let r = 0; r < ROWS; r++) {
       for (let c = 0; c < COLS; c++) {
         const w = cellToWorld(c, r);
-        m.makeTranslation(w.x, 0, w.z);
+        m.makeTranslation(w.x, -tileTop, w.z);
         inst.setMatrixAt(i, m);
         const spawnish = r < BUILD_ROW_MIN;
         inst.setColorAt(i, spawnish ? colSpawn : (c + r) % 2 ? colA : colB);
@@ -105,7 +110,7 @@ export class GameScene {
       new THREE.MeshStandardMaterial({ color: 0x131020, roughness: 1 })
     );
     base.rotation.x = -Math.PI / 2;
-    base.position.y = -0.06;
+    base.position.y = -tileTop - 0.02;
     base.receiveShadow = true;
     this.scene.add(base);
 
@@ -197,30 +202,53 @@ export class GameScene {
     geo.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
     this.gridLines = new THREE.LineSegments(
       geo,
-      new THREE.LineBasicMaterial({ color: 0xe8b84b, transparent: true, opacity: 0.28 })
+      new THREE.LineBasicMaterial({
+        color: 0xe8b84b, transparent: true, opacity: 0.3, depthWrite: false,
+      })
     );
+    this.gridLines.renderOrder = 4;
     this.gridLines.visible = false;
     this.scene.add(this.gridLines);
 
     // hover cell highlight
     this.cellHighlight = new THREE.Mesh(
       new THREE.PlaneGeometry(CELL * 0.96, CELL * 0.96),
-      new THREE.MeshBasicMaterial({ color: 0x8fe98f, transparent: true, opacity: 0.35, side: THREE.DoubleSide })
+      new THREE.MeshBasicMaterial({
+        color: 0x8fe98f, transparent: true, opacity: 0.35,
+        side: THREE.DoubleSide, depthWrite: false,
+      })
     );
     this.cellHighlight.rotation.x = -Math.PI / 2;
     this.cellHighlight.position.y = 0.05;
+    this.cellHighlight.renderOrder = 5;
     this.cellHighlight.visible = false;
     this.scene.add(this.cellHighlight);
 
-    // tower range ring
-    this.rangeRing = new THREE.Mesh(
-      new THREE.RingGeometry(1, 1.06, 48),
-      new THREE.MeshBasicMaterial({ color: 0x8fd0ff, transparent: true, opacity: 0.5, side: THREE.DoubleSide })
+    // tower range indicator: soft fill + bright edge, always on top of terrain
+    this.rangeGroup = new THREE.Group();
+    const rangeFill = new THREE.Mesh(
+      new THREE.CircleGeometry(1, 48),
+      new THREE.MeshBasicMaterial({
+        color: 0x8fd0ff, transparent: true, opacity: 0.13,
+        depthWrite: false, side: THREE.DoubleSide,
+      })
     );
-    this.rangeRing.rotation.x = -Math.PI / 2;
-    this.rangeRing.position.y = 0.06;
-    this.rangeRing.visible = false;
-    this.scene.add(this.rangeRing);
+    const rangeEdge = new THREE.Mesh(
+      new THREE.RingGeometry(0.965, 1, 64),
+      new THREE.MeshBasicMaterial({
+        color: 0xaadeff, transparent: true, opacity: 0.85,
+        depthWrite: false, side: THREE.DoubleSide,
+      })
+    );
+    rangeEdge.position.z = 0.001;
+    this.rangeGroup.add(rangeFill, rangeEdge);
+    this.rangeGroup.rotation.x = -Math.PI / 2;
+    this.rangeGroup.position.y = 0.06;
+    this.rangeGroup.renderOrder = 6;
+    rangeFill.renderOrder = 6;
+    rangeEdge.renderOrder = 7;
+    this.rangeGroup.visible = false;
+    this.scene.add(this.rangeGroup);
   }
 
   setBuildMode(on) { this.gridLines.visible = on; }
@@ -234,11 +262,11 @@ export class GameScene {
   hideCellHighlight() { this.cellHighlight.visible = false; }
 
   showRange(x, z, range) {
-    this.rangeRing.visible = true;
-    this.rangeRing.position.set(x, 0.06, z);
-    this.rangeRing.scale.setScalar(range);
+    this.rangeGroup.visible = true;
+    this.rangeGroup.position.set(x, 0.06, z);
+    this.rangeGroup.scale.setScalar(range);
   }
-  hideRange() { this.rangeRing.visible = false; }
+  hideRange() { this.rangeGroup.visible = false; }
 
   // pointer (client coords) -> world point on the ground plane
   pointerToGround(clientX, clientY) {
@@ -290,7 +318,12 @@ export class GameScene {
     this.camera.updateProjectionMatrix();
   }
 
-  addShake(amount) { this.shake = Math.min(this.shake + amount, 0.7); }
+  addShake(amount) {
+    if (this.shakeEnabled === false) return;
+    this.shake = Math.min(this.shake + amount, 0.7);
+  }
+
+  setShadows(on) { this.moon.castShadow = on; }
 
   update(dt) {
     this.time += dt;

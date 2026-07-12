@@ -22,22 +22,22 @@ export const CRYSTAL_BREACH_LIMIT = 10;
 // def = fraction of incoming damage absorbed.
 export const CLASSES = {
   berserker: {
-    name: 'Berserker', icon: '🪓',
+    name: 'Berserker', icon: 'axe',
     hp: 230, def: 0.25, atk: 36, range: 1.8, rate: 1.15, speed: 4.3,
     knockback: 1.8, model: 'char-berserker',
   },
   tanker: {
-    name: 'Tanker', icon: '🛡️',
+    name: 'Tanker', icon: 'shield',
     hp: 340, def: 0.45, atk: 18, range: 1.8, rate: 1.0, speed: 3.4,
     knockback: 1.3, model: 'char-tanker',
   },
   archer: {
-    name: 'Archer', icon: '🏹',
+    name: 'Archer', icon: 'bow',
     hp: 150, def: 0.10, atk: 15, range: 7.0, rate: 2.3, speed: 5.3,
     knockback: 0.6, model: 'char-archer',
   },
   mage: {
-    name: 'Mage', icon: '🔮',
+    name: 'Mage', icon: 'orb',
     hp: 175, def: 0.22, atk: 16, range: 8.5, rate: 0.85, speed: 4.4,
     knockback: 0.8, aoe: 1.9, model: 'char-mage',
   },
@@ -62,17 +62,17 @@ export const PLAYER = {
 // ---------- towers ----------
 export const TOWERS = {
   ballista: {
-    name: 'Ballista', icon: '🏹', cost: 60,
+    name: 'Ballista', icon: 'ballista', cost: 60,
     dmg: 14, range: 5.5, rate: 1.5, aoe: 0, projSpeed: 16,
     model: 'tower-ballista', ammo: 'arrow',
   },
   catapult: {
-    name: 'Catapult', icon: '🪃', cost: 140,
+    name: 'Catapult', icon: 'catapult', cost: 140,
     dmg: 26, range: 8.5, minRange: 2.5, rate: 0.4, aoe: 1.4, projSpeed: 9,
     model: 'tower-catapult', ammo: 'boulder', lob: true,
   },
   cannon: {
-    name: 'Cannon', icon: '💣', cost: 220,
+    name: 'Cannon', icon: 'cannon', cost: 220,
     dmg: 45, range: 4.5, rate: 0.5, aoe: 1.8, projSpeed: 13,
     model: 'tower-cannon', ammo: 'cannonball',
   },
@@ -84,7 +84,7 @@ export const TOWER_UPGRADE = {
   sellRefund: 0.6,
 };
 
-export const OBSTACLES = ['barrel', 'rocks', 'wall']; // random cosmetic variety
+export const OBSTACLES = ['rocks', 'barrel']; // random cosmetic variety
 export const OBSTACLE_STOCK_CAP = 10;
 
 // ---------- enemies ----------
