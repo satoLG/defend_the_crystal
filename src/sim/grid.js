@@ -30,6 +30,26 @@ export const HALF_H = (ROWS * CELL) / 2;
 // there; their goal is the crystal, which lives on the board)
 export const PLAZA = { HALF_W: 7, DEPTH: 6 };
 
+// Jump check: standing at (x,z) facing along yaw, can the character
+// vault over exactly ONE blocked cell (tower/obstacle) and land on the
+// free cell right behind it? Facing is quantized to the 4 cardinals.
+// Returns { to: worldPos, over: cell } or null.
+export function canJumpFrom(grid, x, z, yaw) {
+  const { c, r } = worldToCell(x, z);
+  if (!inBounds(c, r)) return null;
+  const dx = Math.sin(yaw), dz = Math.cos(yaw);
+  const dc = Math.abs(dx) >= Math.abs(dz) ? (dx > 0 ? 1 : -1) : 0;
+  const dr = dc === 0 ? (dz > 0 ? 1 : -1) : 0;
+  const oc = c + dc, or = r + dr;          // cell being vaulted
+  const lc = c + dc * 2, lr = r + dr * 2;  // landing cell
+  if (!inBounds(oc, or) || !grid.blocked[idx(oc, or)]) return null;
+  if (!grid.isWalkable(lc, lr)) return null;
+  // must actually be right in front of the vaulted cell
+  const ow = cellToWorld(oc, or);
+  if (Math.abs(x - ow.x) > CELL * 1.2 || Math.abs(z - ow.z) > CELL * 1.2) return null;
+  return { to: cellToWorld(lc, lr), over: { c: oc, r: or } };
+}
+
 const NEIGHBORS4 = [[1, 0], [-1, 0], [0, 1], [0, -1]];
 const NEIGHBORS8 = [
   [1, 0], [-1, 0], [0, 1], [0, -1],

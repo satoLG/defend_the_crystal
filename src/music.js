@@ -102,6 +102,11 @@ function startDrone() {
 
 function schedule() {
   if (!playing) return;
+  // after being backgrounded the clock may be far ahead of the last
+  // scheduled note — skip forward instead of burst-playing the backlog
+  if (nextNoteTime < ctx.currentTime - 0.05) {
+    nextNoteTime = ctx.currentTime + 0.06;
+  }
   while (nextNoteTime < ctx.currentTime + 0.35) {
     const bar = Math.floor(step / 16);
     const idx = step % 16;
@@ -143,6 +148,23 @@ export const music = {
     if (master) master.gain.value = volume * 0.9;
     if (volume <= 0.001) this.stop();
     else if (!playing) this.start(); // start() creates the AudioContext itself
+  },
+  // called from inside a user gesture: browsers (iOS especially) only
+  // let an AudioContext start/resume synchronously within one
+  unlock() {
+    if (volume <= 0.001) return;
+    if (!playing) { this.start(); return; }
+    this.resume();
+  },
+  // called when the tab becomes visible again — iOS parks the context
+  // in 'suspended'/'interrupted' when the app is minimized
+  resume() {
+    if (!ctx || !playing) return;
+    if (ctx.state !== 'running') {
+      try { ctx.resume().catch(() => {}); } catch { /* ok */ }
+    }
+    if (timer) clearTimeout(timer);
+    schedule();
   },
   isPlaying: () => playing,
 };

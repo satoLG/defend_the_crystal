@@ -2,13 +2,13 @@ import { loadAssets } from './render/assets.js';
 import { GameScene } from './render/scene.js';
 import { GameView } from './render/view.js';
 import { Sim } from './sim/sim.js';
-import { Grid, worldToCell, cellToWorld } from './sim/grid.js';
+import { Grid, worldToCell, cellToWorld, canJumpFrom } from './sim/grid.js';
 import { Net, selfId } from './net.js';
 import { Input } from './input.js';
 import { UI } from './ui.js';
-import { armAudioOnFirstGesture, sfx, setSfxVolume } from './audio.js';
-import { CLASSES, PLAYER, NET, SIM_DT, TOWERS, TOWER_UPGRADE, GRID } from './config.js';
-import { makeRoomCode, clamp, dist2d } from './utils.js';
+import { armAudioOnFirstGesture, bindAudioLifecycle, sfx, setSfxVolume } from './audio.js';
+import { CLASSES, PLAYER, NET, SIM_DT, TOWERS, TOWER_UPGRADE, GRID, JUMP } from './config.js';
+import { makeRoomCode, clamp, lerp, dist2d } from './utils.js';
 import { settings } from './settings.js';
 import { music } from './music.js';
 
@@ -29,8 +29,8 @@ const state = {
   over: false,
   // client-side snapshot interpolation
   snapPrev: null, snapNext: null, snapPrevT: 0, snapNextT: 0,
-  // local self-prediction
-  self: { x: 0, z: 4, yaw: Math.PI, moving: false, kbx: 0, kbz: 0, dead: false, speed: 4 },
+  // local self-prediction (jump = in-flight hop over a grid cell)
+  self: { x: 0, z: 4, yaw: Math.PI, moving: false, kbx: 0, kbz: 0, dead: false, speed: 4, jump: null },
   selfInit: false,
   clientGrid: new Grid(),
   blockedKey: '',
@@ -45,14 +45,21 @@ let gs, view, ui, input;
 // boot
 // ---------------------------------------------------------
 
+const effectiveVolumes = () => ({
+  music: settings.get('musicMuted') ? 0 : settings.get('musicVol'),
+  sfx: settings.get('sfxMuted') ? 0 : settings.get('sfxVol'),
+});
+
 async function boot() {
-  armAudioOnFirstGesture();
-  setSfxVolume(settings.get('sfxVol'));
-  const startMusicOnce = () => {
-    music.setVolume(settings.get('musicVol'));
-    window.removeEventListener('pointerdown', startMusicOnce);
-  };
-  window.addEventListener('pointerdown', startMusicOnce);
+  // every user gesture (re)applies volumes and unlocks/resumes the
+  // audio contexts — required on iOS, harmless elsewhere
+  armAudioOnFirstGesture(() => {
+    const v = effectiveVolumes();
+    setSfxVolume(v.sfx);
+    music.setVolume(v.music);
+  });
+  bindAudioLifecycle();
+  setSfxVolume(effectiveVolumes().sfx);
 
   const canvas = document.getElementById('game-canvas');
 
@@ -61,6 +68,7 @@ async function boot() {
     onJoin: joinGame,
     onStartMatch: startMatch,
     onAction: sendAction,
+    onJump: () => doJump(),
     onBuildMode: (on) => { gs.setBuildMode(on); if (!on) view.clearGhost(); },
     onPanelClose: () => gs.hideRange(),
     onExit: () => location.reload(),
@@ -296,9 +304,41 @@ function onKeyAction(action) {
       ui.closePanel();
       gs.hideRange();
       break;
+    case 'jump': doJump(); break;
     case 'startwave':
-      if (state.role === 'host') sendAction({ t: 'start' });
+      // Space jumps when a jump is possible; otherwise it keeps its
+      // old job of starting the next wave (host only)
+      if (!doJump() && state.role === 'host') sendAction({ t: 'start' });
       break;
+  }
+}
+
+// ---------------------------------------------------------
+// jumping over grid towers / obstacles
+// ---------------------------------------------------------
+
+function doJump() {
+  const s = state.self;
+  if (!state.started || state.over || s.dead || s.jump) return false;
+  if (state.role === 'client' && !state.selfInit) return false;
+  const info = canJumpFrom(clientGridRef(), s.x, s.z, s.yaw);
+  if (!info) return false;
+  s.jump = { fx: s.x, fz: s.z, tx: info.to.x, tz: info.to.z, t: 0, dur: JUMP.DUR };
+  view.startJump(selfId, JUMP.DUR);
+  sfx.jump();
+  sendAction({ t: 'jump', yaw: Math.round(s.yaw * 100) / 100 });
+  return true;
+}
+
+let jumpWasEnabled = null;
+function updateJumpButton() {
+  const s = state.self;
+  const ok = state.started && !state.over && !s.dead && !s.jump &&
+    (state.role === 'host' || state.selfInit) &&
+    !!canJumpFrom(clientGridRef(), s.x, s.z, s.yaw);
+  if (ok !== jumpWasEnabled) {
+    jumpWasEnabled = ok;
+    ui.setJumpEnabled(ok);
   }
 }
 
@@ -348,6 +388,13 @@ function handleEvent(ev) {
     case 'lvl':
       if (ev.id === selfId) { ui.toast(`Level ${ev.lvl}!`, 'gold'); sfx.levelUp(); }
       break;
+    case 'pickup':
+      if (ev.id === selfId) (ev.k === 'pts' ? sfx.coin : sfx.xp)();
+      break;
+    case 'jump':
+      // own jump is predicted locally in doJump()
+      if (ev.id !== selfId) view.startJump(ev.id, ev.dur);
+      break;
     case 'breach':
       sfx.breach();
       ui.toast('The crystal was hit!', 'error');
@@ -384,6 +431,7 @@ function syncSelfFromSim() {
     state.self.x = p.x; state.self.z = p.z; state.self.yaw = p.yaw;
     state.self.speed = p.speed;
     state.self.dead = p.dead;
+    state.self.jump = null;
     state.selfInit = true;
   }
 }
@@ -413,7 +461,18 @@ function syncClientGrid(snap) {
 
 function stepSelf(dt) {
   const s = state.self;
-  if (s.dead) { s.moving = false; return; }
+  if (s.dead) { s.moving = false; s.jump = null; return; }
+  // mid-jump: fly along the arc, ignoring input and cell collision
+  if (s.jump) {
+    const j = s.jump;
+    j.t += dt;
+    const k = Math.min(j.t / j.dur, 1);
+    s.x = lerp(j.fx, j.tx, k);
+    s.z = lerp(j.fz, j.tz, k);
+    s.moving = false;
+    if (k >= 1) s.jump = null;
+    return;
+  }
   const dir = input.moveDir();
   const mag = Math.hypot(dir.x, dir.z);
   s.moving = mag > 0.15;
@@ -449,6 +508,7 @@ function frame(t) {
   lastT = now;
 
   if (state.started && !state.over) stepSelf(dt);
+  updateJumpButton();
 
   if (state.role === 'host' && state.started) {
     // fixed-step authoritative sim

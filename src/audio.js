@@ -1,9 +1,12 @@
 import { tiks } from '@rexa-developer/tiks';
+import { music } from './music.js';
 
 // ============================================================
 // UI / game feedback sounds via tiks (procedural, no files).
 // Gameplay events are throttled so a big wave doesn't turn
-// into white noise.
+// into white noise. Also owns the mobile audio lifecycle:
+// unlocking WebAudio on iOS and resuming every context after
+// the tab is backgrounded/minimized.
 // ============================================================
 
 let ready = false;
@@ -29,10 +32,82 @@ export function setSfxVolume(v) {
   }
 }
 
-// call once on the first user gesture (browsers require it)
-export function armAudioOnFirstGesture() {
-  const arm = () => { initAudio(); window.removeEventListener('pointerdown', arm); };
-  window.addEventListener('pointerdown', arm);
+// best-effort: dig the AudioContext out of the tiks engine so we can
+// resume it after iOS "interrupts" it (tiks only self-heals from the
+// plain 'suspended' state)
+function tiksContext() {
+  try {
+    for (const v of Object.values(tiks)) {
+      if (v && typeof v === 'object' && typeof v.getContext === 'function') {
+        return v.getContext();
+      }
+    }
+  } catch { /* ok */ }
+  return null;
+}
+
+export function resumeSfx() {
+  const ctx = tiksContext();
+  if (ctx && ctx.state !== 'running') {
+    try { ctx.resume().catch(() => {}); } catch { /* ok */ }
+  }
+}
+
+const isIOS = () =>
+  /iP(hone|ad|od)/.test(navigator.userAgent) ||
+  (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
+// ~6ms of looped silence
+const SILENT_WAV =
+  'data:audio/wav;base64,UklGRlQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YTAAAACAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIA=';
+
+// iOS routes WebAudio through the "ambient" session, which the hardware
+// mute switch silences; keeping a (silent) <audio> element playing flips
+// the session to "playback" so music and SFX are actually audible
+let silentEl = null;
+function ensurePlaybackSession() {
+  if (!isIOS()) return;
+  if (!silentEl) {
+    silentEl = document.createElement('audio');
+    silentEl.setAttribute('playsinline', '');
+    silentEl.loop = true;
+    silentEl.preload = 'auto';
+    silentEl.src = SILENT_WAV;
+  }
+  silentEl.play().catch(() => { /* retried on the next gesture */ });
+}
+
+// Bound permanently: browsers only allow audio to start inside a user
+// gesture, and iOS can re-lock contexts after calls/interruptions, so
+// every gesture re-arms whatever got silenced. `onGesture` lets the
+// game apply current volumes/mutes inside the same gesture.
+export function armAudioOnFirstGesture(onGesture) {
+  const arm = () => {
+    initAudio();
+    ensurePlaybackSession();
+    onGesture?.();
+    resumeSfx();
+    music.unlock();
+  };
+  // pointerdown covers most browsers; touchend is the gesture iOS
+  // historically requires for audio unlock
+  for (const evt of ['pointerdown', 'touchend', 'keydown']) {
+    window.addEventListener(evt, arm);
+  }
+}
+
+// coming back from a minimized tab / switched app: resume everything
+export function bindAudioLifecycle() {
+  const resume = () => {
+    resumeSfx();
+    music.resume();
+    if (silentEl) silentEl.play().catch(() => {});
+  };
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') resume();
+  });
+  window.addEventListener('pageshow', resume);
+  window.addEventListener('focus', resume);
 }
 
 function throttled(name, minGap, fn) {
@@ -49,6 +124,8 @@ export const sfx = {
   placeTower: () => ready && throttled('placeT', 80, () => { tiks.pop(); tiks.success(); }),
   waveClear: () => ready && throttled('waveClr', 400, () => { tiks.success(); tiks.notify(); }),
   coin: () => ready && throttled('coin', 90, () => tiks.pop()),
+  xp: () => ready && throttled('xp', 120, () => tiks.hover()),
+  jump: () => ready && throttled('jump', 150, () => tiks.swoosh()),
   hit: () => ready && throttled('hit', 90, () => tiks.click()),
   shoot: () => ready && throttled('shoot', 120, () => tiks.swoosh()),
   melee: () => ready && throttled('melee', 140, () => tiks.swoosh()),

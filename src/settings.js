@@ -6,10 +6,12 @@
 const KEY = 'dtc-settings';
 
 const DEFAULTS = {
-  musicVol: 0.5,   // 0..1
-  sfxVol: 0.7,     // 0..1
-  shake: true,     // camera shake on breaches / hits
-  shadows: true,   // realtime shadows
+  musicVol: 0.5,      // 0..1
+  sfxVol: 0.7,        // 0..1
+  musicMuted: false,
+  sfxMuted: false,
+  shake: true,        // camera shake on breaches / hits
+  shadows: true,      // realtime shadows
 };
 
 let state = { ...DEFAULTS };
