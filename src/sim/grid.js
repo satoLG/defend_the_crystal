@@ -25,6 +25,11 @@ export const CRYSTAL_POS = cellToWorld(CRYSTAL.c, CRYSTAL.r);
 export const HALF_W = (COLS * CELL) / 2;
 export const HALF_H = (ROWS * CELL) / 2;
 
+// sanctuary plaza behind the board's south edge — a paved resting
+// spot players can wander into between waves (enemies never path
+// there; their goal is the crystal, which lives on the board)
+export const PLAZA = { HALF_W: 7, DEPTH: 6 };
+
 const NEIGHBORS4 = [[1, 0], [-1, 0], [0, 1], [0, -1]];
 const NEIGHBORS8 = [
   [1, 0], [-1, 0], [0, 1], [0, -1],
@@ -147,11 +152,20 @@ export class Grid {
   }
 
   // Circle-vs-blocked-cells collision resolve for characters.
-  // Returns corrected {x,z}.
-  resolveCircle(x, z, radius) {
+  // Returns corrected {x,z}. allowPlaza lets players (not enemies)
+  // step off the south edge into the sanctuary plaza.
+  resolveCircle(x, z, radius, allowPlaza = false) {
     const margin = 0.05;
-    x = Math.min(Math.max(x, -HALF_W + radius + margin), HALF_W - radius - margin);
-    z = Math.min(Math.max(z, -HALF_H + radius + margin), HALF_H - radius - margin);
+    if (allowPlaza && z > HALF_H - radius) {
+      // already south of the battlefield: confined to the plaza's width
+      x = Math.min(Math.max(x, -PLAZA.HALF_W + radius + margin), PLAZA.HALF_W - radius - margin);
+    } else {
+      x = Math.min(Math.max(x, -HALF_W + radius + margin), HALF_W - radius - margin);
+    }
+    const southMax = allowPlaza && Math.abs(x) < PLAZA.HALF_W - radius
+      ? HALF_H + PLAZA.DEPTH
+      : HALF_H;
+    z = Math.min(Math.max(z, -HALF_H + radius + margin), southMax - radius - margin);
     const { c, r } = worldToCell(x, z);
     for (let rr = r - 1; rr <= r + 1; rr++) {
       for (let cc = c - 1; cc <= c + 1; cc++) {

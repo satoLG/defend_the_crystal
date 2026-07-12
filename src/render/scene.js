@@ -1,18 +1,19 @@
 import * as THREE from 'three';
 import { GRID } from '../config.js';
-import { cellToWorld, CRYSTAL_POS, HALF_W, HALF_H } from '../sim/grid.js';
+import { cellToWorld, CRYSTAL_POS, HALF_W, HALF_H, PLAZA } from '../sim/grid.js';
 import { instantiate } from './assets.js';
 
 // ============================================================
 // Static world: renderer, portrait-friendly camera that always
 // frames the whole board, moody night lighting, and the set
 // dressing — enemies emerge from a fog-choked forest at the top,
-// the board is a clearing whose floor blends dirt and grass, and
-// the bottom settles into a stone sanctuary with fountains
-// around the crystal.
+// the board is a clearing whose floor blends dirt and grass into
+// stone paving near the crystal, and behind the south edge sits a
+// small sanctuary plaza (fountains, statues, columns) players can
+// wander into between waves.
 // ============================================================
 
-const { COLS, ROWS, CELL, SPAWNS, BUILD_ROW_MIN, BUILD_ROW_MAX } = GRID;
+const { COLS, ROWS, CELL, SPAWNS, CRYSTAL, BUILD_ROW_MIN, BUILD_ROW_MAX } = GRID;
 
 export class GameScene {
   constructor(canvas) {
@@ -28,7 +29,7 @@ export class GameScene {
     this.scene.fog = new THREE.Fog(0x151128, 34, 80);
 
     this.camera = new THREE.PerspectiveCamera(50, 1, 0.5, 200);
-    this.lookTarget = new THREE.Vector3(0, 0, 0.8);
+    this.lookTarget = new THREE.Vector3(0, 0, 2.2);
     this.camDir = new THREE.Vector3(0, Math.sin(0.98), Math.cos(0.98)).normalize();
     this.shake = 0;
 
@@ -36,13 +37,11 @@ export class GameScene {
     this.groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
     this.time = 0;
     this.waters = [];
-    this.flames = [];
-    this.fireLights = [];
     this.fogSprites = [];
 
     this.buildLights();
     this.buildTerrain();
-    this.buildSanctuary();
+    this.buildPlaza();
     this.buildCrystal();
     this.buildForest();
     this.buildPenumbra();
@@ -109,7 +108,9 @@ export class GameScene {
       );
     };
 
-    const kinds = [];   // 0 grass, 1 dirt
+    // 0 grass, 1 dirt, 2 stone (the crystal's row and the pocket in
+    // front of it read as old paving; nothing else sits on the grid)
+    const kinds = [];
     const colors = [];
     const GRASS_TONES = [
       [0.72, 0.85, 0.6], [0.85, 0.97, 0.7], [0.97, 1.05, 0.8],
@@ -118,8 +119,20 @@ export class GameScene {
     const DIRT_TONES = [
       [1.0, 0.94, 0.86], [0.88, 0.83, 0.78], [0.97, 0.88, 0.78], [0.8, 0.76, 0.74],
     ];
+    const STONE_TONES = [
+      [0.62, 0.64, 0.74], [0.55, 0.57, 0.66], [0.68, 0.7, 0.8], [0.5, 0.52, 0.62],
+    ];
+    const isStoneCell = (c, r) =>
+      r >= ROWS - 2 || (r === ROWS - 3 && Math.abs(c - CRYSTAL.c) <= 1);
     for (let r = 0; r < ROWS; r++) {
       for (let c = 0; c < COLS; c++) {
+        if (isStoneCell(c, r)) {
+          kinds.push(2);
+          const tone = STONE_TONES[Math.floor(rng() * STONE_TONES.length)];
+          const jit = 0.92 + rng() * 0.16;
+          colors.push([tone[0] * jit, tone[1] * jit, tone[2] * jit]);
+          continue;
+        }
         const w = cellToWorld(c, r);
         const t = r / (ROWS - 1);
         // the two spawn trails bend toward the crystal as they go south
@@ -146,18 +159,34 @@ export class GameScene {
           const dark = 0.42 + r * 0.16;
           cr *= dark; cg *= dark; cb *= dark * 1.08;
         }
-        // sanctuary: cool stone cast on the bottom rows
-        if (r >= ROWS - 2) { cr *= 0.88; cg *= 0.92; cb *= 1.0; }
         colors.push([cr, cg, cb]);
       }
     }
 
+    // stone paving continues past the south edge as the plaza floor
+    const plazaCells = [];
+    const plazaRows = Math.round(PLAZA.DEPTH / CELL);
+    for (let pr = 0; pr < plazaRows; pr++) {
+      for (let c = 0; c < COLS; c++) {
+        const w = cellToWorld(c, ROWS + pr);
+        if (Math.abs(w.x) > PLAZA.HALF_W) continue;
+        const tone = STONE_TONES[Math.floor(rng() * STONE_TONES.length)];
+        const jit = 0.9 + rng() * 0.16;
+        plazaCells.push({ x: w.x, z: w.z, color: [tone[0] * jit, tone[1] * jit, tone[2] * jit] });
+      }
+    }
+
+    // untextured stone material: the tile shape with a plain gray face
+    // (kept dim — the crystal and fountain lights land right on it)
+    const stoneMat = new THREE.MeshStandardMaterial({ color: 0x878b9e, roughness: 0.95 });
+
     const m = new THREE.Matrix4();
-    for (const kind of [0, 1]) {
-      const src = kind ? dirt : grass;
-      const count = kinds.filter((k) => k === kind).length;
+    for (const kind of [0, 1, 2]) {
+      const src = kind === 1 ? dirt : grass;
+      const extra = kind === 2 ? plazaCells.length : 0;
+      const count = kinds.filter((k) => k === kind).length + extra;
       if (!count) continue;
-      const inst = new THREE.InstancedMesh(src.geo, src.mat, count);
+      const inst = new THREE.InstancedMesh(src.geo, kind === 2 ? stoneMat : src.mat, count);
       inst.receiveShadow = true;
       let i = 0, ci = 0;
       for (let r = 0; r < ROWS; r++) {
@@ -170,41 +199,55 @@ export class GameScene {
           i++;
         }
       }
+      if (kind === 2) {
+        for (const p of plazaCells) {
+          m.makeTranslation(p.x, -tileTop, p.z);
+          inst.setMatrixAt(i, m);
+          inst.setColorAt(i, new THREE.Color(...p.color));
+          i++;
+        }
+      }
       inst.instanceColor.needsUpdate = true;
       this.scene.add(inst);
     }
 
-    // dark base plane under everything
+    // the world around the clearing is forest floor, not a void:
+    // dark mossy ground stretching out under the trees
     const base = new THREE.Mesh(
       new THREE.PlaneGeometry(160, 160),
-      new THREE.MeshStandardMaterial({ color: 0x100d1e, roughness: 1 })
+      new THREE.MeshStandardMaterial({ color: 0x27301f, roughness: 1 })
     );
     base.rotation.x = -Math.PI / 2;
     base.position.y = -tileTop - 0.02;
     base.receiveShadow = true;
     this.scene.add(base);
+
+    // subtle color breakup so the surrounding ground reads as terrain
+    const patchGeo = new THREE.CircleGeometry(1, 10);
+    const patchMats = [0x2f3a24, 0x1f271a, 0x33402a, 0x2a2f22].map(
+      (col) => new THREE.MeshStandardMaterial({ color: col, roughness: 1 })
+    );
+    for (let i = 0; i < 60; i++) {
+      const a = rng() * Math.PI * 2;
+      const rad = 12 + rng() * 26;
+      const px = Math.cos(a) * rad;
+      const pz = Math.sin(a) * rad * 1.3;
+      // keep patches off the board and plaza
+      if (Math.abs(px) < HALF_W + 1 && pz > -HALF_H - 1 && pz < HALF_H + PLAZA.DEPTH + 1) continue;
+      const patch = new THREE.Mesh(patchGeo, patchMats[Math.floor(rng() * patchMats.length)]);
+      patch.rotation.x = -Math.PI / 2;
+      patch.position.set(px, -tileTop + 0.005, pz);
+      patch.scale.setScalar(1.5 + rng() * 3.5);
+      this.scene.add(patch);
+    }
   }
 
-  // stone ruins, fountains and paving that gather around the crystal
-  buildSanctuary() {
+  // the crystal's pedestal is the ONLY prop on the grid; the sanctuary
+  // proper is a small plaza behind the south edge where players can
+  // stretch their legs between waves
+  buildPlaza() {
     const cz = CRYSTAL_POS.z;
-
-    // circular paving under the crystal
-    const paving = new THREE.Mesh(
-      new THREE.CylinderGeometry(2.65, 2.8, 0.09, 28),
-      new THREE.MeshStandardMaterial({ color: 0x565c72, roughness: 0.95 })
-    );
-    paving.position.set(0, 0.0, cz);
-    paving.receiveShadow = true;
-    this.scene.add(paving);
-    const pavingRing = new THREE.Mesh(
-      new THREE.RingGeometry(2.8, 3.35, 28),
-      new THREE.MeshStandardMaterial({ color: 0x3c4054, roughness: 1 })
-    );
-    pavingRing.rotation.x = -Math.PI / 2;
-    pavingRing.position.set(0, 0.02, cz);
-    pavingRing.receiveShadow = true;
-    this.scene.add(pavingRing);
+    const pz = HALF_H + PLAZA.DEPTH / 2; // plaza center line
 
     // pedestal the crystal hovers over
     const altar = instantiate('env-altar').group;
@@ -213,58 +256,52 @@ export class GameScene {
     const altarBox = new THREE.Box3().setFromObject(altar);
     this.crystalBaseY = altarBox.max.y - 0.06;
 
-    // twin fountains flanking the crystal
-    for (const sx of [-1, 1]) this.makeFountain(sx * 3.6, cz + 0.9);
+    // cools a kit piece toward gray stone so the plaza reads uniform
+    const grayStone = (group) => {
+      group.traverse((o) => {
+        if (o.isMesh && o.material) {
+          o.material = o.material.clone();
+          o.material.color.multiply(new THREE.Color(0.55, 0.58, 0.72));
+        }
+      });
+      return group;
+    };
 
-    // curved walls wrap the sanctuary's southern corners
-    // (the piece is a quarter arc: rotY 0 opens NE, rotY π/2 opens NW)
-    for (const [sx, ry] of [[-1, 0], [1, Math.PI / 2]]) {
-      const wall = instantiate('env-wall-curve').group;
-      wall.position.set(sx * 4.3, 0, HALF_H + 0.4);
-      wall.rotation.y = ry;
-      wall.scale.setScalar(0.9);
-      this.scene.add(wall);
-    }
+    // twin fountains — the heart of the plaza, scaled up to be seen
+    for (const sx of [-1, 1]) this.makeFountain(sx * 4.1, pz, 1.5);
 
-    // columns mark the sanctuary gateway, statues watch the entrance
+    // statues guard the plaza entrance, facing the battlefield
     for (const sx of [-1, 1]) {
-      const col = instantiate('env-column').group;
-      col.position.set(sx * 6.9, 0, cz + 2.6);
-      this.scene.add(col);
-
-      const statue = instantiate('env-statue').group;
-      statue.position.set(sx * 5.4, 0, cz + 1.4);
-      statue.rotation.y = Math.PI + sx * 0.4; // face the battlefield
+      const statue = grayStone(instantiate('env-statue').group);
+      statue.position.set(sx * 5.9, 0, HALF_H + 1.1);
+      statue.rotation.y = Math.PI + sx * 0.25;
+      statue.scale.setScalar(1.15);
       this.scene.add(statue);
-
-      const fire = instantiate('env-fire').group;
-      fire.position.set(sx * 1.9, 0, cz + 1.7);
-      this.scene.add(fire);
-      const flame = new THREE.Mesh(
-        new THREE.ConeGeometry(0.16, 0.5, 6),
-        new THREE.MeshBasicMaterial({ color: 0xffa040, transparent: true, opacity: 0.95 })
-      );
-      flame.position.set(sx * 1.9, 1.05, cz + 1.7);
-      this.scene.add(flame);
-      this.flames.push(flame);
-      const fl = new THREE.PointLight(0xff8c3a, 11, 9, 1.9);
-      fl.position.set(sx * 1.9, 1.4, cz + 1.7);
-      this.scene.add(fl);
-      this.fireLights.push(fl);
     }
 
-    // lanterns at the bottom corners of the clearing
+    // gray columns mark the plaza's four corners
     for (const sx of [-1, 1]) {
-      const lt = instantiate('env-lantern').group;
-      lt.position.set(sx * (HALF_W + 0.9), 0, HALF_H - 2);
-      this.scene.add(lt);
-      const gl = new THREE.PointLight(0xffc06a, 6, 6, 2);
-      gl.position.set(sx * (HALF_W + 0.9), 1.4, HALF_H - 2);
-      this.scene.add(gl);
+      for (const zz of [HALF_H + 0.8, HALF_H + PLAZA.DEPTH - 0.6]) {
+        const col = grayStone(instantiate('env-column').group);
+        col.position.set(sx * (PLAZA.HALF_W - 0.6), 0, zz);
+        this.scene.add(col);
+      }
+    }
+
+    // lanterns light the resting spot and the clearing's bottom corners
+    for (const sx of [-1, 1]) {
+      for (const [lx, lz] of [[HALF_W + 0.9, HALF_H - 2], [2.9, HALF_H + PLAZA.DEPTH - 1]]) {
+        const lt = instantiate('env-lantern').group;
+        lt.position.set(sx * lx, 0, lz);
+        this.scene.add(lt);
+        const gl = new THREE.PointLight(0xffc06a, 6, 6, 2);
+        gl.position.set(sx * lx, 1.4, lz);
+        this.scene.add(gl);
+      }
     }
   }
 
-  makeFountain(x, z) {
+  makeFountain(x, z, scale = 1) {
     const g = new THREE.Group();
     const base = instantiate('env-pillar-small').group;
     g.add(base);
@@ -296,11 +333,12 @@ export class GameScene {
     g.add(jet);
 
     // faint cool glow so the water reads as water from afar
-    const glow = new THREE.PointLight(0x66c8e8, 4, 4, 2);
+    const glow = new THREE.PointLight(0x66c8e8, 2.2, 4, 2);
     glow.position.y = water.position.y + 0.5;
     g.add(glow);
 
     g.position.set(x, 0, z);
+    g.scale.setScalar(scale);
     this.scene.add(g);
     this.waters.push({ water, jet, phase: x * 1.7 });
   }
@@ -374,20 +412,45 @@ export class GameScene {
     }
 
     // --- far scatter so wide screens never stare into the void:
-    // a loose ring of dark trees beyond the flanks and behind the sanctuary
+    // a loose ring of dark trees beyond the flanks and wrapping the plaza
     for (let i = 0; i < 46; i++) {
       const south = rng() < 0.4;
       let x, z;
       if (south) {
         x = -HALF_W - 12 + rng() * (COLS * CELL + 24);
-        z = HALF_H + 1.5 + rng() * 9;
-        if (Math.abs(x) < 6.5) continue; // keep the sanctuary gate clear
+        z = HALF_H + 1.5 + rng() * 10;
+        // keep the plaza itself clear; trees hug its sides and back
+        if (Math.abs(x) < PLAZA.HALF_W + 1.2 && z < HALF_H + PLAZA.DEPTH + 1) continue;
       } else {
         const side = rng() < 0.5 ? -1 : 1;
         x = side * (HALF_W + 7 + rng() * 11);
         z = -HALF_H - 4 + rng() * 26;
       }
       placeTree(x, z, 0.8 + rng() * 1.1, 0.5 + rng() * 0.25, rng() < 0.35);
+    }
+
+    // --- a tree line closes off the back of the plaza
+    for (let i = 0; i < 9; i++) {
+      const x = -PLAZA.HALF_W - 1 + rng() * (PLAZA.HALF_W * 2 + 2);
+      const z = HALF_H + PLAZA.DEPTH + 1.4 + rng() * 2.4;
+      placeTree(x, z, 0.8 + rng() * 0.7, 0.62 + rng() * 0.2, rng() < 0.35);
+    }
+
+    // --- low rocks and shrubs hug the board's side edges so it's
+    // obvious the clearing ends there
+    for (let i = 0; i < 14; i++) {
+      const side = rng() < 0.5 ? -1 : 1;
+      const z = -HALF_H + 3 + rng() * (ROWS * CELL - 5);
+      const x = side * (HALF_W + 0.65 + rng() * 0.5);
+      if (rng() < 0.55) {
+        const rock = instantiate('env-rocks-tall').group;
+        rock.position.set(x, 0, z);
+        rock.rotation.y = rng() * Math.PI * 2;
+        rock.scale.setScalar(0.35 + rng() * 0.35);
+        this.scene.add(rock);
+      } else {
+        placeTree(x, z, 0.45 + rng() * 0.3, 0.8, true);
+      }
     }
 
     // --- stone takes over on the southern flanks (forest → sanctuary)
@@ -588,7 +651,8 @@ export class GameScene {
       new THREE.Vector3(-HALF_W - 0.8, 0, HALF_H + 0.6),
       new THREE.Vector3(HALF_W + 0.8, 0, HALF_H + 0.6),
       new THREE.Vector3(0, 2.6, -HALF_H),
-      new THREE.Vector3(0, 1.3, HALF_H + 1.4),
+      // keep most of the resting plaza on screen below the board
+      new THREE.Vector3(0, 0.4, HALF_H + PLAZA.DEPTH - 1),
     ];
     let lo = 8, hi = 130;
     for (let it = 0; it < 22; it++) {
@@ -631,16 +695,6 @@ export class GameScene {
       m.emissive.setHSL(0.55 - this.crystalHurt * 0.5, 0.85, 0.45);
     }
     this.crystalLight.intensity = 26 + Math.sin(this.time * 2.2) * 7 + this.crystalHurt * 40;
-
-    // brazier flicker
-    for (let i = 0; i < this.flames.length; i++) {
-      const f = this.flames[i];
-      f.scale.y = 1 + Math.sin(this.time * 13 + i * 2.1) * 0.2;
-      f.rotation.y += dt * 2;
-      if (this.fireLights[i]) {
-        this.fireLights[i].intensity = 9 + Math.sin(this.time * 11 + i * 2.1) * 1.8 + Math.sin(this.time * 23 + i) * 1.1;
-      }
-    }
 
     // fountain water: shimmering surface + pulsing jet
     for (const w of this.waters) {
