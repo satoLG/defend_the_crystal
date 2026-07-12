@@ -118,6 +118,10 @@
 
       <button id="build-hint" class="hidden"></button>
 
+      <button id="jump-btn" disabled title="Jump over the block ahead (J / Space)">
+        <i data-icon="jump"></i>
+      </button>
+
       <div id="hud-bottom">
         <button class="build-card" data-item="obstacle">
           <span class="bc-icon"><img class="entity-img" src="./img/block.png" alt=""></span><span class="bc-name">Block</span>
@@ -169,10 +173,12 @@
         <div class="setting-row">
           <label for="set-music"><i data-icon="music"></i> Music</label>
           <input type="range" id="set-music" min="0" max="100" />
+          <button id="mute-music" class="btn small mute-btn" title="Mute music"></button>
         </div>
         <div class="setting-row">
           <label for="set-sfx"><i data-icon="speaker"></i> Sound effects</label>
           <input type="range" id="set-sfx" min="0" max="100" />
+          <button id="mute-sfx" class="btn small mute-btn" title="Mute sound effects"></button>
         </div>
         <div class="setting-row toggle">
           <label for="set-shake">Camera shake</label>

@@ -179,6 +179,7 @@ export class UI {
       sfx.click();
       this.cb.onAction({ t: 'start' });
     });
+    $('jump-btn').addEventListener('click', () => this.cb.onJump?.());
     $('room-chip').addEventListener('click', async () => {
       try { await navigator.clipboard.writeText(this.roomCode); this.toast('Code copied!', 'gold'); } catch { /* ok */ }
     });
@@ -204,6 +205,11 @@ export class UI {
     this.hide('menu'); this.hide('lobby');
     this.show('hud');
     $('room-label').textContent = this.roomCode || '';
+  }
+
+  // lit only while the character faces a grid cell it can vault over
+  setJumpEnabled(on) {
+    $('jump-btn').disabled = !on;
   }
 
   selectItem(item) {
@@ -379,27 +385,54 @@ export class UI {
   // ---------------- settings ----------------
 
   bindSettings() {
+    const paintMutes = () => {
+      for (const [btn, key] of [['mute-music', 'musicMuted'], ['mute-sfx', 'sfxMuted']]) {
+        const muted = settings.get(key);
+        $(btn).innerHTML = icon(muted ? 'mute' : 'speaker');
+        $(btn).classList.toggle('muted', muted);
+      }
+    };
+    const applyMusic = () =>
+      music.setVolume(settings.get('musicMuted') ? 0 : settings.get('musicVol'));
+    const applySfx = () =>
+      setSfxVolume(settings.get('sfxMuted') ? 0 : settings.get('sfxVol'));
+
     const openPanel = () => {
       sfx.click();
       $('set-music').value = Math.round(settings.get('musicVol') * 100);
       $('set-sfx').value = Math.round(settings.get('sfxVol') * 100);
       $('set-shake').checked = settings.get('shake');
       $('set-shadows').checked = settings.get('shadows');
+      paintMutes();
       this.show('settings-panel');
     };
     $('menu-settings').addEventListener('click', openPanel);
     $('hud-settings').addEventListener('click', openPanel);
     $('settings-close').addEventListener('click', () => { sfx.click(); this.hide('settings-panel'); });
 
+    $('mute-music').addEventListener('click', () => {
+      settings.set('musicMuted', !settings.get('musicMuted'));
+      applyMusic();
+      paintMutes();
+      sfx.click();
+    });
+    $('mute-sfx').addEventListener('click', () => {
+      settings.set('sfxMuted', !settings.get('sfxMuted'));
+      applySfx();
+      paintMutes();
+      sfx.click();
+    });
+
+    // dragging a slider unmutes — you asked for sound, you get sound
     $('set-music').addEventListener('input', (e) => {
-      const v = Number(e.target.value) / 100;
-      settings.set('musicVol', v);
-      music.setVolume(v);
+      settings.set('musicVol', Number(e.target.value) / 100);
+      if (settings.get('musicMuted')) { settings.set('musicMuted', false); paintMutes(); }
+      applyMusic();
     });
     $('set-sfx').addEventListener('input', (e) => {
-      const v = Number(e.target.value) / 100;
-      settings.set('sfxVol', v);
-      setSfxVolume(v);
+      settings.set('sfxVol', Number(e.target.value) / 100);
+      if (settings.get('sfxMuted')) { settings.set('sfxMuted', false); paintMutes(); }
+      applySfx();
     });
     $('set-shake').addEventListener('change', (e) => settings.set('shake', e.target.checked));
     $('set-shadows').addEventListener('change', (e) => settings.set('shadows', e.target.checked));

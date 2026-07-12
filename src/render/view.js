@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { instantiate } from './assets.js';
-import { CLASSES, TOWERS } from '../config.js';
+import { CLASSES, TOWERS, JUMP } from '../config.js';
 import { cellToWorld, CRYSTAL_POS } from '../sim/grid.js';
 import { lerp, angleLerp } from '../utils.js';
 import { sfx } from '../audio.js';
@@ -111,6 +111,28 @@ export class GameView {
 
     this._ringGeo = new THREE.RingGeometry(0.85, 1, 40);
     this._discGeo = new THREE.CircleGeometry(1, 32);
+
+    // XP (green) / point (blue) orbs — two instanced meshes with flat
+    // materials keep hundreds of orbs at a single draw call each.
+    // Only the local player's own orbs are ever rendered.
+    this.dropCap = 160;
+    const mkOrbs = (geo, color) => {
+      const mesh = new THREE.InstancedMesh(
+        geo, new THREE.MeshBasicMaterial({ color }), this.dropCap
+      );
+      mesh.count = 0;
+      mesh.frustumCulled = false;
+      mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      this.scene.add(mesh);
+      return mesh;
+    };
+    this.xpOrbs = mkOrbs(new THREE.OctahedronGeometry(0.17), 0x5dff7a);
+    this.ptsOrbs = mkOrbs(new THREE.IcosahedronGeometry(0.16), 0x5ab8ff);
+    this._orbMat = new THREE.Matrix4();
+    this._orbPos = new THREE.Vector3();
+    this._orbQuat = new THREE.Quaternion();
+    this._orbEuler = new THREE.Euler();
+    this._orbScale = new THREE.Vector3(1, 1, 1);
   }
 
   // ---------------- actors ----------------
@@ -464,6 +486,39 @@ export class GameView {
     for (const [id, g] of this.obstacles) {
       if (!seenO.has(id)) { this.scene.remove(g); this.obstacles.delete(id); }
     }
+
+    this.updateDrops(prev?.dr, next.dr, alpha, selfId);
+  }
+
+  // ---------------- drops ----------------
+
+  // rows: [id, owner, kind(0=xp 1=pts), x, z] — only own orbs are drawn
+  updateDrops(prevRows, rows, alpha, selfId) {
+    const prevMap = new Map();
+    if (prevRows) for (const r of prevRows) prevMap.set(r[0], r);
+    let xi = 0, pi = 0;
+    if (rows) {
+      for (const row of rows) {
+        if (row[1] !== selfId) continue;
+        const isXp = row[2] === 0;
+        const i = isXp ? xi : pi;
+        if (i >= this.dropCap) continue;
+        let x = row[3], z = row[4];
+        const p = prevMap.get(row[0]);
+        if (p) { x = lerp(p[3], x, alpha); z = lerp(p[4], z, alpha); }
+        this._orbPos.set(x, 0.32 + Math.sin(this.time * 3.5 + row[0] * 1.7) * 0.09, z);
+        this._orbEuler.set(0, this.time * 2.2 + row[0], 0);
+        this._orbMat.compose(
+          this._orbPos, this._orbQuat.setFromEuler(this._orbEuler), this._orbScale
+        );
+        (isXp ? this.xpOrbs : this.ptsOrbs).setMatrixAt(i, this._orbMat);
+        if (isXp) xi++; else pi++;
+      }
+    }
+    this.xpOrbs.count = xi;
+    this.ptsOrbs.count = pi;
+    this.xpOrbs.instanceMatrix.needsUpdate = true;
+    this.ptsOrbs.instanceMatrix.needsUpdate = true;
   }
 
   // ---------------- events ----------------
@@ -532,6 +587,16 @@ export class GameView {
         break;
       }
     }
+  }
+
+  // vertical arc while the character vaults a grid cell; x/z motion
+  // comes from the snapshot (or local prediction for the own player)
+  startJump(id, dur) {
+    const a = this.players.get(id);
+    if (!a) return;
+    a.jumpT = 0;
+    a.jumpDur = dur || JUMP.DUR;
+    if (a.actions.jump) this.playOnce(a, 'jump', a.jumpDur);
   }
 
   spawnCorpse(a) {
@@ -683,6 +748,14 @@ export class GameView {
   update(dt, camera) {
     this.time += dt;
 
+    for (const a of this.players.values()) {
+      if (a.jumpT == null) continue;
+      a.jumpT += dt;
+      const k = Math.min(a.jumpT / a.jumpDur, 1);
+      a.group.position.y = Math.sin(k * Math.PI) * JUMP.HEIGHT;
+      if (k >= 1) { a.jumpT = null; a.group.position.y = 0; }
+    }
+
     for (const group of [this.players, this.enemies]) {
       for (const a of group.values()) {
         a.mixer.update(dt);
@@ -788,6 +861,7 @@ export class GameView {
     for (const c of this.corpses) this.scene.remove(c.actor.group);
     this.players.clear(); this.enemies.clear(); this.towers.clear(); this.obstacles.clear();
     this.projectiles = []; this.effects = []; this.corpses = [];
+    this.xpOrbs.count = 0; this.ptsOrbs.count = 0;
     this.clearGhost();
   }
 }

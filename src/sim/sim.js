@@ -3,9 +3,11 @@ import { EntityManager, Vehicle, SeekBehavior, SeparationBehavior } from 'yuka';
 import {
   CLASSES, PLAYER, TOWERS, TOWER_LEVEL_MAX, TOWER_UPGRADE, OBSTACLES,
   OBSTACLE_STOCK_CAP, ENEMIES, ENEMY, WAVES, SCALING, scaleFor,
-  CRYSTAL_BREACH_LIMIT, GRID,
+  CRYSTAL_BREACH_LIMIT, GRID, JUMP, DROPS,
 } from '../config.js';
-import { Grid, cellToWorld, worldToCell, CRYSTAL_POS, HALF_W, HALF_H } from './grid.js';
+import {
+  Grid, cellToWorld, worldToCell, canJumpFrom, CRYSTAL_POS, HALF_W, HALF_H,
+} from './grid.js';
 import { buildWavePlan, enemyStats } from './waves.js';
 import { clamp, dist2d, nextId } from '../utils.js';
 
@@ -37,6 +39,7 @@ export class Sim {
     this.buildTimerOn = false;
     this.spawnQueue = [];   // [{kind, at(abs time), boss}]
     this.spawnIdx = 0;
+    this.drops = [];        // XP/point orbs on the ground, per-player
     this.pending = [];      // scheduled callbacks [{at, fn}]
     this.events = [];
     this.contReady = new Set();
@@ -61,7 +64,7 @@ export class Sim {
       range: base.range, rate: base.rate, speed: base.speed,
       aoe: base.aoe || 0, kbPower: base.knockback,
       lvl: 1, xp: 0, xpNext: this.xpNext(1),
-      dead: false, respawnT: 0, atkCd: 0, lastDmg: -99,
+      dead: false, respawnT: 0, atkCd: 0, lastDmg: -99, jumpT: 0,
       kills: 0, obst: 0, lastInputT: this.time,
     });
     if (this.phase !== 'lobby') {
@@ -109,7 +112,11 @@ export class Sim {
       x = p.x + (x - p.x) * f;
       z = p.z + (z - p.z) * f;
     }
-    const fixed = this.grid.resolveCircle(x, z, PLAYER.RADIUS, true);
+    // mid-jump the character sails over blocked cells, so skip the
+    // cell collision resolve (bounds are still enforced)
+    const fixed = p.jumpT > 0
+      ? { x: clamp(x, -HALF_W + 0.3, HALF_W - 0.3), z: clamp(z, -HALF_H + 0.3, HALF_H - 0.3) }
+      : this.grid.resolveCircle(x, z, PLAYER.RADIUS, true);
     p.x = fixed.x; p.z = fixed.z;
     p.moving = !!m;
     if (typeof yaw === 'number') p.yaw = yaw;
@@ -139,6 +146,7 @@ export class Sim {
     this.breaches = 0;
     this.spawnQueue = [];
     this.pending = [];
+    this.drops = [];
     this.contReady.clear();
     for (const r of roster) this.addPlayer(r.id, r.name, r.cls);
     this.start();
@@ -215,6 +223,7 @@ export class Sim {
       case 'remove': return this.tryRemove(p, act);
       case 'upg': return this.tryUpgrade(p, act);
       case 'sell': return this.trySell(p, act);
+      case 'jump': return this.tryJump(p, act);
       case 'start': if (this.phase === 'build') this.startWave(); return;
       case 'cont': return this.setContinue(id);
       case 'restart': if (this.phase === 'over') this.restart(); return;
@@ -304,6 +313,18 @@ export class Sim {
     this.emit({ t: 'unplace', c, r, refund });
   }
 
+  // hop over the single blocked cell the character is facing; the
+  // owning client animates the arc, the host just opens the collision
+  // window and tells everyone so they can animate it too
+  tryJump(p, act) {
+    if (p.dead || p.jumpT > 0 || this.phase === 'over') return;
+    if (typeof act?.yaw === 'number') p.yaw = act.yaw;
+    const info = canJumpFrom(this.grid, p.x, p.z, p.yaw);
+    if (!info) return;
+    p.jumpT = JUMP.DUR;
+    this.emit({ t: 'jump', id: p.id, dur: JUMP.DUR });
+  }
+
   towerStats(t) {
     const def = TOWERS[t.kind];
     const m = t.lvl - 1;
@@ -374,14 +395,74 @@ export class Sim {
     if (e.hp <= 0) {
       const pos = e.vehicle.position;
       this.emit({ t: 'die', id: e.id, kind: e.kind, x: rnd2(pos.x), z: rnd2(pos.z), boss: e.boss });
-      const mult = scaleFor(SCALING.points, this.playerCount());
-      this.points += Math.round(e.pts * mult);
       const killer = killerId && this.getPlayer(killerId);
       if (killer) killer.kills += 1;
-      for (const p of this.players) this.grantXp(p, e.xp);
+      // nothing is granted on the kill itself — the enemy drops XP and
+      // point orbs that each player has to walk over to collect
+      this.spawnDrops(e);
       this.removeEnemy(e);
       this.checkWaveCleared();
     }
+  }
+
+  // ---------------- drops (XP / point orbs) ----------------
+
+  spawnDrops(e) {
+    const pos = e.vehicle.position;
+    const n = Math.max(this.playerCount(), 1);
+    // the shared point pool only grows when orbs are picked up, so each
+    // player's orb carries their slice of the kill's value
+    const ptsAmt = Math.max(1, Math.round((e.pts * scaleFor(SCALING.points, n)) / n));
+    for (const p of this.players) {
+      this.addDrop(p.id, 'xp', e.xp, pos.x, pos.z);
+      this.addDrop(p.id, 'pts', ptsAmt, pos.x, pos.z);
+    }
+  }
+
+  addDrop(owner, kind, amount, x, z) {
+    // deaths cluster around chokepoints — merge nearby same-kind orbs
+    // so the ground (and the snapshot) never floods
+    for (const d of this.drops) {
+      if (d.owner === owner && d.kind === kind &&
+          dist2d(d.x, d.z, x, z) < DROPS.MERGE_RADIUS) {
+        d.amount += amount;
+        d.until = this.time + DROPS.TTL;
+        return;
+      }
+    }
+    const jit = () => (Math.random() - 0.5) * 0.9;
+    const fixed = this.grid.resolveCircle(x + jit(), z + jit(), 0.3);
+    this.drops.push({
+      id: nextId(), owner, kind, amount,
+      x: fixed.x, z: fixed.z, until: this.time + DROPS.TTL,
+    });
+    if (this.drops.length > DROPS.MAX) this.drops.shift();
+  }
+
+  stepDrops(dt) {
+    if (!this.drops.length) return;
+    const keep = [];
+    for (const d of this.drops) {
+      if (d.until <= this.time) continue;
+      const p = this.getPlayer(d.owner);
+      if (!p) continue; // owner left the match
+      if (!p.dead) {
+        const dist = dist2d(d.x, d.z, p.x, p.z);
+        if (dist <= DROPS.PICKUP_RADIUS) {
+          if (d.kind === 'xp') this.grantXp(p, d.amount);
+          else this.points += d.amount;
+          this.emit({ t: 'pickup', id: p.id, k: d.kind, amt: d.amount });
+          continue;
+        }
+        if (dist <= DROPS.MAGNET_RADIUS) {
+          const pull = Math.min((DROPS.MAGNET_SPEED * dt) / Math.max(dist, 0.001), 1);
+          d.x += (p.x - d.x) * pull;
+          d.z += (p.z - d.z) * pull;
+        }
+      }
+      keep.push(d);
+    }
+    this.drops = keep;
   }
 
   grantXp(p, xp) {
@@ -464,6 +545,7 @@ export class Sim {
     }
 
     this.stepPlayers(dt);
+    this.stepDrops(dt);
     this.stepEnemies(dt);
     this.stepTowers(dt);
 
@@ -484,6 +566,8 @@ export class Sim {
       if (this.time - p.lastDmg > PLAYER.REGEN_DELAY && p.hp < p.maxHp) {
         p.hp = Math.min(p.maxHp, p.hp + p.maxHp * PLAYER.REGEN_RATE * dt);
       }
+      // no attacking mid-air
+      if (p.jumpT > 0) { p.jumpT = Math.max(p.jumpT - dt, 0); continue; }
       // auto-attack nearest enemy (attacks pass through walls by design)
       p.atkCd -= dt;
       if (p.atkCd > 0 || this.phase === 'over') continue;
@@ -714,6 +798,7 @@ export class Sim {
       ]),
       tw: this.towers.entities.map((t) => [t.id, t.kind, t.c, t.r, t.lvl, rnd2(t.rot)]),
       ob: this.obstacles.entities.map((o) => [o.id, o.kind, o.c, o.r]),
+      dr: this.drops.map((d) => [d.id, d.owner, d.kind === 'xp' ? 0 : 1, rnd2(d.x), rnd2(d.z)]),
     };
   }
 }

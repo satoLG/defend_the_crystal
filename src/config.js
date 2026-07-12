@@ -43,6 +43,20 @@ export const CLASSES = {
   },
 };
 
+// hop over exactly one blocked grid cell (tower/obstacle)
+export const JUMP = { DUR: 0.55, HEIGHT: 1.4 };
+
+// XP/point orbs dropped by dying enemies; collected by walking near.
+// Orbs are per-player (each player only sees & collects their own).
+export const DROPS = {
+  TTL: 10,             // seconds before an uncollected orb fades away
+  PICKUP_RADIUS: 1.15,
+  MAGNET_RADIUS: 2.6,  // orbs drift toward their owner inside this
+  MAGNET_SPEED: 6.5,
+  MERGE_RADIUS: 1.6,   // nearby same-kind orbs merge to keep counts low
+  MAX: 240,            // hard cap on live orbs (oldest are culled)
+};
+
 export const PLAYER = {
   RADIUS: 0.45,
   REGEN_DELAY: 3.0,     // seconds without damage before regen kicks in
@@ -90,12 +104,12 @@ export const OBSTACLE_STOCK_CAP = 10;
 
 // ---------- enemies ----------
 export const ENEMIES = {
-  skeleton: { hp: 32,  speed: 2.3, dmg: 8,  pts: 10, xp: 8,  fromWave: 1, model: 'enemy-skeleton' },
-  zombie:   { hp: 78,  speed: 1.5, dmg: 14, pts: 16, xp: 13, fromWave: 2, model: 'enemy-zombie' },
-  ghost:    { hp: 26,  speed: 2.9, dmg: 6,  pts: 14, xp: 11, fromWave: 4, model: 'enemy-ghost', flying: true },
-  orc:      { hp: 155, speed: 1.9, dmg: 22, pts: 28, xp: 22, fromWave: 6, model: 'enemy-orc' },
-  vampire:  { hp: 235, speed: 2.5, dmg: 30, pts: 48, xp: 36, fromWave: 9, model: 'enemy-vampire' },
-  keeper:   { hp: 900, speed: 1.6, dmg: 40, pts: 400, xp: 300, fromWave: 999, model: 'enemy-keeper' }, // boss only
+  skeleton: { hp: 40,  speed: 2.3, dmg: 8,  pts: 4,  xp: 7,  fromWave: 1, model: 'enemy-skeleton' },
+  zombie:   { hp: 95,  speed: 1.5, dmg: 14, pts: 6,  xp: 11, fromWave: 2, model: 'enemy-zombie' },
+  ghost:    { hp: 33,  speed: 2.9, dmg: 6,  pts: 5,  xp: 9,  fromWave: 4, model: 'enemy-ghost', flying: true },
+  orc:      { hp: 190, speed: 1.9, dmg: 22, pts: 10, xp: 18, fromWave: 6, model: 'enemy-orc' },
+  vampire:  { hp: 290, speed: 2.5, dmg: 30, pts: 16, xp: 30, fromWave: 9, model: 'enemy-vampire' },
+  keeper:   { hp: 1150, speed: 1.6, dmg: 40, pts: 110, xp: 260, fromWave: 999, model: 'enemy-keeper' }, // boss only
 };
 
 export const ENEMY = {
@@ -119,12 +133,12 @@ export const WAVES = {
   BUILD_TIME: 25,          // seconds between waves
   CHECKPOINT_EVERY: 10,
   SUBBOSS_EVERY: 5,
-  BASE_COUNT: 5,
-  COUNT_PER_WAVE: 2.0,
+  BASE_COUNT: 8,
+  COUNT_PER_WAVE: 2.6,
   SPAWN_WINDOW_BASE: 8,    // seconds over which a wave trickles in
   SPAWN_WINDOW_PER_WAVE: 0.7,
-  SPAWN_WINDOW_MAX: 22,
-  CHECKPOINT_BONUS: 60,    // points * wave / 10 awarded at checkpoints
+  SPAWN_WINDOW_MAX: 24,
+  CHECKPOINT_BONUS: 25,    // points * wave / 10 awarded at checkpoints
 };
 
 // ---------- 1..4 player scaling ----------
@@ -132,9 +146,9 @@ export const WAVES = {
 export const SCALING = {
   enemyHp:    [0.85, 1.0, 1.2, 1.4],
   enemyCount: [0.8, 1.0, 1.3, 1.55],
-  points:     [1.7, 1.3, 1.15, 1.0],
+  points:     [1.4, 1.1, 0.95, 0.85],
   obstaclesPerWave: [4, 3, 2, 2],
-  startPoints: [140, 110, 90, 80], // per match, shared pool
+  startPoints: [70, 60, 50, 45], // per match, shared pool
   startObstacles: [4, 3, 3, 2],
 };
 
