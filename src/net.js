@@ -1,10 +1,100 @@
-import { joinRoom, selfId as trysteroId } from 'trystero';
+import { joinRoom as joinNostr, selfId as trysteroId } from 'trystero';
+import { joinRoom as joinTorrent } from '@trystero-p2p/torrent';
+import { joinRoom as joinMqtt } from '@trystero-p2p/mqtt';
 import { NET } from './config.js';
 
 const useLocalNet = new URLSearchParams(location.search).has('localnet');
 export const selfId = useLocalNet
   ? `local-${Math.random().toString(36).slice(2, 10)}`
   : trysteroId;
+
+// ============================================================
+// Robust peer discovery.
+//
+// Trystero's default Nostr strategy only tries a handful of
+// relays, chosen deterministically from the app id. When those
+// specific relays are down or reject events (a common, transient
+// situation with public Nostr infra), two peers never find each
+// other even though plenty of *other* relays are healthy.
+//
+// To make connecting far more reliable we:
+//   1. Feed the Nostr strategy a large, curated relay pool (both
+//      peers use the exact same list, so overlap is guaranteed
+//      and a single healthy relay is enough to connect).
+//   2. Join the same room over several *independent* transports
+//      at once (Nostr relays, WebTorrent trackers, MQTT brokers).
+//      A peer is discovered as soon as ANY transport links them,
+//      so all of them have to be down for a match to fail.
+//
+// The transports run in parallel and are merged behind one Net
+// interface; the game layer is unaware of the plumbing.
+// ============================================================
+
+// A wide mix of well-known, permissive public Nostr relays. Every
+// peer connects to all of them, so as long as any single relay is
+// reachable by both sides a match can be brokered. `hornetstorage`
+// is intentionally excluded — it rejects our ephemeral events with
+// "event creation date must be after January 1, 2019", which just
+// spams the console without ever helping.
+const NOSTR_RELAYS = [
+  // rock-solid, always-on relays
+  'wss://relay.damus.io',
+  'wss://nos.lol',
+  'wss://relay.primal.net',
+  'wss://relay.snort.social',
+  'wss://relay.nostr.band',
+  'wss://offchain.pub',
+  'wss://nostr-pub.wellorder.net',
+  'wss://nostr.oxtr.dev',
+  'wss://nostr.mom',
+  'wss://relay.nostr.bg',
+  // additional reachable relays from Trystero's vetted defaults
+  'wss://relay.mostr.pub',
+  'wss://relay.froth.zone',
+  'wss://purplerelay.com',
+  'wss://relay.nostr.place',
+  'wss://nostr.data.haus',
+  'wss://strfry.openhoofd.nl',
+  'wss://relay.notoshi.win',
+  'wss://nostr.vulpem.com',
+];
+
+// Public WebTorrent tracker + MQTT broker pools are handled by the
+// respective strategies' own defaults, which are already broad and
+// independent of Nostr; we just enable those transports below.
+
+// Each transport is a named joiner. They are attempted in order and
+// any that fails to initialize is skipped, so a single broken
+// strategy can never take the others down with it.
+const TRANSPORTS = [
+  {
+    name: 'nostr',
+    join: (code) => joinNostr(
+      { appId: NET.APP_ID, relayConfig: { urls: NOSTR_RELAYS } },
+      code,
+    ),
+  },
+  {
+    name: 'torrent',
+    join: (code) => joinTorrent({ appId: NET.APP_ID }, code),
+  },
+  {
+    name: 'mqtt',
+    join: (code) => joinMqtt({ appId: NET.APP_ID }, code),
+  },
+];
+
+// Optional override for debugging: ?net=nostr,torrent limits which
+// transports are used. Unknown names are ignored.
+function activeTransports() {
+  const wanted = new URLSearchParams(location.search).get('net');
+  if (!wanted) return TRANSPORTS;
+  const allow = new Set(wanted.split(',').map((s) => s.trim().toLowerCase()));
+  const picked = TRANSPORTS.filter((t) => allow.has(t.name));
+  return picked.length ? picked : TRANSPORTS;
+}
+
+const ACTION_NAMES = ['hello', 'input', 'act', 'snap', 'ev', 'lobby'];
 
 // BroadcastChannel transport: lets tabs of the same browser play
 // together without touching the network. Used for local testing
@@ -51,61 +141,131 @@ class LocalRoom {
 }
 
 // ============================================================
-// Thin wrapper around a Trystero room. Same object serves host
-// and clients; the game layer decides what to send/handle.
-// Serverless WebRTC: peers find each other through public
-// Nostr relays using the room code, then talk directly.
+// Thin wrapper that fans a single logical room out across every
+// available transport. The same object serves host and clients;
+// the game layer decides what to send/handle.
+//
+// Peers are deduplicated across transports by their (shared) peer
+// id, so a player reachable on two transports still shows up once.
+// Each peer is pinned to the transport that discovered it first
+// ("primary transport"); we send to that one only, so no message
+// is ever delivered twice.
 // ============================================================
 export class Net {
   constructor(code) {
     this.code = code;
-    this.room = null;
-    this.peers = new Set();
+    this.rooms = [];             // active underlying rooms
+    this.peers = new Set();      // unified set of connected peer ids
     this.onPeerJoin = null;
     this.onPeerLeave = null;
-    this.handlers = {};
-    this._actions = {};
+    this.handlers = {};          // action name -> fn(data, peerId)
+    this._actionsByRoom = new Map(); // room -> { name -> action }
+    this._membersByRoom = new Map(); // room -> Set(peerId)
+    this._primary = new Map();       // peerId -> room used for sending
 
-    try {
-      this.room = useLocalNet
-        ? new LocalRoom(code)
-        : joinRoom({ appId: NET.APP_ID }, code);
-    } catch (err) {
-      console.warn('[net] could not join room (offline?):', err);
+    if (useLocalNet) {
+      this._initRoom(new LocalRoom(code));
       return;
     }
 
-    for (const name of ['hello', 'input', 'act', 'snap', 'ev', 'lobby']) {
-      const action = this.room.makeAction(name);
-      action.onMessage = (data, context) => this.handlers[name]?.(data, context.peerId);
-      this._actions[name] = action;
+    for (const transport of activeTransports()) {
+      try {
+        this._initRoom(transport.join(code));
+      } catch (err) {
+        console.warn(`[net] transport "${transport.name}" unavailable:`, err);
+      }
     }
+    if (this.rooms.length === 0) {
+      console.warn('[net] no transports could start (offline?)');
+    }
+  }
 
-    this.room.onPeerJoin = (peerId) => {
-      this.peers.add(peerId);
-      this.onPeerJoin?.(peerId);
+  _initRoom(room) {
+    this.rooms.push(room);
+    const members = new Set();
+    this._membersByRoom.set(room, members);
+
+    const actions = {};
+    for (const name of ACTION_NAMES) {
+      const action = room.makeAction(name);
+      // A message is sent over exactly one transport, so handlers can
+      // fire directly — no cross-transport de-duplication needed here.
+      action.onMessage = (data, context) => this.handlers[name]?.(data, context.peerId);
+      actions[name] = action;
+    }
+    this._actionsByRoom.set(room, actions);
+
+    room.onPeerJoin = (peerId) => {
+      members.add(peerId);
+      if (!this.peers.has(peerId)) {
+        this.peers.add(peerId);
+        this._primary.set(peerId, room);
+        this.onPeerJoin?.(peerId);
+      }
     };
-    this.room.onPeerLeave = (peerId) => {
-      this.peers.delete(peerId);
-      this.onPeerLeave?.(peerId);
+    room.onPeerLeave = (peerId) => {
+      members.delete(peerId);
+      const stillOn = this.rooms.find((r) => this._membersByRoom.get(r)?.has(peerId));
+      if (stillOn) {
+        // Still reachable elsewhere: just repoint sends if the primary left.
+        if (this._primary.get(peerId) === room) this._primary.set(peerId, stillOn);
+        return;
+      }
+      if (this.peers.delete(peerId)) {
+        this._primary.delete(peerId);
+        this.onPeerLeave?.(peerId);
+      }
     };
   }
 
   on(name, fn) { this.handlers[name] = fn; }
 
-  send(name, data, target) {
-    if (!this.room || this.peers.size === 0) return;
+  _sendVia(room, name, data, target) {
+    const action = this._actionsByRoom.get(room)?.[name];
+    if (!action) return;
     try {
-      this._actions[name].send(data, target ? { target } : undefined)
-        .catch((err) => console.warn('[net] send failed', name, err));
+      const p = action.send(data, target != null ? { target } : undefined);
+      p?.catch?.((err) => console.warn('[net] send failed', name, err));
     } catch (err) {
       console.warn('[net] send failed', name, err);
     }
   }
 
+  send(name, data, target) {
+    if (this.peers.size === 0) return;
+
+    if (target != null) {
+      const room = this._primary.get(target);
+      if (room) this._sendVia(room, name, data, target);
+      return;
+    }
+
+    // Broadcast. With a single transport we can fan out normally;
+    // with several we address each peer on its primary transport so
+    // nobody receives the same message twice.
+    if (this.rooms.length === 1) {
+      this._sendVia(this.rooms[0], name, data, undefined);
+      return;
+    }
+    const byRoom = new Map(); // room -> [peerId]
+    for (const peerId of this.peers) {
+      const room = this._primary.get(peerId);
+      if (!room) continue;
+      const ids = byRoom.get(room);
+      if (ids) ids.push(peerId);
+      else byRoom.set(room, [peerId]);
+    }
+    for (const [room, ids] of byRoom) this._sendVia(room, name, data, ids);
+  }
+
   leave() {
-    try { this.room?.leave(); } catch { /* ignore */ }
-    this.room = null;
+    for (const room of this.rooms) {
+      try { room.leave(); } catch { /* ignore */ }
+    }
+    this.rooms = [];
+    this._actionsByRoom.clear();
+    this._membersByRoom.clear();
+    this._primary.clear();
     this.peers.clear();
   }
 }
