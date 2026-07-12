@@ -431,7 +431,7 @@ function stepSelf(dt) {
 
   const nx = s.x + vx * dt;
   const nz = s.z + vz * dt;
-  const fixed = clientGridRef().resolveCircle(nx, nz, PLAYER.RADIUS);
+  const fixed = clientGridRef().resolveCircle(nx, nz, PLAYER.RADIUS, true);
   s.x = fixed.x; s.z = fixed.z;
 }
 

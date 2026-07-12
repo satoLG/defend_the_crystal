@@ -109,7 +109,7 @@ export class Sim {
       x = p.x + (x - p.x) * f;
       z = p.z + (z - p.z) * f;
     }
-    const fixed = this.grid.resolveCircle(x, z, PLAYER.RADIUS);
+    const fixed = this.grid.resolveCircle(x, z, PLAYER.RADIUS, true);
     p.x = fixed.x; p.z = fixed.z;
     p.moving = !!m;
     if (typeof yaw === 'number') p.yaw = yaw;

@@ -28,6 +28,16 @@ html, body {
   display: block; touch-action: none;
 }
 
+/* soft darkness where the scenery runs out — reads as forest night
+   closing in, and hides the board's hard edges on wide screens */
+#vignette {
+  position: absolute; inset: 0; z-index: 5; pointer-events: none;
+  background: radial-gradient(115% 92% at 50% 46%,
+    transparent 50%,
+    rgba(10, 8, 22, 0.38) 76%,
+    rgba(10, 8, 22, 0.85) 96%);
+}
+
 .hidden { display: none !important; }
 .muted { color: rgba(240, 233, 216, 0.55); font-size: 0.85rem; }
 
