@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="theme-color" content="#141021" />
+  <title>Defend the Crystal</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💎</text></svg>" />
+  <link rel="stylesheet" href="./src/style.css" />
+</head>
+<body>
+  <div id="app">
+    <canvas id="game-canvas"></canvas>
+
+    <!-- ============ LOADING ============ -->
+    <div id="loading" class="screen">
+      <div class="panel center-panel">
+        <h1 class="title">Defend<br/>the Crystal</h1>
+        <div class="load-bar"><div id="load-fill"></div></div>
+        <div id="load-label" class="muted">Summoning models…</div>
+      </div>
+    </div>
+
+    <!-- ============ MAIN MENU ============ -->
+    <div id="menu" class="screen hidden">
+      <div class="panel menu-panel">
+        <h1 class="title">Defend<br/>the Crystal</h1>
+        <div id="best-wave" class="muted"></div>
+
+        <label class="field-label" for="name-input">Your name</label>
+        <input id="name-input" maxlength="12" autocomplete="off" placeholder="Hero name" />
+
+        <div class="field-label">Choose your class</div>
+        <div id="class-grid">
+          <button class="class-card selected" data-cls="berserker">
+            <span class="cls-icon">🪓</span><span class="cls-name">Berserker</span>
+            <span class="cls-desc">Huge damage up close</span>
+            <span class="stat-rows">
+              <i style="--v:.95">ATK</i><i style="--v:.55">DEF</i><i style="--v:.2">RNG</i><i style="--v:.6">SPD</i>
+            </span>
+          </button>
+          <button class="class-card" data-cls="tanker">
+            <span class="cls-icon">🛡️</span><span class="cls-name">Tanker</span>
+            <span class="cls-desc">Unbreakable wall</span>
+            <span class="stat-rows">
+              <i style="--v:.5">ATK</i><i style="--v:.95">DEF</i><i style="--v:.2">RNG</i><i style="--v:.4">SPD</i>
+            </span>
+          </button>
+          <button class="class-card" data-cls="archer">
+            <span class="cls-icon">🏹</span><span class="cls-name">Archer</span>
+            <span class="cls-desc">Fast &amp; far shooter</span>
+            <span class="stat-rows">
+              <i style="--v:.5">ATK</i><i style="--v:.25">DEF</i><i style="--v:.8">RNG</i><i style="--v:.95">SPD</i>
+            </span>
+          </button>
+          <button class="class-card" data-cls="mage">
+            <span class="cls-icon">🔮</span><span class="cls-name">Mage</span>
+            <span class="cls-desc">Area damage from afar</span>
+            <span class="stat-rows">
+              <i style="--v:.5">ATK</i><i style="--v:.5">DEF</i><i style="--v:1">RNG</i><i style="--v:.6">SPD</i>
+            </span>
+          </button>
+        </div>
+
+        <div class="menu-actions">
+          <button id="host-btn" class="btn primary big">⚔️ Host a match</button>
+          <div class="join-row">
+            <input id="join-code" maxlength="5" placeholder="CODE" autocomplete="off" />
+            <button id="join-btn" class="btn big">Join</button>
+          </div>
+        </div>
+        <div id="menu-error" class="error-label"></div>
+      </div>
+    </div>
+
+    <!-- ============ LOBBY ============ -->
+    <div id="lobby" class="screen hidden">
+      <div class="panel center-panel">
+        <h2>War camp</h2>
+        <div class="muted">Share this code with your allies</div>
+        <div class="code-row">
+          <div id="room-code" class="room-code">·····</div>
+          <button id="copy-code" class="btn small" title="Copy code">📋</button>
+          <button id="share-code" class="btn small" title="Share link">🔗</button>
+        </div>
+        <div id="lobby-status" class="muted"></div>
+        <ul id="player-list"></ul>
+        <div class="menu-actions">
+          <button id="start-btn" class="btn primary big hidden">Start the defense</button>
+          <div id="lobby-hint" class="muted"></div>
+          <button id="leave-btn" class="btn subtle">Leave</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ HUD ============ -->
+    <div id="hud" class="hidden">
+      <div id="hud-top">
+        <div class="hud-chip" id="wave-chip">🌊 <span id="wave-label">–</span></div>
+        <div class="hud-chip gold" id="points-chip">🪙 <span id="points-label">0</span></div>
+        <div class="hud-chip" id="crystal-chip">💎 <span id="crystal-hp">10</span></div>
+        <div class="hud-chip subtle" id="room-chip" title="Room code — allies can join mid-match">🔗 <span id="room-label"></span></div>
+      </div>
+
+      <div id="player-bar">
+        <div class="pb-row">
+          <span id="pb-class">🪓</span>
+          <div class="pb-bars">
+            <div class="bar hp"><div id="pb-hp"></div><span id="pb-hp-text"></span></div>
+            <div class="bar xp"><div id="pb-xp"></div></div>
+          </div>
+          <span id="pb-level" class="pb-lvl">1</span>
+        </div>
+      </div>
+
+      <div id="build-hint" class="hidden"></div>
+
+      <div id="hud-bottom">
+        <button class="build-card" data-item="obstacle">
+          <span class="bc-icon">🪨</span><span class="bc-name">Block</span>
+          <span class="bc-cost" id="obst-stock">×0</span>
+        </button>
+        <button class="build-card" data-item="ballista">
+          <span class="bc-icon">🏹</span><span class="bc-name">Ballista</span>
+          <span class="bc-cost">🪙<span data-cost="ballista"></span></span>
+        </button>
+        <button class="build-card" data-item="catapult">
+          <span class="bc-icon">🪃</span><span class="bc-name">Catapult</span>
+          <span class="bc-cost">🪙<span data-cost="catapult"></span></span>
+        </button>
+        <button class="build-card" data-item="cannon">
+          <span class="bc-icon">💣</span><span class="bc-name">Cannon</span>
+          <span class="bc-cost">🪙<span data-cost="cannon"></span></span>
+        </button>
+        <button id="startwave-btn" class="btn primary">
+          <span id="startwave-label">Start<br/>wave</span>
+        </button>
+      </div>
+
+      <div id="upgrade-panel" class="panel hidden">
+        <div id="upg-title">Tower</div>
+        <div id="upg-stats" class="muted"></div>
+        <div class="upg-actions">
+          <button id="upg-btn" class="btn primary">Upgrade</button>
+          <button id="sell-btn" class="btn danger">Sell</button>
+          <button id="close-upg" class="btn subtle">✕</button>
+        </div>
+      </div>
+
+      <div id="respawn-overlay" class="hidden">
+        <div>☠️ You fell…</div>
+        <div id="respawn-timer"></div>
+      </div>
+
+      <div id="joystick" class="hidden">
+        <div id="joy-base"><div id="joy-knob"></div></div>
+      </div>
+
+      <div id="toasts"></div>
+    </div>
+
+    <!-- ============ CHECKPOINT ============ -->
+    <div id="checkpoint" class="screen overlay hidden">
+      <div class="panel center-panel">
+        <h2>⛺ Checkpoint</h2>
+        <p>Wave <span id="cp-wave"></span> cleared! Everyone is healed.<br/>Catch your breath, then push on.</p>
+        <div id="cp-status" class="muted"></div>
+        <button id="cont-btn" class="btn primary big">Keep going ➜</button>
+      </div>
+    </div>
+
+    <!-- ============ GAME OVER ============ -->
+    <div id="gameover" class="screen overlay hidden">
+      <div class="panel center-panel">
+        <h2>💔 The crystal shattered</h2>
+        <div id="go-stats"></div>
+        <div class="menu-actions">
+          <button id="restart-btn" class="btn primary big hidden">Try again</button>
+          <div id="go-hint" class="muted hidden">Waiting for the host to restart…</div>
+          <button id="exit-btn" class="btn subtle">Back to menu</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ HOST LOST ============ -->
+    <div id="host-lost" class="screen overlay hidden">
+      <div class="panel center-panel">
+        <h2>Connection lost</h2>
+        <p class="muted">The host has left the realm.</p>
+        <button id="hl-exit" class="btn primary big">Back to menu</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="./src/main.js"></script>
+</body>
+</html>
