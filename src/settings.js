@@ -11,7 +11,7 @@ const DEFAULTS = {
   musicMuted: false,
   sfxMuted: false,
   shake: true,        // camera shake on breaches / hits
-  shadows: true,      // realtime shadows
+  shadows: false,     // realtime shadows
 };
 
 let state = { ...DEFAULTS };
