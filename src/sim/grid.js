@@ -50,6 +50,29 @@ export function canJumpFrom(grid, x, z, yaw) {
   return { to: cellToWorld(lc, lr), over: { c: oc, r: or } };
 }
 
+// Shortcut check for jumping enemies (vampires): from the cell under
+// (x,z), is there a cardinal hop over exactly ONE blocked cell onto a
+// free cell that is meaningfully closer to the crystal (by flow dist)?
+// minGain is in flow-dist units (an orthogonal step costs 2).
+export function enemyJumpShortcut(grid, x, z, minGain) {
+  const { c, r } = worldToCell(x, z);
+  if (!inBounds(c, r)) return null;
+  const here = grid.dist[idx(c, r)];
+  if (here === -1) return null;
+  let best = null, bestD = here - minGain;
+  for (const [dc, dr] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+    const oc = c + dc, or = r + dr;          // cell being vaulted
+    const lc = c + dc * 2, lr = r + dr * 2;  // landing cell
+    if (!inBounds(oc, or) || !grid.blocked[idx(oc, or)]) continue;
+    if (!grid.isWalkable(lc, lr)) continue;
+    const d = grid.dist[idx(lc, lr)];
+    if (d === -1 || d > bestD) continue;
+    bestD = d;
+    best = { to: cellToWorld(lc, lr), over: { c: oc, r: or } };
+  }
+  return best;
+}
+
 const NEIGHBORS4 = [[1, 0], [-1, 0], [0, 1], [0, -1]];
 const NEIGHBORS8 = [
   [1, 0], [-1, 0], [0, 1], [0, -1],

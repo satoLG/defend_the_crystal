@@ -11,7 +11,7 @@ Models were taken from the following Kenney asset packs:
 | --- | --- |
 | Tower Defense Kit (2.1) | towers, weapons, ammo, ground tiles, spawn pads, crystals |
 | Mini Characters (1.x) | the four playable classes, mage staff (cane) |
-| Graveyard Kit (5.0) | skeleton / zombie / ghost / vampire / keeper enemies, obstacles, decor, sanctuary stonework (altar, pillars, obelisk, bowl) |
+| Graveyard Kit (5.0) | skeleton / zombie / ghost / vampire / keeper enemies, obstacles, decor, sanctuary stonework (altar, pillars, obelisk, bowl), boss props (gravestone, grave mound, carved pumpkin, shovel, coffin) |
 | Mini Dungeon (1.x) | orc enemy, sword, shield, barrel obstacle |
 | Mini Arena (1.x) | sanctuary statue and columns |
 

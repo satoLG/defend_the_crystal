@@ -47,6 +47,19 @@ export class UI {
     if (kind === 'error') sfx.error();
   }
 
+  // huge dramatic splash when a (mini-)boss stomps onto the field
+  showBossBanner(name, flavor, mini = false) {
+    const b = $('boss-banner');
+    clearTimeout(this._bannerT);
+    $('bb-tag').textContent = mini ? '⚠ MINI-BOSS ⚠' : '☠ BOSS INCOMING ☠';
+    $('bb-name').textContent = name;
+    $('bb-flavor').textContent = flavor || '';
+    b.classList.remove('hidden', 'boss', 'mini');
+    void b.offsetWidth; // restart the CSS animation
+    b.classList.add(mini ? 'mini' : 'boss');
+    this._bannerT = setTimeout(() => b.classList.add('hidden'), mini ? 2600 : 3700);
+  }
+
   // ---------------- loading ----------------
 
   loadProgress(frac) {

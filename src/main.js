@@ -346,6 +346,14 @@ function updateJumpButton() {
 // events from the sim (host: direct, client: over the wire)
 // ---------------------------------------------------------
 
+// sensationalist one-liners for the checkpoint bosses
+const BOSS_FLAVOR = {
+  'Coveiro': 'He digs your graves in advance!',
+  'Tiro Cego': 'Nobody escapes the volley — NOBODY!',
+  'Zé do Caixão': 'Walls mean NOTHING to him!',
+  'Abobrado': 'Take cover — pumpkins incoming!',
+};
+
 function handleEvent(ev) {
   view.handleEvent(ev);
   switch (ev.t) {
@@ -356,6 +364,17 @@ function handleEvent(ev) {
       ui.toast(`Wave ${ev.n}!`, 'gold');
       sfx.wave();
       break;
+    case 'boss':
+      ui.showBossBanner(ev.name, BOSS_FLAVOR[ev.name] || 'The ground trembles…');
+      music.bossJingle();
+      gs.addShake(0.55);
+      break;
+    case 'subboss':
+      ui.showBossBanner(ev.name, 'A monstrous champion joins the wave!', true);
+      music.miniJingle();
+      break;
+    case 'ejump': sfx.jump(); break;
+    case 'grave': sfx.boom(); break;
     case 'phase':
       if (ev.ph === 'build' && ev.n > 1) sfx.waveClear();
       break;

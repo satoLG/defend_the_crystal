@@ -3,10 +3,11 @@ import { EntityManager, Vehicle, SeekBehavior, SeparationBehavior } from 'yuka';
 import {
   CLASSES, PLAYER, TOWERS, TOWER_LEVEL_MAX, TOWER_UPGRADE, OBSTACLES,
   OBSTACLE_STOCK_CAP, ENEMIES, ENEMY, WAVES, SCALING, scaleFor,
-  CRYSTAL_BREACH_LIMIT, GRID, JUMP, DROPS,
+  CRYSTAL_BREACH_LIMIT, GRID, JUMP, DROPS, SUMMON, BOSSES,
 } from '../config.js';
 import {
-  Grid, cellToWorld, worldToCell, canJumpFrom, CRYSTAL_POS, HALF_W, HALF_H,
+  Grid, cellToWorld, worldToCell, canJumpFrom, enemyJumpShortcut, idx,
+  CRYSTAL_POS, HALF_W, HALF_H,
 } from './grid.js';
 import { buildWavePlan, enemyStats } from './waves.js';
 import { clamp, dist2d, nextId } from '../utils.js';
@@ -37,8 +38,9 @@ export class Sim {
     this.breaches = 0;
     this.buildT = 0;
     this.buildTimerOn = false;
-    this.spawnQueue = [];   // [{kind, at(abs time), boss}]
+    this.spawnQueue = [];   // [{kind, at(abs time), boss, variant}]
     this.spawnIdx = 0;
+    this.graves = [];       // tombs raised by the gravedigger, still spawning
     this.drops = [];        // XP/point orbs on the ground, per-player
     this.pending = [];      // scheduled callbacks [{at, fn}]
     this.events = [];
@@ -145,6 +147,7 @@ export class Sim {
     this.grid = new Grid();
     this.breaches = 0;
     this.spawnQueue = [];
+    this.graves = [];
     this.pending = [];
     this.drops = [];
     this.contReady.clear();
@@ -339,11 +342,14 @@ export class Sim {
 
   // ---------------- enemies ----------------
 
-  spawnEnemy(kind, boss) {
+  // `at` (optional {x,z}) drops the enemy mid-board — used by the
+  // gravedigger's tombs; otherwise it walks in from a top spawn pad
+  spawnEnemy(kind, boss, variant = null, at = null) {
     const def = ENEMIES[kind];
     const s = GRID.SPAWNS[this.spawnIdx++ % GRID.SPAWNS.length];
-    const w = cellToWorld(s.c, s.r);
-    const stats = enemyStats(kind, boss, this.wave, this.waveStartCount);
+    const w = at || cellToWorld(s.c, s.r);
+    const stats = enemyStats(kind, boss, this.wave, this.waveStartCount, variant);
+    const bossDef = boss === 2 ? BOSSES[variant] : null;
 
     const vehicle = new Vehicle();
     vehicle.position.set(w.x + (Math.random() - 0.5) * 0.8, 0, w.z + (Math.random() - 0.5) * 0.5);
@@ -362,20 +368,44 @@ export class Sim {
     vehicle.steering.add(sep);
     this.ai.add(vehicle);
 
+    // ranged skeletons; the boss variant looses a volley at everyone
+    let archer = def.archer ? { ...def.archer } : null;
+    if (archer && bossDef?.multishot) {
+      archer.range += 1.5;
+      archer.multishot = true;
+    }
+
     const e = this.world.add({
       enemy: true, id: nextId(), kind, vehicle, seek,
       hp: stats.hp, maxHp: stats.hp, dmg: stats.dmg, speed: stats.speed,
       pts: stats.pts, xp: stats.xp, scale: stats.scale, breach: stats.breach,
       boss, flying: !!def.flying, state: 'path', targetId: null,
       atkCd: 0, kbx: 0, kbz: 0, yaw: 0,
+      // special powers
+      archer,
+      jumper: !!def.jumper && !def.flying,
+      jump: null,
+      jumpCd: ENEMY.JUMP_EVERY * (0.4 + Math.random() * 0.6),
+      chainJumps: bossDef?.jumps || 1,
+      chainLeft: 0, chainT: 0,
+      summoner: !!def.summoner, summonCd: SUMMON.FIRST,
+      pumpkin: bossDef?.pumpkin || null,
     });
-    this.emit({ t: 'spawn', id: e.id, kind, boss });
+    const ev = { t: 'spawn', id: e.id, kind, boss };
+    if (at) { ev.g = 1; ev.x = rnd2(w.x); ev.z = rnd2(w.z); } // rose from a tomb
+    this.emit(ev);
+    if (boss === 2) this.emit({ t: 'boss', name: bossDef?.name || def.name || kind });
+    else if (boss === 1) this.emit({ t: 'subboss', name: def.name || kind });
     return e;
   }
 
   removeEnemy(e) {
     this.ai.remove(e.vehicle);
     this.world.remove(e);
+    // the gravedigger's tombs crumble with him
+    if (e.summoner && this.graves.length) {
+      this.graves = this.graves.filter((g) => g.owner !== e.id);
+    }
   }
 
   damageEnemy(e, dmg, kbx, kbz, killerId) {
@@ -513,9 +543,98 @@ export class Sim {
 
   checkWaveCleared() {
     if (this.phase !== 'combat') return;
-    if (this.spawnQueue.length === 0 && this.enemies.entities.length === 0) {
+    if (this.spawnQueue.length === 0 && this.enemies.entities.length === 0 &&
+        this.graves.length === 0) {
       this.onWaveCleared();
     }
+  }
+
+  // ---------------- gravedigger tombs ----------------
+
+  // a tomb bursts out of the ground on a free cell near the keeper and
+  // keeps disgorging zombies/skeletons until it is spent
+  raiseGrave(e) {
+    const pos = e.vehicle.position;
+    const { c, r } = worldToCell(pos.x, pos.z);
+    const options = [];
+    for (let dc = -SUMMON.RADIUS; dc <= SUMMON.RADIUS; dc++) {
+      for (let dr = -SUMMON.RADIUS; dr <= SUMMON.RADIUS; dr++) {
+        const nc = c + dc, nr = r + dr;
+        if (!this.grid.isWalkable(nc, nr)) continue;
+        if (this.grid.dist[idx(nc, nr)] === -1) continue; // sealed pocket
+        const w = cellToWorld(nc, nr);
+        // not right at the crystal's feet
+        if (dist2d(w.x, w.z, CRYSTAL_POS.x, CRYSTAL_POS.z) < 3) continue;
+        options.push(w);
+      }
+    }
+    if (!options.length) return;
+    const w = options[(Math.random() * options.length) | 0];
+    const g = {
+      id: nextId(), owner: e.id, x: w.x, z: w.z,
+      spawnsLeft: SUMMON.PER_GRAVE, nextAt: this.time + SUMMON.INTERVAL,
+    };
+    this.graves.push(g);
+    this.emit({ t: 'grave', id: g.id, x: rnd2(w.x), z: rnd2(w.z) });
+  }
+
+  stepGraves() {
+    if (!this.graves.length) return;
+    const keep = [];
+    for (const g of this.graves) {
+      if (this.time >= g.nextAt) {
+        g.nextAt = this.time + SUMMON.INTERVAL;
+        g.spawnsLeft -= 1;
+        const kind = SUMMON.KINDS[(Math.random() * SUMMON.KINDS.length) | 0];
+        this.spawnEnemy(kind, 0, null, {
+          x: g.x + (Math.random() - 0.5) * 0.6,
+          z: g.z + (Math.random() - 0.5) * 0.6,
+        });
+      }
+      if (g.spawnsLeft > 0) keep.push(g);
+    }
+    this.graves = keep;
+  }
+
+  // ---------------- enemy ranged attacks ----------------
+
+  // arrow at one character: telegraphed flight, damage on impact
+  shootArrowAt(e, p, dist) {
+    const pos = e.vehicle.position;
+    const ft = Math.max(dist / e.archer.projSpeed, 0.08);
+    this.emit({
+      t: 'shoot', k: 'arrow',
+      f: [rnd2(pos.x), 1.1, rnd2(pos.z)], to: [rnd2(p.x), 0.8, rnd2(p.z)], ft: rnd2(ft),
+    });
+    const id = p.id, dmg = e.dmg, fx = pos.x, fz = pos.z;
+    this.pending.push({ at: this.time + ft, fn: () => {
+      const q = this.getPlayer(id);
+      if (!q || q.dead) return;
+      const n = Math.max(dist2d(fx, fz, q.x, q.z), 0.2);
+      this.damagePlayer(q, dmg, ((q.x - fx) / n) * 1.1, ((q.z - fz) / n) * 1.1);
+    }});
+  }
+
+  // lobbed pumpkin: area damage on every character near the impact
+  throwPumpkinAt(e, p, dist) {
+    const pos = e.vehicle.position;
+    const pk = e.pumpkin;
+    const ft = Math.max(dist / pk.projSpeed, 0.3);
+    const cx = p.x, cz = p.z;
+    this.emit({
+      t: 'shoot', k: 'pumpkin', lob: 1,
+      f: [rnd2(pos.x), 1.5, rnd2(pos.z)], to: [rnd2(cx), 0.3, rnd2(cz)], ft: rnd2(ft),
+    });
+    this.emit({ t: 'aoe', x: rnd2(cx), z: rnd2(cz), r: pk.aoe, k: 'pumpkin', ft: rnd2(ft) });
+    this.pending.push({ at: this.time + ft, fn: () => {
+      for (const q of this.players) {
+        if (q.dead) continue;
+        const d = dist2d(cx, cz, q.x, q.z);
+        if (d > pk.aoe + PLAYER.RADIUS) continue;
+        const n = Math.max(d, 0.2);
+        this.damagePlayer(q, pk.dmg, ((q.x - cx) / n) * 2.2, ((q.z - cz) / n) * 2.2);
+      }
+    }});
   }
 
   // ---------------- main tick ----------------
@@ -540,12 +659,13 @@ export class Sim {
     if (this.phase === 'combat' && this.spawnQueue.length) {
       while (this.spawnQueue.length && this.spawnQueue[0].at <= this.time) {
         const s = this.spawnQueue.shift();
-        this.spawnEnemy(s.kind, s.boss);
+        this.spawnEnemy(s.kind, s.boss, s.variant);
       }
     }
 
     this.stepPlayers(dt);
     this.stepDrops(dt);
+    this.stepGraves();
     this.stepEnemies(dt);
     this.stepTowers(dt);
 
@@ -625,6 +745,58 @@ export class Sim {
     for (const e of this.enemies) {
       const pos = e.vehicle.position;
 
+      // mid-hop: sail along the arc over the vaulted cell, ignore
+      // everything else (knockback keeps accumulating for the landing)
+      if (e.jump) {
+        const j = e.jump;
+        j.t += dt;
+        const k = Math.min(j.t / j.dur, 1);
+        pos.x = j.fx + (j.tx - j.fx) * k;
+        pos.z = j.fz + (j.tz - j.fz) * k;
+        e.vehicle.velocity.set(0, 0, 0);
+        e.seek.target.set(j.tx, 0, j.tz);
+        e.yaw = Math.atan2(j.tx - j.fx, j.tz - j.fz);
+        if (k >= 1) {
+          e.jump = null;
+          e.jumpCd = e.chainLeft > 0 ? 0.25 : ENEMY.JUMP_EVERY;
+          if (e.chainLeft > 0) e.chainT = 1.6; // short window for the chained hop
+        }
+        continue;
+      }
+
+      // the gravedigger keeps pulling fresh tombs out of the ground
+      if (e.summoner && this.phase === 'combat') {
+        e.summonCd -= dt;
+        if (e.summonCd <= 0) {
+          e.summonCd = SUMMON.EVERY;
+          if (this.enemies.entities.length < SUMMON.MAX_ENEMIES) this.raiseGrave(e);
+        }
+      }
+
+      // vampires hunt for shortcuts: every so often they vault a single
+      // blocked cell if the landing is meaningfully closer to the crystal
+      if (e.jumper && e.state === 'path') {
+        if (e.chainLeft > 0) {
+          e.chainT -= dt;
+          if (e.chainT <= 0) { // chained hop window expired unused
+            e.chainLeft = 0;
+            e.jumpCd = Math.max(e.jumpCd, ENEMY.JUMP_EVERY * 0.5);
+          }
+        }
+        e.jumpCd -= dt;
+        if (e.jumpCd <= 0) {
+          const hop = enemyJumpShortcut(this.grid, pos.x, pos.z, ENEMY.JUMP_MIN_GAIN);
+          if (hop) {
+            if (e.chainLeft > 0) e.chainLeft -= 1;      // consuming a chained hop
+            else e.chainLeft = e.chainJumps - 1;        // fresh hop arms the chain
+            e.jump = { fx: pos.x, fz: pos.z, tx: hop.to.x, tz: hop.to.z, t: 0, dur: JUMP.DUR };
+            this.emit({ t: 'ejump', id: e.id, dur: JUMP.DUR });
+            continue;
+          }
+          e.jumpCd = 0.8; // nothing to vault right here — keep scanning
+        }
+      }
+
       // knockback impulses decay quickly; ground units can't be
       // pushed through walls/obstacles (ghosts fly over them)
       if (e.kbx || e.kbz) {
@@ -665,7 +837,43 @@ export class Sim {
       }
 
       e.atkCd -= dt;
-      if (target) {
+
+      // ranged attackers (skeleton archers / the pumpkin boss) hold
+      // position and fire as long as any character is inside range —
+      // shots pass through walls, same as the characters' attacks do
+      const ranged = e.archer || e.pumpkin;
+      let engaged = false;
+      if (ranged && alive.length && this.phase !== 'over') {
+        const rng = ranged.range;
+        const foes = [];
+        for (const p of alive) {
+          const d = dist2d(pos.x, pos.z, p.x, p.z);
+          if (d <= rng) foes.push({ p, d });
+        }
+        if (foes.length) {
+          engaged = true;
+          foes.sort((a, b) => a.d - b.d);
+          const aim = foes[0];
+          e.seek.target.copy(pos);
+          e.vehicle.velocity.multiplyScalar(0.6);
+          e.yaw = Math.atan2(aim.p.x - pos.x, aim.p.z - pos.z);
+          if (e.atkCd <= 0) {
+            e.atkCd = 1 / ranged.rate;
+            this.emit({ t: 'atk', id: e.id, tx: rnd2(aim.p.x), tz: rnd2(aim.p.z), r: 1 });
+            if (e.pumpkin) {
+              this.throwPumpkinAt(e, aim.p, aim.d);
+            } else if (e.archer.multishot) {
+              for (const f of foes) this.shootArrowAt(e, f.p, f.d); // volley at everyone
+            } else {
+              this.shootArrowAt(e, aim.p, aim.d);
+            }
+          }
+        }
+      }
+
+      if (engaged) {
+        // holding position to shoot — skip melee/marching
+      } else if (target) {
         const d = dist2d(pos.x, pos.z, target.x, target.z);
         if (d <= ENEMY.ATTACK_RANGE + PLAYER.RADIUS) {
           // hold position and swing
@@ -710,7 +918,8 @@ export class Sim {
       pos.z = clamp(pos.z, -HALF_H + 0.3, HALF_H - 0.3);
       pos.y = 0;
       // steering/separation can nudge ground units into blocked cells
-      if (!e.flying) {
+      // (mid-jump the arc owns the position — it flies over the cell)
+      if (!e.flying && !e.jump) {
         const fixed = this.grid.resolveCircle(pos.x, pos.z, ENEMY.RADIUS * 0.8);
         pos.x = fixed.x; pos.z = fixed.z;
       }
@@ -783,7 +992,8 @@ export class Sim {
       bt: this.buildTimerOn ? rnd2(Math.max(this.buildT, 0)) : -1,
       pts: Math.round(this.points),
       br: this.breaches,
-      left: this.spawnQueue.length + this.enemies.entities.length,
+      left: this.spawnQueue.length + this.enemies.entities.length +
+        this.graves.reduce((s, g) => s + g.spawnsLeft, 0),
       cont: [...this.contReady],
       pl: this.players.entities.map((p) => [
         p.id, p.cls, rnd2(p.x), rnd2(p.z), rnd2(p.yaw),
@@ -798,6 +1008,7 @@ export class Sim {
       ]),
       tw: this.towers.entities.map((t) => [t.id, t.kind, t.c, t.r, t.lvl, rnd2(t.rot)]),
       ob: this.obstacles.entities.map((o) => [o.id, o.kind, o.c, o.r]),
+      gr: this.graves.map((g) => [g.id, rnd2(g.x), rnd2(g.z)]),
       dr: this.drops.map((d) => [d.id, d.owner, d.kind === 'xp' ? 0 : 1, rnd2(d.x), rnd2(d.z)]),
     };
   }
