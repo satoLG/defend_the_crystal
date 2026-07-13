@@ -42,6 +42,21 @@ export class Input {
       e.preventDefault();
       this.onKeyAction?.('cancel');
     });
+
+    // kill mobile Safari/Chrome pinch-zoom, double-tap-zoom and the
+    // long-press text-selection/drag that otherwise fires everywhere
+    document.addEventListener('gesturestart', (e) => e.preventDefault());
+    document.addEventListener('gesturechange', (e) => e.preventDefault());
+    document.addEventListener('selectstart', (e) => {
+      if (e.target.tagName !== 'INPUT' && e.target.tagName !== 'TEXTAREA') e.preventDefault();
+    });
+    document.addEventListener('dragstart', (e) => e.preventDefault());
+    let lastTouchEnd = 0;
+    document.addEventListener('touchend', (e) => {
+      const now = Date.now();
+      if (now - lastTouchEnd <= 300) e.preventDefault();
+      lastTouchEnd = now;
+    }, { passive: false });
   }
 
   pointerDown(e) {
