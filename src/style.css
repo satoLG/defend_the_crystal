@@ -174,6 +174,7 @@ input:focus { border-color: var(--gold); }
   border: 2px solid rgba(240, 233, 216, 0.15);
   background: rgba(0, 0, 0, 0.3); color: var(--text);
   font-family: inherit; text-align: left;
+  touch-action: none;
 }
 .class-card.selected {
   border-color: var(--gold);

@@ -51,20 +51,20 @@ export class Input {
     canvas.addEventListener('touchstart', (e) => e.preventDefault(), { passive: false });
     canvas.addEventListener('touchmove', (e) => e.preventDefault(), { passive: false });
 
-    // kill mobile Safari/Chrome pinch-zoom, double-tap-zoom and the
-    // long-press text-selection/drag that otherwise fires everywhere
+    // kill mobile Safari/Chrome pinch-zoom and the long-press
+    // text-selection/drag that otherwise fires everywhere. Double-tap
+    // zoom is handled per-element via CSS touch-action instead of a
+    // global touchend/preventDefault timer — that timer used to swallow
+    // the click on any button whose touchend landed within 300ms of any
+    // OTHER touch on the page (e.g. releasing the movement joystick
+    // right before tapping jump/skill), which made combat taps feel
+    // like they needed a deliberate hold to register.
     document.addEventListener('gesturestart', (e) => e.preventDefault());
     document.addEventListener('gesturechange', (e) => e.preventDefault());
     document.addEventListener('selectstart', (e) => {
       if (e.target.tagName !== 'INPUT' && e.target.tagName !== 'TEXTAREA') e.preventDefault();
     });
     document.addEventListener('dragstart', (e) => e.preventDefault());
-    let lastTouchEnd = 0;
-    document.addEventListener('touchend', (e) => {
-      const now = Date.now();
-      if (now - lastTouchEnd <= 300) e.preventDefault();
-      lastTouchEnd = now;
-    }, { passive: false });
   }
 
   pointerDown(e) {
