@@ -7,6 +7,25 @@ import { music } from './music.js';
 
 const $ = (id) => document.getElementById(id);
 
+// Some HUD buttons (jump, skill, build cards, start-wave) must react
+// even while a finger is already holding the movement joystick down
+// elsewhere on screen. Browsers only synthesize a `click` event from
+// the FIRST touch point active on the page — a second simultaneous
+// finger gets touchstart/touchend on its own target but no click,
+// which silently ate taps on any HUD button while moving. Pointer
+// events don't share that limitation: every touch gets its own
+// independent pointerdown regardless of how many other fingers are
+// down, so trigger on that (falling back to click for keyboard/
+// assistive-tech activation, which never fires pointerdown).
+const bindTap = (el, fn) => {
+  el.addEventListener('pointerdown', (e) => {
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    e.preventDefault();
+    fn();
+  });
+  el.addEventListener('click', fn);
+};
+
 // real render of the 3D model (Kenney preview) instead of a generic glyph
 const entityImg = (name) =>
   `<img class="entity-img" src="${import.meta.env.BASE_URL || './'}img/${name}.png" alt="">`;
@@ -184,7 +203,7 @@ export class UI {
 
   bindHud() {
     for (const card of document.querySelectorAll('.build-card')) {
-      card.addEventListener('click', () => this.selectItem(
+      bindTap(card, () => this.selectItem(
         card.dataset.item === this.selectedItem ? null : card.dataset.item
       ));
     }
@@ -194,12 +213,12 @@ export class UI {
       const el = document.querySelector(`[data-cost="${key}"]`);
       if (el) el.textContent = def.cost;
     }
-    $('startwave-btn').addEventListener('click', () => {
+    bindTap($('startwave-btn'), () => {
       sfx.click();
       this.cb.onAction({ t: 'start' });
     });
-    $('jump-btn').addEventListener('click', () => this.cb.onJump?.());
-    $('skill-btn').addEventListener('click', () => this.cb.onSkill?.());
+    bindTap($('jump-btn'), () => this.cb.onJump?.());
+    bindTap($('skill-btn'), () => this.cb.onSkill?.());
     $('room-chip').addEventListener('click', async () => {
       try { await navigator.clipboard.writeText(this.roomCode); this.toast('Code copied!', 'gold'); } catch { /* ok */ }
     });
