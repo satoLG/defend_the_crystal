@@ -50,6 +50,30 @@ export function canJumpFrom(grid, x, z, yaw) {
   return { to: cellToWorld(lc, lr), over: { c: oc, r: or } };
 }
 
+// Endpoint of the berserker's dash: march forward along yaw up to
+// `cells` grid cells, stopping short of the first blocked cell or the
+// edge of the playable area. Used by both the sim and the owning
+// client's local prediction, so they agree on where the dash lands.
+export function computeDashEnd(grid, x, z, yaw, cells) {
+  const dx = Math.sin(yaw), dz = Math.cos(yaw);
+  const open = (nx, nz) => {
+    if (nx >= -HALF_W + 0.5 && nx <= HALF_W - 0.5 &&
+        nz >= -HALF_H + 0.5 && nz <= HALF_H - 0.5) {
+      const { c, r } = worldToCell(nx, nz);
+      return !grid.blocked[idx(c, r)];
+    }
+    // sanctuary plaza south of the board is open ground too
+    return Math.abs(nx) < PLAZA.HALF_W - 0.5 && nz > 0 && nz <= HALF_H + PLAZA.DEPTH - 0.5;
+  };
+  const step = 0.2;
+  let dist = 0;
+  for (let d = step; d <= cells * CELL; d += step) {
+    if (!open(x + dx * d, z + dz * d)) break;
+    dist = d;
+  }
+  return { x: x + dx * dist, z: z + dz * dist };
+}
+
 // Shortcut check for jumping enemies (vampires): from the cell under
 // (x,z), is there a cardinal hop over exactly ONE blocked cell onto a
 // free cell that is meaningfully closer to the crystal (by flow dist)?

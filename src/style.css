@@ -313,6 +313,35 @@ input:focus { border-color: var(--gold); }
   50% { box-shadow: 0 0 18px rgba(232, 184, 75, 0.65); }
 }
 
+/* ---------- class special attack button (next to jump) ---------- */
+#skill-btn {
+  position: absolute; right: 84px;
+  bottom: calc(max(10px, env(safe-area-inset-bottom)) + 100px);
+  width: 62px; height: 62px; border-radius: 50%;
+  background: linear-gradient(180deg, #55302a, #3a1b24);
+  border: 2px solid var(--panel-border);
+  color: #ffce9a; cursor: pointer; font-family: inherit;
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+  touch-action: manipulation;
+}
+#skill-btn .ico { width: 1.9rem; height: 1.9rem; }
+#skill-btn:disabled { opacity: 0.4; cursor: default; }
+#skill-btn:not(:disabled) {
+  border-color: #ff9a4a;
+  animation: skill-ready 1.2s infinite;
+}
+#skill-btn:not(:disabled):active { transform: scale(0.92); }
+@keyframes skill-ready {
+  50% { box-shadow: 0 0 20px rgba(255, 130, 60, 0.8); }
+}
+#skill-cd {
+  position: absolute; inset: 0; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(10, 8, 20, 0.6);
+  font-weight: 900; font-size: 1.25rem; color: var(--text);
+}
+
 /* settings */
 .setting-row {
   display: flex; align-items: center; justify-content: space-between;

@@ -24,7 +24,7 @@ export class Input {
       this.keys.add(e.code);
       const map = {
         KeyB: 'build', Digit1: 'card0', Digit2: 'card1', Digit3: 'card2', Digit4: 'card3',
-        Escape: 'cancel', Space: 'startwave', KeyJ: 'jump',
+        Escape: 'cancel', Space: 'startwave', KeyJ: 'jump', KeyK: 'skill',
       };
       if (map[e.code]) {
         if (e.code === 'Space') e.preventDefault();

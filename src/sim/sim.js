@@ -3,11 +3,11 @@ import { EntityManager, Vehicle, SeekBehavior, SeparationBehavior } from 'yuka';
 import {
   CLASSES, PLAYER, TOWERS, TOWER_LEVEL_MAX, TOWER_UPGRADE, OBSTACLES,
   OBSTACLE_STOCK_CAP, ENEMIES, ENEMY, WAVES, SCALING, scaleFor,
-  CRYSTAL_BREACH_LIMIT, GRID, JUMP, DROPS, SUMMON, BOSSES,
+  CRYSTAL_BREACH_LIMIT, GRID, JUMP, DROPS, SUMMON, BOSSES, SKILLS,
 } from '../config.js';
 import {
   Grid, cellToWorld, worldToCell, canJumpFrom, enemyJumpShortcut, idx,
-  CRYSTAL_POS, HALF_W, HALF_H,
+  computeDashEnd, CRYSTAL_POS, HALF_W, HALF_H,
 } from './grid.js';
 import { buildWavePlan, enemyStats } from './waves.js';
 import { clamp, dist2d, nextId } from '../utils.js';
@@ -67,6 +67,7 @@ export class Sim {
       aoe: base.aoe || 0, kbPower: base.knockback,
       lvl: 1, xp: 0, xpNext: this.xpNext(1),
       dead: false, respawnT: 0, atkCd: 0, lastDmg: -99, jumpT: 0,
+      skillCd: 0, wallT: 0, dashT: 0,
       kills: 0, obst: 0, lastInputT: this.time,
     });
     if (this.phase !== 'lobby') {
@@ -107,7 +108,12 @@ export class Sim {
     if (!p || p.dead) return;
     const dt = Math.max(this.time - p.lastInputT, 0.01);
     p.lastInputT = this.time;
-    const maxStep = p.speed * dt * 1.8 + 0.6;
+    // mid-dash the character legitimately covers ground far faster
+    // than its walk speed, so the anti-teleport clamp opens up
+    const speed = p.dashT > 0
+      ? (SKILLS.berserker.cells * GRID.CELL) / SKILLS.berserker.dur
+      : p.speed;
+    const maxStep = speed * dt * 1.8 + 0.6;
     const d = dist2d(p.x, p.z, x, z);
     if (d > maxStep) {
       const f = maxStep / d;
@@ -227,6 +233,7 @@ export class Sim {
       case 'upg': return this.tryUpgrade(p, act);
       case 'sell': return this.trySell(p, act);
       case 'jump': return this.tryJump(p, act);
+      case 'skill': return this.trySkill(p, act);
       case 'start': if (this.phase === 'build') this.startWave(); return;
       case 'cont': return this.setContinue(id);
       case 'restart': if (this.phase === 'over') this.restart(); return;
@@ -320,12 +327,155 @@ export class Sim {
   // owning client animates the arc, the host just opens the collision
   // window and tells everyone so they can animate it too
   tryJump(p, act) {
-    if (p.dead || p.jumpT > 0 || this.phase === 'over') return;
+    if (p.dead || p.jumpT > 0 || p.dashT > 0 || this.phase === 'over') return;
     if (typeof act?.yaw === 'number') p.yaw = act.yaw;
     const info = canJumpFrom(this.grid, p.x, p.z, p.yaw);
     if (!info) return;
     p.jumpT = JUMP.DUR;
     this.emit({ t: 'jump', id: p.id, dur: JUMP.DUR });
+  }
+
+  // ---------------- class special attacks ----------------
+
+  // one shared cooldown; a skill that finds no valid target refuses
+  // to fire (and refuses to burn the cooldown)
+  trySkill(p, act) {
+    if (p.dead || p.skillCd > 0 || p.jumpT > 0 || p.dashT > 0) return;
+    if (this.phase === 'over' || this.phase === 'lobby') return;
+    if (typeof act?.yaw === 'number') p.yaw = act.yaw;
+    const cast = {
+      berserker: () => this.skillBerserker(p),
+      tanker: () => this.skillTanker(p),
+      archer: () => this.skillArcher(p),
+      mage: () => this.skillMage(p),
+    }[p.cls];
+    if (!cast || cast() === false) return;
+    p.skillCd = SKILLS.COOLDOWN;
+  }
+
+  // dash up to N cells forward; every enemy along the line is hit the
+  // moment the berserker reaches it and flung backward. Movement stays
+  // client-authoritative (the owning client predicts the same dash);
+  // dashT just opens the speed clamp, like jumpT does for hops.
+  skillBerserker(p) {
+    const S = SKILLS.berserker;
+    const end = computeDashEnd(this.grid, p.x, p.z, p.yaw, S.cells);
+    const fx = p.x, fz = p.z;
+    const dx = end.x - fx, dz = end.z - fz;
+    const len2 = dx * dx + dz * dz;
+    p.dashT = S.dur;
+    const dmg = p.atk * S.dmgMult;
+    for (const e of this.enemies) {
+      const ep = e.vehicle.position;
+      const t = len2 > 0.001
+        ? clamp(((ep.x - fx) * dx + (ep.z - fz) * dz) / len2, 0, 1)
+        : 0;
+      if (dist2d(fx + dx * t, fz + dz * t, ep.x, ep.z) > S.width + ENEMY.RADIUS) continue;
+      const id = e.id, pid = p.id;
+      this.pending.push({ at: this.time + S.dur * t, fn: () => {
+        const hit = this.enemies.entities.find((n) => n.id === id);
+        if (hit) this.damageEnemy(hit, dmg, S.kb, 0, pid);
+      }});
+    }
+    this.emit({
+      t: 'skill', cls: 'berserker', id: p.id,
+      x: rnd2(fx), z: rnd2(fz), tx: rnd2(end.x), tz: rnd2(end.z), dur: S.dur,
+    });
+  }
+
+  // wall mode: no knockback + doubled defense, applied in damagePlayer
+  skillTanker(p) {
+    p.wallT = SKILLS.tanker.dur;
+    this.emit({ t: 'skill', cls: 'tanker', id: p.id, dur: SKILLS.tanker.dur });
+  }
+
+  skillArcher(p) {
+    const S = SKILLS.archer;
+    if (!this.archerVolley(p)) return false; // needs a target in range
+    for (let b = 1; b < S.bursts; b++) {
+      const pid = p.id;
+      this.pending.push({ at: this.time + b * S.gap, fn: () => {
+        const q = this.getPlayer(pid);
+        if (q && !q.dead && this.phase !== 'over') this.archerVolley(q);
+      }});
+    }
+    this.emit({ t: 'skill', cls: 'archer', id: p.id });
+    return true;
+  }
+
+  // one volley: 5 arrows split across the nearest enemies in range
+  // (cycling over them when fewer than 5 remain)
+  archerVolley(p) {
+    const S = SKILLS.archer;
+    const range = p.range * S.rangeMult;
+    const foes = [];
+    for (const e of this.enemies) {
+      const ep = e.vehicle.position;
+      const d = dist2d(p.x, p.z, ep.x, ep.z);
+      if (d <= range + ENEMY.RADIUS) foes.push({ e, d });
+    }
+    if (!foes.length) {
+      if (p.skillCd <= 0) this.deny(p, 'No enemies in range');
+      return false;
+    }
+    foes.sort((a, b) => a.d - b.d);
+    const targets = foes.slice(0, S.arrows);
+    const aim = targets[0].e.vehicle.position;
+    p.yaw = Math.atan2(aim.x - p.x, aim.z - p.z);
+    this.emit({ t: 'atk', id: p.id, tx: rnd2(aim.x), tz: rnd2(aim.z) });
+    for (let i = 0; i < S.arrows; i++) {
+      const f = targets[i % targets.length];
+      const tp = f.e.vehicle.position;
+      const ft = Math.max(f.d / 18, 0.06);
+      this.emit({
+        t: 'shoot', k: 'arrow',
+        f: [rnd2(p.x), 1.0, rnd2(p.z)], to: [rnd2(tp.x), 0.7, rnd2(tp.z)], ft: rnd2(ft),
+      });
+      const id = f.e.id, dmg = p.atk * S.dmgMult, pid = p.id;
+      this.pending.push({ at: this.time + ft, fn: () => {
+        const e = this.enemies.entities.find((n) => n.id === id);
+        if (e) this.damageEnemy(e, dmg, 0.4, 0, pid);
+      }});
+    }
+    return true;
+  }
+
+  // giant arcane orb lobbed at the nearest enemy: blast area and
+  // damage far beyond the mage's normal attack
+  skillMage(p) {
+    const S = SKILLS.mage;
+    let best = null, bestD = Infinity;
+    for (const e of this.enemies) {
+      const d = dist2d(p.x, p.z, e.vehicle.position.x, e.vehicle.position.z);
+      if (d < bestD) { bestD = d; best = e; }
+    }
+    if (!best || bestD > p.range * S.rangeMult + ENEMY.RADIUS) {
+      this.deny(p, 'No enemies in range');
+      return false;
+    }
+    const tp = best.vehicle.position;
+    const cx = tp.x, cz = tp.z;
+    const r = p.aoe * S.aoeMult, dmg = p.atk * S.dmgMult, kb = p.kbPower * S.kbMult;
+    const ft = S.flightT;
+    p.yaw = Math.atan2(cx - p.x, cz - p.z);
+    this.emit({ t: 'atk', id: p.id, tx: rnd2(cx), tz: rnd2(cz) });
+    this.emit({
+      t: 'shoot', k: 'magic', big: 1,
+      f: [rnd2(p.x), 1.3, rnd2(p.z)], to: [rnd2(cx), 0.5, rnd2(cz)], ft,
+    });
+    this.emit({ t: 'aoe', x: rnd2(cx), z: rnd2(cz), r: rnd2(r), k: 'mage', ft, big: 1 });
+    const pid = p.id;
+    this.pending.push({ at: this.time + ft, fn: () => {
+      for (const e of [...this.enemies.entities]) {
+        const ep = e.vehicle.position;
+        const d = dist2d(cx, cz, ep.x, ep.z);
+        if (d <= r + ENEMY.RADIUS) {
+          const n = Math.max(d, 0.2);
+          this.damageEnemy(e, dmg, ((ep.x - cx) / n) * kb, ((ep.z - cz) / n) * kb, pid);
+        }
+      }
+    }});
+    this.emit({ t: 'skill', cls: 'mage', id: p.id });
   }
 
   towerStats(t) {
@@ -511,7 +661,11 @@ export class Sim {
 
   damagePlayer(p, rawDmg, kbx, kbz) {
     if (p.dead) return;
-    const dmg = rawDmg * (1 - p.def);
+    // wall mode (tanker skill): doubled defense, immune to knockback
+    const wall = p.wallT > 0;
+    const def = wall ? Math.min(p.def * SKILLS.tanker.defMult, SKILLS.tanker.defCap) : p.def;
+    if (wall) { kbx = 0; kbz = 0; }
+    const dmg = rawDmg * (1 - def);
     p.hp -= dmg;
     p.lastDmg = this.time;
     this.emit({ t: 'hit', id: p.id });
@@ -677,6 +831,8 @@ export class Sim {
 
   stepPlayers(dt) {
     for (const p of this.players) {
+      if (p.skillCd > 0) p.skillCd = Math.max(p.skillCd - dt, 0);
+      if (p.wallT > 0) p.wallT = Math.max(p.wallT - dt, 0);
       if (p.dead) {
         p.respawnT -= dt;
         if (p.respawnT <= 0 && this.phase !== 'over') this.respawnPlayer(p);
@@ -686,8 +842,9 @@ export class Sim {
       if (this.time - p.lastDmg > PLAYER.REGEN_DELAY && p.hp < p.maxHp) {
         p.hp = Math.min(p.maxHp, p.hp + p.maxHp * PLAYER.REGEN_RATE * dt);
       }
-      // no attacking mid-air
+      // no attacking mid-air or mid-dash
       if (p.jumpT > 0) { p.jumpT = Math.max(p.jumpT - dt, 0); continue; }
+      if (p.dashT > 0) { p.dashT = Math.max(p.dashT - dt, 0); continue; }
       // auto-attack nearest enemy (attacks pass through walls by design)
       p.atkCd -= dt;
       if (p.atkCd > 0 || this.phase === 'over') continue;
@@ -999,7 +1156,7 @@ export class Sim {
         p.id, p.cls, rnd2(p.x), rnd2(p.z), rnd2(p.yaw),
         Math.ceil(p.hp), p.maxHp, p.lvl, Math.round(p.xp), p.xpNext,
         p.moving ? 1 : 0, p.dead ? 1 : 0, rnd2(Math.max(p.respawnT, 0)),
-        p.obst, p.kills, p.name,
+        p.obst, p.kills, p.name, rnd2(Math.max(p.skillCd, 0)), p.wallT > 0 ? 1 : 0,
       ]),
       en: this.enemies.entities.map((e) => [
         e.id, e.kind, rnd2(e.vehicle.position.x), rnd2(e.vehicle.position.z),

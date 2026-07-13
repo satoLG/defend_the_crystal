@@ -138,4 +138,17 @@ export const sfx = {
   error: () => ready && throttled('err', 150, () => tiks.error()),
   success: () => ready && throttled('ok', 150, () => tiks.success()),
   toggle: (on) => ready && throttled('tgl', 60, () => tiks.toggle(on)),
+  // class special attacks: layered/staggered tones so they land much
+  // harder than the regular one-shot cues
+  skill: (cls) => ready && throttled('skill', 250, () => {
+    const seq = {
+      berserker: [[0, 'swoosh'], [70, 'warning'], [150, 'swoosh']],
+      tanker: [[0, 'warning'], [100, 'success'], [220, 'notify']],
+      archer: [[0, 'swoosh'], [120, 'swoosh'], [240, 'swoosh'], [360, 'notify']],
+      mage: [[0, 'warning'], [130, 'notify'], [260, 'swoosh']],
+    }[cls] || [[0, 'notify'], [100, 'warning']];
+    for (const [delay, name] of seq) {
+      setTimeout(() => { try { tiks[name](); } catch { /* ok */ } }, delay);
+    }
+  }),
 };
