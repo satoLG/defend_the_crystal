@@ -96,10 +96,14 @@ export class UI {
     const best = localStorage.getItem('dtc-best-wave');
     if (best) $('best-wave').textContent = `Best run: wave ${best}`;
 
-    // joining via shared link (?room=CODE)
+    // joining via shared link (?room=CODE): show join-only, no host/code entry
     const url = new URL(location.href);
     const room = normalizeRoomCode(url.searchParams.get('room') || '');
-    if (room.length === 5) $('join-code').value = room;
+    if (room.length === 5) {
+      $('join-code').value = room;
+      $('host-btn').classList.add('hidden');
+      $('join-code').classList.add('hidden');
+    }
   }
 
   menuError(msg) { $('menu-error').textContent = msg; sfx.error(); }
