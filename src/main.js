@@ -617,8 +617,18 @@ function frame(t) {
     }
   }
 
+  // checkpoints are free time: the camera leaves the board framing and
+  // follows the hero while they stroll (and rest) around the sanctuary
+  const phase = state.role === 'host' ? state.sim?.phase : state.snapNext?.ph;
+  if (state.started && !state.over && phase === 'checkpoint' &&
+      (state.role === 'host' || state.selfInit) && !state.self.dead) {
+    gs.setFollow(state.self.x, state.self.z);
+  } else {
+    gs.clearFollow();
+  }
+
   gs.update(dt);
-  if (view) view.update(dt, gs.camera);
+  if (view) view.update(dt, gs.camera, selfPose());
   gs.render();
 }
 

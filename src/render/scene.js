@@ -26,12 +26,21 @@ export class GameScene {
 
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0x151128);
-    this.scene.fog = new THREE.Fog(0x151128, 34, 80);
+    // tight fog: the forest dissolves into darkness before any edge of
+    // the ground plane or tree cover can show
+    this.scene.fog = new THREE.Fog(0x151128, 34, 62);
 
     this.camera = new THREE.PerspectiveCamera(50, 1, 0.5, 200);
     this.lookTarget = new THREE.Vector3(0, 0, 2.2);
     this.camDir = new THREE.Vector3(0, Math.sin(0.98), Math.cos(0.98)).normalize();
     this.shake = 0;
+    // checkpoint stroll: camera leaves the board framing to track the player
+    this.followGoal = null;
+    this.followPos = new THREE.Vector3();
+    this.followBlend = 0;
+    this._camPos = new THREE.Vector3();
+    this._camLook = new THREE.Vector3();
+    this._followCam = new THREE.Vector3();
 
     this.raycaster = new THREE.Raycaster();
     this.groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
@@ -44,6 +53,7 @@ export class GameScene {
     this.buildPlaza();
     this.buildCrystal();
     this.buildForest();
+    this.buildForestFill();
     this.buildPenumbra();
     this.buildOverlay();
 
@@ -156,7 +166,7 @@ export class GameScene {
         let cr = tone[0] * jit, cg = tone[1] * jit, cb = tone[2] * jit;
         // penumbra: the forest swallows the top rows
         if (r <= 3) {
-          const dark = 0.42 + r * 0.16;
+          const dark = 0.26 + r * 0.19;
           cr *= dark; cg *= dark; cb *= dark * 1.08;
         }
         colors.push([cr, cg, cb]);
@@ -212,10 +222,11 @@ export class GameScene {
     }
 
     // the world around the clearing is forest floor, not a void:
-    // dark mossy ground stretching out under the trees
+    // mossy green ground (close to the board's grass, a shade darker)
+    // stretching out under the trees
     const base = new THREE.Mesh(
-      new THREE.PlaneGeometry(160, 160),
-      new THREE.MeshStandardMaterial({ color: 0x27301f, roughness: 1 })
+      new THREE.PlaneGeometry(240, 240),
+      new THREE.MeshStandardMaterial({ color: 0x3d5230, roughness: 1 })
     );
     base.rotation.x = -Math.PI / 2;
     base.position.y = -tileTop - 0.02;
@@ -224,12 +235,12 @@ export class GameScene {
 
     // subtle color breakup so the surrounding ground reads as terrain
     const patchGeo = new THREE.CircleGeometry(1, 10);
-    const patchMats = [0x2f3a24, 0x1f271a, 0x33402a, 0x2a2f22].map(
+    const patchMats = [0x466039, 0x33452a, 0x4c6b3e, 0x394d2e].map(
       (col) => new THREE.MeshStandardMaterial({ color: col, roughness: 1 })
     );
-    for (let i = 0; i < 60; i++) {
+    for (let i = 0; i < 90; i++) {
       const a = rng() * Math.PI * 2;
-      const rad = 12 + rng() * 26;
+      const rad = 12 + rng() * 38;
       const px = Math.cos(a) * rad;
       const pz = Math.sin(a) * rad * 1.3;
       // keep patches off the board and plaza
@@ -385,7 +396,7 @@ export class GameScene {
       const z = -HALF_H - 0.4 - depth * 6.2;
       // leave shadowy trail mouths where the spawns are
       if (depth < 0.3 && spawnXs.some((sx) => Math.abs(x - sx) < 1.5)) continue;
-      const darkness = 0.9 - depth * 0.55;
+      const darkness = 0.55 - depth * 0.35;
       placeTree(x, z, 0.75 + rng() * 0.95, darkness, rng() < 0.3);
     }
     // a few trees leaning INTO the top corners of the board
@@ -472,6 +483,75 @@ export class GameScene {
     }
   }
 
+  // Instanced filler forest: hundreds of pines packing everything the
+  // camera can see around the clearing and the plaza, denser and darker
+  // with distance, so no bare ground or square edge ever shows. A couple
+  // of InstancedMeshes keep it at a handful of draw calls.
+  buildForestFill() {
+    const rng = mulberry32(99);
+    const clearX = HALF_W + 1.1;
+    const plazaX = PLAZA.HALF_W + 1.1;
+    const southZ = HALF_H + PLAZA.DEPTH;
+    const specs = [];
+    for (let i = 0; i < 2600 && specs.length < 620; i++) {
+      const x = (rng() * 2 - 1) * 72;
+      const z = -HALF_H - 30 + rng() * (ROWS * CELL + PLAZA.DEPTH + 30 + 24);
+      // keep the battlefield and the sanctuary plaza open
+      if (Math.abs(x) < clearX && z > -HALF_H - 0.6 && z < HALF_H + 0.6) continue;
+      if (Math.abs(x) < plazaX && z >= HALF_H - 0.6 && z < southZ + 1) continue;
+      // distance from the open areas drives darkness; the north (where
+      // enemies come from) is darker still
+      const dx = Math.max(0, Math.abs(x) - clearX);
+      const dzN = Math.max(0, -HALF_H - z);
+      const dzS = Math.max(0, z - southZ);
+      const d = Math.hypot(dx, Math.max(dzN, dzS));
+      if (d < 1 && rng() < 0.5) continue; // props already dress the very edge
+      const north = Math.min(Math.max((-z - HALF_H + 6) / 18, 0), 1);
+      const dark = Math.max(0.12, (0.72 - d * 0.016 - north * 0.34) * (0.85 + rng() * 0.3));
+      specs.push({
+        x, z, s: 0.8 + rng() * 1.15, dark,
+        crooked: rng() < 0.3, rot: rng() * Math.PI * 2,
+      });
+    }
+
+    const grabParts = (key) => {
+      const t = instantiate(key, { shadows: false });
+      t.group.updateMatrixWorld(true);
+      const parts = [];
+      t.group.traverse((o) => {
+        if (o.isMesh) {
+          const geo = o.geometry.clone();
+          geo.applyMatrix4(o.matrixWorld);
+          parts.push({ geo, mat: o.material });
+        }
+      });
+      return parts;
+    };
+    const m = new THREE.Matrix4();
+    const p = new THREE.Vector3(), s3 = new THREE.Vector3();
+    const q = new THREE.Quaternion();
+    const up = new THREE.Vector3(0, 1, 0);
+    const col = new THREE.Color();
+    for (const [key, list] of [
+      ['env-pine', specs.filter((t) => !t.crooked)],
+      ['env-pine-crooked', specs.filter((t) => t.crooked)],
+    ]) {
+      if (!list.length) continue;
+      for (const part of grabParts(key)) {
+        const inst = new THREE.InstancedMesh(part.geo, part.mat, list.length);
+        inst.frustumCulled = false;
+        list.forEach((t, i) => {
+          q.setFromAxisAngle(up, t.rot);
+          m.compose(p.set(t.x, 0, t.z), q, s3.setScalar(t.s));
+          inst.setMatrixAt(i, m);
+          inst.setColorAt(i, col.setScalar(t.dark));
+        });
+        inst.instanceColor.needsUpdate = true;
+        this.scene.add(inst);
+      }
+    }
+  }
+
   // layered darkness where the enemies come from + drifting fog
   buildPenumbra() {
     const gradTex = (stops, vertical = true) => {
@@ -499,16 +579,29 @@ export class GameScene {
     curtain.position.set(0, 5.4, -HALF_H - 7.6);
     this.scene.add(curtain);
 
+    // near shroud right at the forest mouth: swallows most of the tree
+    // wall so only silhouettes of the first trunks survive, and the
+    // enemies walk out of a black void
+    const shroud = new THREE.Mesh(
+      new THREE.PlaneGeometry(110, 15),
+      new THREE.MeshBasicMaterial({
+        map: gradTex([[0, 'rgba(10,8,24,0.98)'], [0.6, 'rgba(10,8,24,0.92)'], [1, 'rgba(10,8,24,0)']]),
+        transparent: true, depthWrite: false,
+      })
+    );
+    shroud.position.set(0, 5.1, -HALF_H - 1.4);
+    this.scene.add(shroud);
+
     // shadow spilling out of the woods onto the spawn rows
     const spill = new THREE.Mesh(
-      new THREE.PlaneGeometry(56, 9.5),
+      new THREE.PlaneGeometry(60, 11),
       new THREE.MeshBasicMaterial({
-        map: gradTex([[0, 'rgba(8,6,20,0.95)'], [0.45, 'rgba(8,6,20,0.55)'], [1, 'rgba(8,6,20,0)']]),
+        map: gradTex([[0, 'rgba(6,4,16,1)'], [0.4, 'rgba(6,4,16,0.7)'], [1, 'rgba(6,4,16,0)']]),
         transparent: true, depthWrite: false,
       })
     );
     spill.rotation.x = -Math.PI / 2;
-    spill.position.set(0, 0.035, -HALF_H - 1 + 9.5 / 2);
+    spill.position.set(0, 0.035, -HALF_H - 1 + 11 / 2);
     spill.renderOrder = 2;
     this.scene.add(spill);
 
@@ -651,8 +744,9 @@ export class GameScene {
       new THREE.Vector3(-HALF_W - 0.8, 0, HALF_H + 0.6),
       new THREE.Vector3(HALF_W + 0.8, 0, HALF_H + 0.6),
       new THREE.Vector3(0, 2.6, -HALF_H),
-      // keep most of the resting plaza on screen below the board
-      new THREE.Vector3(0, 0.4, HALF_H + PLAZA.DEPTH - 1),
+      // keep the plaza entrance on screen below the board (the deep
+      // part is toured with the checkpoint follow-cam instead)
+      new THREE.Vector3(0, 0.4, HALF_H + 4),
     ];
     let lo = 8, hi = 130;
     for (let it = 0; it < 22; it++) {
@@ -680,6 +774,19 @@ export class GameScene {
     if (this.shakeEnabled === false) return;
     this.shake = Math.min(this.shake + amount, 0.7);
   }
+
+  // checkpoint stroll: while set, the camera glides off its board
+  // framing and tracks the given point (the local player) up close
+  setFollow(x, z) {
+    if (!this.followGoal) {
+      this.followGoal = new THREE.Vector3(x, 0, z);
+      this.followPos.set(x, 0, z);
+    } else {
+      this.followGoal.set(x, 0, z);
+    }
+  }
+
+  clearFollow() { this.followGoal = null; }
 
   setShadows(on) { this.moon.castShadow = on; }
 
@@ -710,16 +817,28 @@ export class GameScene {
       f.spr.position.x = f.x0 + Math.sin(this.time * f.speed + f.phase) * f.amp;
     }
 
+    // camera: blend between the fixed board framing and the checkpoint
+    // follow-cam, then layer shake on top
+    this.followBlend += ((this.followGoal ? 1 : 0) - this.followBlend) * Math.min(dt * 2, 1);
+    this._camPos.copy(this.baseCamPos || this.camera.position);
+    this._camLook.copy(this.lookTarget);
+    if (this.followBlend > 0.003) {
+      if (this.followGoal) this.followPos.lerp(this.followGoal, Math.min(dt * 6, 1));
+      const b = this.followBlend;
+      const k = b * b * (3 - 2 * b); // smoothstep for a gentle glide
+      this._followCam.copy(this.followPos).addScaledVector(this.camDir, 15);
+      this._camPos.lerp(this._followCam, k);
+      this._camLook.lerp(this.followPos, k);
+    }
+    this.camera.position.copy(this._camPos);
+    this.camera.lookAt(this._camLook);
+
     // camera shake decay
     if (this.shake > 0.001) {
       this.shake *= Math.exp(-6 * dt);
-      this.camera.position.copy(this.baseCamPos).add(new THREE.Vector3(
-        (Math.random() - 0.5) * this.shake,
-        (Math.random() - 0.5) * this.shake * 0.5,
-        (Math.random() - 0.5) * this.shake
-      ));
-    } else if (this.baseCamPos) {
-      this.camera.position.copy(this.baseCamPos);
+      this.camera.position.x += (Math.random() - 0.5) * this.shake;
+      this.camera.position.y += (Math.random() - 0.5) * this.shake * 0.5;
+      this.camera.position.z += (Math.random() - 0.5) * this.shake;
     }
   }
 

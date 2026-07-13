@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { instantiate } from './assets.js';
 import { CLASSES, TOWERS, JUMP, ENEMIES, BOSSES } from '../config.js';
-import { cellToWorld, CRYSTAL_POS } from '../sim/grid.js';
+import { cellToWorld, CRYSTAL_POS, HALF_H, PLAZA } from '../sim/grid.js';
 import { lerp, angleLerp } from '../utils.js';
 import { sfx } from '../audio.js';
 
@@ -145,6 +145,8 @@ export class GameView {
     };
     this.xpOrbs = mkOrbs(new THREE.OctahedronGeometry(0.17), 0x5dff7a);
     this.ptsOrbs = mkOrbs(new THREE.IcosahedronGeometry(0.16), 0x5ab8ff);
+    this.npcs = [];
+    this.spawnNpcs();
     this._orbMat = new THREE.Matrix4();
     this._orbPos = new THREE.Vector3();
     this._orbQuat = new THREE.Quaternion();
@@ -362,6 +364,56 @@ export class GameView {
     return a;
   }
 
+  // ---------------- sanctuary NPCs ----------------
+
+  // two dwellers pottering around the plaza behind the crystal; pure
+  // set dressing for now — walk up to them and they greet you ("Oi!")
+  spawnNpcs() {
+    const defs = [
+      { model: 'char-mage', name: 'Mira', tint: 0x8fd8c8, x: -3.1, z: HALF_H + PLAZA.DEPTH * 0.56, yaw: 0.8 },
+      { model: 'char-tanker', name: 'Bento', tint: 0xd8b06a, x: 2.3, z: HALF_H + PLAZA.DEPTH * 0.24, yaw: -0.7 },
+    ];
+    for (const d of defs) {
+      const a = this.makeAnimated(d.model);
+      a.group.position.set(d.x, 0, d.z);
+      a.group.rotation.y = d.yaw;
+      // dye the outfit so they don't read as one of the player classes
+      for (const m of a.mats) m.color.multiply(new THREE.Color(d.tint));
+      const label = this.makeTextSprite(d.name, 0xffe9b8, 2.2);
+      label.position.y = 2.0;
+      a.group.add(label);
+      const bubble = this.makeTextSprite('Oi!', 0xffffff, 1.5);
+      bubble.position.y = 2.5;
+      bubble.visible = false;
+      a.group.add(bubble);
+      a.bubble = bubble;
+      a.homeYaw = d.yaw;
+      this.scene.add(a.group);
+      this.setLoco(a, 'idle');
+      this.npcs.push(a);
+    }
+  }
+
+  updateNpcs(dt, selfPos) {
+    for (const a of this.npcs) {
+      a.mixer.update(dt);
+      const near = !!selfPos && Math.hypot(
+        selfPos.x - a.group.position.x, selfPos.z - a.group.position.z
+      ) < 2.2;
+      if (near) {
+        // turn to face the visitor and greet them
+        const ty = Math.atan2(
+          selfPos.x - a.group.position.x, selfPos.z - a.group.position.z
+        );
+        a.group.rotation.y = angleLerp(a.group.rotation.y, ty, Math.min(dt * 6, 1));
+        if (!a.bubble.visible && a.actions.wave) this.playOnce(a, 'wave', 1.1);
+      } else {
+        a.group.rotation.y = angleLerp(a.group.rotation.y, a.homeYaw, Math.min(dt * 2, 1));
+      }
+      a.bubble.visible = near;
+    }
+  }
+
   // ---------------- gravedigger tombs ----------------
 
   ensureGrave(row) {
@@ -517,6 +569,18 @@ export class GameView {
       a.group.position.z = z;
       a.group.position.y = a.isGhost ? 0.25 + Math.sin(this.time * 3 + id) * 0.12 : 0;
       a.group.rotation.y = yaw;
+      // enemies materialize out of the northern darkness: nearly
+      // invisible on the spawn rows, fully lit a few cells in
+      const fade = Math.min(Math.max((z + HALF_H - 0.6) / 5.5, 0), 1);
+      if (a.fade !== fade) {
+        a.fade = fade;
+        const baseOp = a.isGhost ? 0.8 : 1;
+        const full = fade >= 1 && !a.isGhost;
+        for (const m of a.mats) {
+          m.transparent = !full;
+          m.opacity = full ? 1 : baseOp * (0.05 + 0.95 * fade);
+        }
+      }
       this.setLoco(a, row[EN.MOV] === 1 ? 'walk' : 'idle', 1.15);
       const frac = row[EN.HP] / row[EN.MHP];
       a.hpBar.visible = frac < 0.999;
@@ -925,8 +989,9 @@ export class GameView {
 
   // ---------------- per-frame ----------------
 
-  update(dt, camera) {
+  update(dt, camera, selfPos = null) {
     this.time += dt;
+    this.updateNpcs(dt, selfPos);
 
     for (const a of this.players.values()) {
       // orbiting stone slabs of the tanker's wall mode

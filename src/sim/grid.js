@@ -27,8 +27,9 @@ export const HALF_H = (ROWS * CELL) / 2;
 
 // sanctuary plaza behind the board's south edge — a paved resting
 // spot players can wander into between waves (enemies never path
-// there; their goal is the crystal, which lives on the board)
-export const PLAZA = { HALF_W: 7, DEPTH: 6 };
+// there; their goal is the crystal, which lives on the board).
+// Deep enough to actually stroll around in during checkpoints.
+export const PLAZA = { HALF_W: 8, DEPTH: 13 };
 
 // Jump check: standing at (x,z) facing along yaw, can the character
 // vault over exactly ONE blocked cell (tower/obstacle) and land on the
