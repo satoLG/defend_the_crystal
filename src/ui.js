@@ -207,8 +207,11 @@ export class UI {
     $('upg-btn').addEventListener('click', () => {
       if (this.panelCell) {
         sfx.click();
-        this.cb.onAction({ t: this.panelType === 'tower' ? 'upg' : 'remove', ...this.panelCell });
-        this.closePanel();
+        const upgrading = this.panelType === 'tower';
+        this.cb.onAction({ t: upgrading ? 'upg' : 'remove', ...this.panelCell });
+        // stay open on upgrade — the panel refreshes itself every frame
+        // from the live snapshot, so allies can queue upgrades back to back
+        if (!upgrading) this.closePanel();
       }
     });
     $('sell-btn').addEventListener('click', () => {
@@ -262,30 +265,7 @@ export class UI {
     this.panelCell = { c: info.c, r: info.r };
     this.panelType = info.type;
     if (info.type === 'tower') {
-      const def = TOWERS[info.kind];
-      const lvl = info.lvl;
-      const stat = (mult, add = 0) => (base) => base * Math.pow(mult, lvl - 1) + add * (lvl - 1);
-      const dmg = Math.round(stat(TOWER_UPGRADE.dmgMult)(def.dmg));
-      const rng = (def.range + TOWER_UPGRADE.rangeAdd * (lvl - 1)).toFixed(1);
-      const spd = (def.rate * Math.pow(TOWER_UPGRADE.rateMult, lvl - 1)).toFixed(2);
-      $('upg-title').innerHTML = `${entityImg('tower-' + info.kind)} ${def.name} — level ${lvl}`;
-      const maxed = lvl >= TOWER_LEVEL_MAX;
-      if (maxed) {
-        $('upg-stats').textContent =
-          `Damage ${dmg} · Range ${rng} · Speed ${spd}/s` + (def.aoe ? ` · Area ${def.aoe}` : '');
-      } else {
-        const nDmg = Math.round(def.dmg * Math.pow(TOWER_UPGRADE.dmgMult, lvl));
-        const nRng = (def.range + TOWER_UPGRADE.rangeAdd * lvl).toFixed(1);
-        const nSpd = (def.rate * Math.pow(TOWER_UPGRADE.rateMult, lvl)).toFixed(2);
-        $('upg-stats').textContent =
-          `Damage ${dmg} ➜ ${nDmg}\nRange ${rng} ➜ ${nRng}\nSpeed ${spd}/s ➜ ${nSpd}/s` +
-          (def.aoe ? `\nArea ${def.aoe}` : '');
-      }
-      const cost = maxed ? 0 : Math.round(def.cost * TOWER_UPGRADE.costMult[lvl]);
-      $('upg-btn').innerHTML = maxed ? 'Max level' : `Upgrade ${icon('coin')}${cost}`;
-      $('upg-btn').disabled = maxed || (this.lastSnap && this.lastSnap.pts < cost);
-      $('sell-btn').classList.remove('hidden');
-      $('sell-btn').textContent = 'Sell';
+      this.renderTowerPanel(info.kind, info.lvl);
     } else {
       $('upg-title').innerHTML = `${entityImg('block')} Block`;
       $('upg-stats').textContent = 'Reclaim it to get a block back in your stock.';
@@ -296,8 +276,37 @@ export class UI {
     this.show('upgrade-panel');
   }
 
+  // (re)paints the tower upgrade panel — called on open and every frame
+  // while it's up, so the cost/afford state always tracks live coins
+  renderTowerPanel(kind, lvl) {
+    const def = TOWERS[kind];
+    const stat = (mult, add = 0) => (base) => base * Math.pow(mult, lvl - 1) + add * (lvl - 1);
+    const dmg = Math.round(stat(TOWER_UPGRADE.dmgMult)(def.dmg));
+    const rng = (def.range + TOWER_UPGRADE.rangeAdd * (lvl - 1)).toFixed(1);
+    const spd = (def.rate * Math.pow(TOWER_UPGRADE.rateMult, lvl - 1)).toFixed(2);
+    $('upg-title').innerHTML = `${entityImg('tower-' + kind)} ${def.name} — level ${lvl}`;
+    const maxed = lvl >= TOWER_LEVEL_MAX;
+    if (maxed) {
+      $('upg-stats').textContent =
+        `Damage ${dmg} · Range ${rng} · Speed ${spd}/s` + (def.aoe ? ` · Area ${def.aoe}` : '');
+    } else {
+      const nDmg = Math.round(def.dmg * Math.pow(TOWER_UPGRADE.dmgMult, lvl));
+      const nRng = (def.range + TOWER_UPGRADE.rangeAdd * lvl).toFixed(1);
+      const nSpd = (def.rate * Math.pow(TOWER_UPGRADE.rateMult, lvl)).toFixed(2);
+      $('upg-stats').textContent =
+        `Damage ${dmg} ➜ ${nDmg}\nRange ${rng} ➜ ${nRng}\nSpeed ${spd}/s ➜ ${nSpd}/s` +
+        (def.aoe ? `\nArea ${def.aoe}` : '');
+    }
+    const cost = maxed ? 0 : Math.round(def.cost * TOWER_UPGRADE.costMult[lvl]);
+    $('upg-btn').innerHTML = maxed ? 'Max level' : `Upgrade ${icon('coin')}${cost}`;
+    $('upg-btn').disabled = maxed || (this.lastSnap && this.lastSnap.pts < cost);
+    $('sell-btn').classList.remove('hidden');
+    $('sell-btn').textContent = 'Sell';
+  }
+
   closePanel() {
     this.panelCell = null;
+    this.panelType = null;
     this.hide('upgrade-panel');
     this.cb.onPanelClose?.();
   }
@@ -316,6 +325,20 @@ export class UI {
     const remaining = Math.max(CRYSTAL_BREACH_LIMIT - snap.br, 0);
     $('crystal-hp').textContent = remaining;
     $('crystal-chip').classList.toggle('warn', remaining <= 3);
+
+    // keep the upgrade panel live while it's open: coins ticking up
+    // should unlock the button immediately, and back-to-back upgrades
+    // (level, stats, next cost) should refresh without closing
+    if (this.panelCell) {
+      if (this.panelType === 'tower') {
+        const tw = snap.tw.find((t) => t[2] === this.panelCell.c && t[3] === this.panelCell.r);
+        if (tw) this.renderTowerPanel(tw[1], tw[4]);
+        else this.closePanel();
+      } else if (this.panelType === 'obstacle') {
+        const ob = snap.ob.find((o) => o[2] === this.panelCell.c && o[3] === this.panelCell.r);
+        if (!ob) this.closePanel();
+      }
+    }
 
     // start-wave button
     const btn = $('startwave-btn');

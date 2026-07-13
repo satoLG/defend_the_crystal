@@ -43,6 +43,14 @@ export class Input {
       this.onKeyAction?.('cancel');
     });
 
+    // the canvas drives the whole game via pointer events, so it never
+    // needs the browser's native touch handling — but on a held touch
+    // (the virtual joystick) touch-action alone doesn't reliably stop
+    // Safari/Chrome from popping the text-selection loupe, so also
+    // preempt it at the raw touch-event level
+    canvas.addEventListener('touchstart', (e) => e.preventDefault(), { passive: false });
+    canvas.addEventListener('touchmove', (e) => e.preventDefault(), { passive: false });
+
     // kill mobile Safari/Chrome pinch-zoom, double-tap-zoom and the
     // long-press text-selection/drag that otherwise fires everywhere
     document.addEventListener('gesturestart', (e) => e.preventDefault());
