@@ -2,12 +2,12 @@ import { loadAssets } from './render/assets.js';
 import { GameScene } from './render/scene.js';
 import { GameView } from './render/view.js';
 import { Sim } from './sim/sim.js';
-import { Grid, worldToCell, cellToWorld, canJumpFrom } from './sim/grid.js';
+import { Grid, worldToCell, cellToWorld, canJumpFrom, computeDashEnd } from './sim/grid.js';
 import { Net, selfId } from './net.js';
 import { Input } from './input.js';
 import { UI } from './ui.js';
 import { armAudioOnFirstGesture, bindAudioLifecycle, sfx, setSfxVolume } from './audio.js';
-import { CLASSES, PLAYER, NET, SIM_DT, TOWERS, TOWER_UPGRADE, GRID, JUMP } from './config.js';
+import { CLASSES, PLAYER, NET, SIM_DT, TOWERS, TOWER_UPGRADE, GRID, JUMP, SKILLS } from './config.js';
 import { makeRoomCode, clamp, lerp, dist2d } from './utils.js';
 import { settings } from './settings.js';
 import { music } from './music.js';
@@ -29,8 +29,9 @@ const state = {
   over: false,
   // client-side snapshot interpolation
   snapPrev: null, snapNext: null, snapPrevT: 0, snapNextT: 0,
-  // local self-prediction (jump = in-flight hop over a grid cell)
-  self: { x: 0, z: 4, yaw: Math.PI, moving: false, kbx: 0, kbz: 0, dead: false, speed: 4, jump: null },
+  // local self-prediction (jump = in-flight hop over a grid cell,
+  // dash = the berserker's special sprint)
+  self: { x: 0, z: 4, yaw: Math.PI, moving: false, kbx: 0, kbz: 0, dead: false, speed: 4, jump: null, dash: null },
   selfInit: false,
   clientGrid: new Grid(),
   blockedKey: '',
@@ -69,6 +70,7 @@ async function boot() {
     onStartMatch: startMatch,
     onAction: sendAction,
     onJump: () => doJump(),
+    onSkill: () => doSkill(),
     onBuildMode: (on) => { gs.setBuildMode(on); if (!on) view.clearGhost(); },
     onPanelClose: () => gs.hideRange(),
     onExit: () => location.reload(),
@@ -305,6 +307,7 @@ function onKeyAction(action) {
       gs.hideRange();
       break;
     case 'jump': doJump(); break;
+    case 'skill': doSkill(); break;
     case 'startwave':
       // Space jumps when a jump is possible; otherwise it keeps its
       // old job of starting the next wave (host only)
@@ -319,7 +322,7 @@ function onKeyAction(action) {
 
 function doJump() {
   const s = state.self;
-  if (!state.started || state.over || s.dead || s.jump) return false;
+  if (!state.started || state.over || s.dead || s.jump || s.dash) return false;
   if (state.role === 'client' && !state.selfInit) return false;
   const info = canJumpFrom(clientGridRef(), s.x, s.z, s.yaw);
   if (!info) return false;
@@ -333,13 +336,31 @@ function doJump() {
 let jumpWasEnabled = null;
 function updateJumpButton() {
   const s = state.self;
-  const ok = state.started && !state.over && !s.dead && !s.jump &&
+  const ok = state.started && !state.over && !s.dead && !s.jump && !s.dash &&
     (state.role === 'host' || state.selfInit) &&
     !!canJumpFrom(clientGridRef(), s.x, s.z, s.yaw);
   if (ok !== jumpWasEnabled) {
     jumpWasEnabled = ok;
     ui.setJumpEnabled(ok);
   }
+}
+
+// ---------------------------------------------------------
+// class special attacks
+// ---------------------------------------------------------
+
+function doSkill() {
+  const s = state.self;
+  if (!state.started || state.over || s.dead || s.jump || s.dash) return;
+  if (state.role === 'client' && !state.selfInit) return;
+  if (!ui.skillReady) return;
+  // the berserker's dash moves the character, and movement is
+  // client-authoritative — predict it locally, like jumps
+  if (ui.myCls === 'berserker') {
+    const end = computeDashEnd(clientGridRef(), s.x, s.z, s.yaw, SKILLS.berserker.cells);
+    s.dash = { fx: s.x, fz: s.z, tx: end.x, tz: end.z, t: 0, dur: SKILLS.berserker.dur };
+  }
+  sendAction({ t: 'skill', yaw: Math.round(s.yaw * 100) / 100 });
 }
 
 // ---------------------------------------------------------
@@ -374,6 +395,12 @@ function handleEvent(ev) {
       music.miniJingle();
       break;
     case 'ejump': sfx.jump(); break;
+    case 'skill':
+      sfx.skill(ev.cls);
+      if (ev.id === selfId) ui.toast(`${SKILLS[ev.cls]?.name || 'Special'}!`, 'gold');
+      if (ev.cls === 'berserker') gs.addShake(0.2);
+      if (ev.cls === 'mage') setTimeout(() => gs.addShake(0.4), SKILLS.mage.flightT * 1000);
+      break;
     case 'grave': sfx.boom(); break;
     case 'phase':
       if (ev.ph === 'build' && ev.n > 1) sfx.waveClear();
@@ -451,6 +478,7 @@ function syncSelfFromSim() {
     state.self.speed = p.speed;
     state.self.dead = p.dead;
     state.self.jump = null;
+    state.self.dash = null;
     state.selfInit = true;
   }
 }
@@ -460,6 +488,9 @@ function reconcileSelf(snap) {
   if (!me) return;
   state.self.speed = CLASSES[me[1]]?.speed || 4;
   state.self.dead = me[11] === 1;
+  // mid-dash the host briefly lags far behind the predicted position —
+  // don't let that trip the teleport-back threshold
+  if (state.self.dash) return;
   if (!state.selfInit || dist2d(state.self.x, state.self.z, me[2], me[3]) > 3) {
     state.self.x = me[2];
     state.self.z = me[3];
@@ -480,7 +511,7 @@ function syncClientGrid(snap) {
 
 function stepSelf(dt) {
   const s = state.self;
-  if (s.dead) { s.moving = false; s.jump = null; return; }
+  if (s.dead) { s.moving = false; s.jump = null; s.dash = null; return; }
   // mid-jump: fly along the arc, ignoring input and cell collision
   if (s.jump) {
     const j = s.jump;
@@ -490,6 +521,20 @@ function stepSelf(dt) {
     s.z = lerp(j.fz, j.tz, k);
     s.moving = false;
     if (k >= 1) s.jump = null;
+    return;
+  }
+  // mid-dash (berserker skill): sprint along the line, ignoring input
+  if (s.dash) {
+    const d = s.dash;
+    d.t += dt;
+    const k = Math.min(d.t / d.dur, 1);
+    s.x = lerp(d.fx, d.tx, k);
+    s.z = lerp(d.fz, d.tz, k);
+    if (Math.hypot(d.tx - d.fx, d.tz - d.fz) > 0.05) {
+      s.yaw = Math.atan2(d.tx - d.fx, d.tz - d.fz);
+    }
+    s.moving = true;
+    if (k >= 1) { s.dash = null; s.moving = false; }
     return;
   }
   const dir = input.moveDir();

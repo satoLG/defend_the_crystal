@@ -46,6 +46,24 @@ export const CLASSES = {
 // hop over exactly one blocked grid cell (tower/obstacle)
 export const JUMP = { DUR: 0.55, HEIGHT: 1.4 };
 
+// ---------- class special attacks (button next to jump) ----------
+// One shared cooldown; each class gets its own signature move.
+export const SKILLS = {
+  COOLDOWN: 30,
+  berserker: { // dash forward, flinging everything on the path backward
+    name: 'Rampage Dash', cells: 5, dur: 0.42, dmgMult: 3.2, kb: 4.5, width: 1.25,
+  },
+  tanker: { // "wall mode": zero knockback + doubled defense for a while
+    name: 'Wall Mode', dur: 10, defMult: 2, defCap: 0.92,
+  },
+  archer: { // 3 quick volleys of 5 arrows at the nearest enemies
+    name: 'Arrow Storm', arrows: 5, bursts: 3, gap: 0.32, rangeMult: 1.25, dmgMult: 1.0,
+  },
+  mage: { // giant arcane orb: much bigger blast, much more damage
+    name: 'Arcane Orb', aoeMult: 2.6, dmgMult: 2.4, kbMult: 2.5, rangeMult: 1.2, flightT: 0.7,
+  },
+};
+
 // XP/point orbs dropped by dying enemies; collected by walking near.
 // Orbs are per-player (each player only sees & collects their own).
 export const DROPS = {

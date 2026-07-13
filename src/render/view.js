@@ -11,7 +11,7 @@ import { sfx } from '../audio.js';
 // rules live here.
 // ============================================================
 
-const PL = { ID: 0, CLS: 1, X: 2, Z: 3, YAW: 4, HP: 5, MHP: 6, LVL: 7, XP: 8, XPN: 9, MOV: 10, DEAD: 11, RESP: 12, OBST: 13, KILLS: 14, NAME: 15 };
+const PL = { ID: 0, CLS: 1, X: 2, Z: 3, YAW: 4, HP: 5, MHP: 6, LVL: 7, XP: 8, XPN: 9, MOV: 10, DEAD: 11, RESP: 12, OBST: 13, KILLS: 14, NAME: 15, SKCD: 16, WALL: 17 };
 const EN = { ID: 0, KIND: 1, X: 2, Z: 3, YAW: 4, HP: 5, MHP: 6, SCALE: 7, BOSS: 8, MOV: 9 };
 
 // Hand props live in BONE space: raw Kenney units, grip at the origin.
@@ -482,6 +482,10 @@ export class GameView {
         this.setLoco(a, moving ? (spd > 4.8 ? 'sprint' : 'walk') : 'idle', moving ? spd / 3.2 : 1);
       }
       this.setHpBar(a.hpBar, row[PL.HP] / row[PL.MHP]);
+      // "wall mode" aura follows the tanker skill flag in the snapshot
+      const wall = row[PL.WALL] === 1;
+      if (wall && !a.wallFx) this.addWallAura(a);
+      else if (!wall && a.wallFx) this.removeWallAura(a);
       if (a.labelLvl !== row[PL.LVL] || a.labelName !== row[PL.NAME]) {
         a.group.remove(a.label);
         a.label.material.map.dispose();
@@ -662,7 +666,65 @@ export class GameView {
         this.spawnBats(a);
         break;
       }
+      case 'skill': {
+        const a = this.players.get(ev.id);
+        if (ev.cls === 'berserker' && typeof ev.x === 'number') {
+          // shock rings pop along the line as the dash passes through
+          const n = 6;
+          for (let i = 0; i <= n; i++) {
+            const k = i / n;
+            this.effects.push({
+              type: 'delayed-burst', t: -(ev.dur || 0.4) * k, dur: 0.3,
+              x: lerp(ev.x, ev.tx, k), z: lerp(ev.z, ev.tz, k),
+              r: 1.15, color: 0xff6a4d,
+            });
+          }
+          if (a) this.playOnce(a, 'attack-melee-right', ev.dur || 0.4);
+        } else if (ev.cls === 'tanker' && a) {
+          this.burst(a.group.position.x, a.group.position.z, 1.7, 0xbfc8d4);
+          this.playOnce(a, 'interact-right', 0.5);
+        } else if (ev.cls === 'mage' && a) {
+          this.burst(a.group.position.x, a.group.position.z, 1.2, 0xc07dff);
+        }
+        break;
+      }
     }
+  }
+
+  // "wall mode": a slowly orbiting ring of stone slabs around the
+  // tanker so the no-knockback / double-defense window is unmissable
+  addWallAura(a) {
+    const g = new THREE.Group();
+    const stone = new THREE.MeshStandardMaterial({
+      color: 0x9aa1ab, roughness: 0.9, flatShading: true,
+      transparent: true, opacity: 0.9,
+    });
+    const slabGeo = new THREE.BoxGeometry(0.34, 0.52, 0.12);
+    for (let i = 0; i < 6; i++) {
+      const slab = new THREE.Mesh(slabGeo, stone);
+      const ang = (i / 6) * Math.PI * 2;
+      slab.position.set(Math.cos(ang) * 0.85, 0.55, Math.sin(ang) * 0.85);
+      slab.rotation.y = -ang;
+      g.add(slab);
+    }
+    const ring = new THREE.Mesh(
+      this._ringGeo,
+      new THREE.MeshBasicMaterial({
+        color: 0xbfc8d4, transparent: true, opacity: 0.55,
+        depthWrite: false, side: THREE.DoubleSide,
+      })
+    );
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.y = 0.04;
+    g.add(ring);
+    g.userData.stone = stone;
+    a.group.add(g);
+    a.wallFx = g;
+  }
+
+  removeWallAura(a) {
+    a.group.remove(a.wallFx);
+    a.wallFx = null;
   }
 
   // vertical arc while the character vaults a grid cell; x/z motion
@@ -751,14 +813,16 @@ export class GameView {
 
   spawnProjectile(ev) {
     if (ev.k === 'magic') {
-      // glowing bolt from the mage's staff
+      // glowing bolt from the mage's staff (ev.big: the skill's
+      // giant arcane orb — same bolt, way scaled up)
+      const s = ev.big ? 2.8 : 1;
       const bolt = new THREE.Group();
       const core = new THREE.Mesh(
-        new THREE.SphereGeometry(0.16, 10, 10),
+        new THREE.SphereGeometry(0.16 * s, 10, 10),
         new THREE.MeshBasicMaterial({ color: 0xe6c4ff })
       );
       const halo = new THREE.Mesh(
-        new THREE.SphereGeometry(0.3, 10, 10),
+        new THREE.SphereGeometry(0.3 * s, 10, 10),
         new THREE.MeshBasicMaterial({
           color: 0xa050ff, transparent: true, opacity: 0.45,
           blending: THREE.AdditiveBlending, depthWrite: false,
@@ -865,6 +929,11 @@ export class GameView {
     this.time += dt;
 
     for (const a of this.players.values()) {
+      // orbiting stone slabs of the tanker's wall mode
+      if (a.wallFx) {
+        a.wallFx.rotation.y += dt * 1.7;
+        a.wallFx.userData.stone.opacity = 0.75 + Math.sin(this.time * 5) * 0.2;
+      }
       if (a.jumpT == null) continue;
       a.jumpT += dt;
       const k = Math.min(a.jumpT / a.jumpDur, 1);

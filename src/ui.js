@@ -1,4 +1,4 @@
-import { CLASSES, TOWERS, TOWER_LEVEL_MAX, TOWER_UPGRADE, CRYSTAL_BREACH_LIMIT } from './config.js';
+import { CLASSES, TOWERS, TOWER_LEVEL_MAX, TOWER_UPGRADE, CRYSTAL_BREACH_LIMIT, SKILLS } from './config.js';
 import { sfx, setSfxVolume } from './audio.js';
 import { normalizeRoomCode } from './utils.js';
 import { icon, mountIcons } from './icons.js';
@@ -24,6 +24,8 @@ export class UI {
     this.panelCell = null;
     this.lastSnap = null;
     this.isHost = false;
+    this.skillReady = false;   // gated by the shared 30s cooldown
+    this.myCls = this.selectedClass;
 
     mountIcons();
     this.bindMenu();
@@ -197,6 +199,7 @@ export class UI {
       this.cb.onAction({ t: 'start' });
     });
     $('jump-btn').addEventListener('click', () => this.cb.onJump?.());
+    $('skill-btn').addEventListener('click', () => this.cb.onSkill?.());
     $('room-chip').addEventListener('click', async () => {
       try { await navigator.clipboard.writeText(this.roomCode); this.toast('Code copied!', 'gold'); } catch { /* ok */ }
     });
@@ -344,6 +347,20 @@ export class UI {
       const ro = $('respawn-overlay');
       ro.classList.toggle('hidden', dead !== 1);
       if (dead === 1) $('respawn-timer').textContent = `${Math.ceil(resp)}s`;
+
+      // class special attack button (next to jump)
+      this.myCls = cls;
+      if (this._skCls !== cls) {
+        this._skCls = cls;
+        $('skill-icon').innerHTML = icon(CLASSES[cls]?.icon || 'sparkle');
+        $('skill-btn').title = `${SKILLS[cls]?.name || 'Special attack'} (K)`;
+      }
+      const skillCd = me[16] || 0;
+      this.skillReady = skillCd <= 0 && dead !== 1;
+      $('skill-btn').disabled = !this.skillReady;
+      const cdEl = $('skill-cd');
+      cdEl.classList.toggle('hidden', skillCd <= 0);
+      if (skillCd > 0) cdEl.textContent = Math.ceil(skillCd);
 
       // never disable the currently selected card — otherwise you
       // couldn't tap it again to unselect when resources run out
