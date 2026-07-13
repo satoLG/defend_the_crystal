@@ -498,6 +498,9 @@ export class Sim {
     const def = ENEMIES[kind];
     const s = GRID.SPAWNS[this.spawnIdx++ % GRID.SPAWNS.length];
     const w = at || cellToWorld(s.c, s.r);
+    // walk-in spawns start hidden inside the dark woods north of the
+    // board and march down out of the penumbra
+    if (!at) w.z = -HALF_H - 2.5 - Math.random() * 2.5;
     const stats = enemyStats(kind, boss, this.wave, this.waveStartCount, variant);
     const bossDef = boss === 2 ? BOSSES[variant] : null;
 
@@ -959,7 +962,7 @@ export class Sim {
       if (e.kbx || e.kbz) {
         pos.x += e.kbx * dt * 6;
         pos.z += e.kbz * dt * 6;
-        if (!e.flying) {
+        if (!e.flying && pos.z > -HALF_H + 0.2) {
           const fixed = this.grid.resolveCircle(pos.x, pos.z, ENEMY.RADIUS);
           pos.x = fixed.x; pos.z = fixed.z;
         }
@@ -1072,11 +1075,14 @@ export class Sim {
     for (const e of this.enemies) {
       const pos = e.vehicle.position;
       pos.x = clamp(pos.x, -HALF_W + 0.3, HALF_W - 0.3);
-      pos.z = clamp(pos.z, -HALF_H + 0.3, HALF_H - 0.3);
+      // enemies may exist a little north of the board (the dark woods
+      // they spawn hidden in) but never leave through the sides/south
+      pos.z = clamp(pos.z, -HALF_H - 5.5, HALF_H - 0.3);
       pos.y = 0;
       // steering/separation can nudge ground units into blocked cells
-      // (mid-jump the arc owns the position — it flies over the cell)
-      if (!e.flying && !e.jump) {
+      // (mid-jump the arc owns the position — it flies over the cell;
+      // off-board in the woods there is nothing to collide with)
+      if (!e.flying && !e.jump && pos.z > -HALF_H + 0.2) {
         const fixed = this.grid.resolveCircle(pos.x, pos.z, ENEMY.RADIUS * 0.8);
         pos.x = fixed.x; pos.z = fixed.z;
       }

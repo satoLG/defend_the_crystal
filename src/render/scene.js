@@ -26,12 +26,21 @@ export class GameScene {
 
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0x151128);
-    this.scene.fog = new THREE.Fog(0x151128, 34, 80);
+    // tight fog: the forest dissolves into darkness before any edge of
+    // the ground plane or tree cover can show
+    this.scene.fog = new THREE.Fog(0x151128, 34, 62);
 
     this.camera = new THREE.PerspectiveCamera(50, 1, 0.5, 200);
     this.lookTarget = new THREE.Vector3(0, 0, 2.2);
     this.camDir = new THREE.Vector3(0, Math.sin(0.98), Math.cos(0.98)).normalize();
     this.shake = 0;
+    // checkpoint stroll: camera leaves the board framing to track the player
+    this.followGoal = null;
+    this.followPos = new THREE.Vector3();
+    this.followBlend = 0;
+    this._camPos = new THREE.Vector3();
+    this._camLook = new THREE.Vector3();
+    this._followCam = new THREE.Vector3();
 
     this.raycaster = new THREE.Raycaster();
     this.groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
@@ -44,6 +53,7 @@ export class GameScene {
     this.buildPlaza();
     this.buildCrystal();
     this.buildForest();
+    this.buildForestFill();
     this.buildPenumbra();
     this.buildOverlay();
 
@@ -156,7 +166,7 @@ export class GameScene {
         let cr = tone[0] * jit, cg = tone[1] * jit, cb = tone[2] * jit;
         // penumbra: the forest swallows the top rows
         if (r <= 3) {
-          const dark = 0.42 + r * 0.16;
+          const dark = 0.26 + r * 0.19;
           cr *= dark; cg *= dark; cb *= dark * 1.08;
         }
         colors.push([cr, cg, cb]);
@@ -212,10 +222,11 @@ export class GameScene {
     }
 
     // the world around the clearing is forest floor, not a void:
-    // dark mossy ground stretching out under the trees
+    // mossy green ground (close to the board's grass, a shade darker)
+    // stretching out under the trees
     const base = new THREE.Mesh(
-      new THREE.PlaneGeometry(160, 160),
-      new THREE.MeshStandardMaterial({ color: 0x27301f, roughness: 1 })
+      new THREE.PlaneGeometry(240, 240),
+      new THREE.MeshStandardMaterial({ color: 0x3d5230, roughness: 1 })
     );
     base.rotation.x = -Math.PI / 2;
     base.position.y = -tileTop - 0.02;
@@ -224,12 +235,12 @@ export class GameScene {
 
     // subtle color breakup so the surrounding ground reads as terrain
     const patchGeo = new THREE.CircleGeometry(1, 10);
-    const patchMats = [0x2f3a24, 0x1f271a, 0x33402a, 0x2a2f22].map(
+    const patchMats = [0x466039, 0x33452a, 0x4c6b3e, 0x394d2e].map(
       (col) => new THREE.MeshStandardMaterial({ color: col, roughness: 1 })
     );
-    for (let i = 0; i < 60; i++) {
+    for (let i = 0; i < 90; i++) {
       const a = rng() * Math.PI * 2;
-      const rad = 12 + rng() * 26;
+      const rad = 12 + rng() * 38;
       const px = Math.cos(a) * rad;
       const pz = Math.sin(a) * rad * 1.3;
       // keep patches off the board and plaza
@@ -240,6 +251,30 @@ export class GameScene {
       patch.scale.setScalar(1.5 + rng() * 3.5);
       this.scene.add(patch);
     }
+
+    // world-space dark fog on the ground: beyond the tree band the
+    // scenery simply sinks into blackness — there is nothing out there
+    const vg = document.createElement('canvas');
+    vg.width = vg.height = 256;
+    const vctx = vg.getContext('2d');
+    const vgrad = vctx.createRadialGradient(128, 128, 0, 128, 128, 128);
+    vgrad.addColorStop(0, 'rgba(21,17,40,0)');
+    vgrad.addColorStop(0.44, 'rgba(21,17,40,0)');
+    vgrad.addColorStop(0.62, 'rgba(21,17,40,0.6)');
+    vgrad.addColorStop(0.85, 'rgba(21,17,40,0.94)');
+    vgrad.addColorStop(1, 'rgba(21,17,40,0.98)');
+    vctx.fillStyle = vgrad;
+    vctx.fillRect(0, 0, 256, 256);
+    const vTex = new THREE.CanvasTexture(vg);
+    vTex.colorSpace = THREE.SRGBColorSpace;
+    const vignette = new THREE.Mesh(
+      new THREE.PlaneGeometry(150, 170),
+      new THREE.MeshBasicMaterial({ map: vTex, transparent: true, depthWrite: false })
+    );
+    vignette.rotation.x = -Math.PI / 2;
+    vignette.position.set(0, 0.02, 4);
+    vignette.renderOrder = 1;
+    this.scene.add(vignette);
   }
 
   // the crystal's pedestal is the ONLY prop on the grid; the sanctuary
@@ -385,7 +420,7 @@ export class GameScene {
       const z = -HALF_H - 0.4 - depth * 6.2;
       // leave shadowy trail mouths where the spawns are
       if (depth < 0.3 && spawnXs.some((sx) => Math.abs(x - sx) < 1.5)) continue;
-      const darkness = 0.9 - depth * 0.55;
+      const darkness = 0.55 - depth * 0.35;
       placeTree(x, z, 0.75 + rng() * 0.95, darkness, rng() < 0.3);
     }
     // a few trees leaning INTO the top corners of the board
@@ -426,7 +461,7 @@ export class GameScene {
         x = side * (HALF_W + 7 + rng() * 11);
         z = -HALF_H - 4 + rng() * 26;
       }
-      placeTree(x, z, 0.8 + rng() * 1.1, 0.5 + rng() * 0.25, rng() < 0.35);
+      placeTree(x, z, 0.8 + rng() * 1.1, 0.3 + rng() * 0.15, rng() < 0.35);
     }
 
     // --- a tree line closes off the back of the plaza
@@ -472,6 +507,108 @@ export class GameScene {
     }
   }
 
+  // Instanced filler forest: a SOLID band of pines hugging the board and
+  // plaza edges out to the tree line (you can barely see the ground in
+  // it), then only sparse near-black silhouettes beyond — the dark fog
+  // owns the rest of the world. A couple of InstancedMeshes keep the
+  // whole thing at a handful of draw calls.
+  buildForestFill() {
+    const rng = mulberry32(99);
+    const spawnXs = SPAWNS.map((s) => cellToWorld(s.c, s.r).x);
+    const edgeX = HALF_W + 0.7;   // trees touch the board border
+    const bandW = 11;             // packed band width (to the tree line)
+    const northD = 13;            // packed depth of the enemy woods
+    const southZ = HALF_H + PLAZA.DEPTH;
+    const specs = [];
+
+    const push = (x, z, base) => {
+      const north = Math.min(Math.max((-z - HALF_H + 4) / 12, 0), 1);
+      const out = Math.max(0, Math.abs(x) - (edgeX + bandW)) +
+        Math.max(0, z - (southZ + 8)) + Math.max(0, -z - (HALF_H + northD));
+      const dark = Math.max(0.08, (base - north * 0.38 - out * 0.05) * (0.85 + rng() * 0.3));
+      specs.push({
+        x, z, s: 0.72 + rng() * 0.9, dark,
+        crooked: rng() < 0.3, rot: rng() * Math.PI * 2,
+      });
+    };
+    const jit = () => (rng() - 0.5) * 1.2;
+
+    // flank bands: wall-to-wall foliage from the board edge outward
+    for (const side of [-1, 1]) {
+      for (let x = edgeX; x <= edgeX + bandW; x += 1.5) {
+        for (let z = -HALF_H - 1; z <= HALF_H + 1.2; z += 1.5) {
+          push(side * (x + Math.abs(jit())), z + jit(), 0.62);
+        }
+      }
+    }
+    // north band: the dark woods the enemies march out of (the two
+    // spawn corridors stay clear so they don't walk through trunks)
+    for (let x = -(edgeX + bandW); x <= edgeX + bandW; x += 1.55) {
+      for (let z = -HALF_H - northD; z <= -HALF_H - 0.2; z += 1.55) {
+        const px = x + jit(), pz = z + jit();
+        if (spawnXs.some((sx) => Math.abs(px - sx) < 1.7)) continue;
+        push(px, pz, 0.5);
+      }
+    }
+    // the sanctuary plaza is walled in too: flanks and back
+    for (const side of [-1, 1]) {
+      for (let x = PLAZA.HALF_W + 0.8; x <= edgeX + bandW; x += 1.6) {
+        for (let z = HALF_H + 1; z <= southZ + 2; z += 1.6) {
+          push(side * (x + Math.abs(jit())), z + jit(), 0.6);
+        }
+      }
+    }
+    for (let x = -(edgeX + bandW); x <= edgeX + bandW; x += 1.6) {
+      for (let z = southZ + 1.5; z <= southZ + 8; z += 1.6) {
+        push(x + jit(), z + jit(), 0.55);
+      }
+    }
+    // beyond the tree line: sparse silhouettes swallowed by the dark
+    for (let i = 0; i < 140; i++) {
+      const x = (rng() * 2 - 1) * 58;
+      const z = -HALF_H - 26 + rng() * (ROWS * CELL + PLAZA.DEPTH + 26 + 16);
+      if (Math.abs(x) < edgeX + bandW + 1 && z > -HALF_H - northD - 1 && z < southZ + 9) continue;
+      push(x, z, 0.28);
+    }
+
+    const grabParts = (key) => {
+      const t = instantiate(key, { shadows: false });
+      t.group.updateMatrixWorld(true);
+      const parts = [];
+      t.group.traverse((o) => {
+        if (o.isMesh) {
+          const geo = o.geometry.clone();
+          geo.applyMatrix4(o.matrixWorld);
+          parts.push({ geo, mat: o.material });
+        }
+      });
+      return parts;
+    };
+    const m = new THREE.Matrix4();
+    const p = new THREE.Vector3(), s3 = new THREE.Vector3();
+    const q = new THREE.Quaternion();
+    const up = new THREE.Vector3(0, 1, 0);
+    const col = new THREE.Color();
+    for (const [key, list] of [
+      ['env-pine', specs.filter((t) => !t.crooked)],
+      ['env-pine-crooked', specs.filter((t) => t.crooked)],
+    ]) {
+      if (!list.length) continue;
+      for (const part of grabParts(key)) {
+        const inst = new THREE.InstancedMesh(part.geo, part.mat, list.length);
+        inst.frustumCulled = false;
+        list.forEach((t, i) => {
+          q.setFromAxisAngle(up, t.rot);
+          m.compose(p.set(t.x, 0, t.z), q, s3.setScalar(t.s));
+          inst.setMatrixAt(i, m);
+          inst.setColorAt(i, col.setScalar(t.dark));
+        });
+        inst.instanceColor.needsUpdate = true;
+        this.scene.add(inst);
+      }
+    }
+  }
+
   // layered darkness where the enemies come from + drifting fog
   buildPenumbra() {
     const gradTex = (stops, vertical = true) => {
@@ -499,16 +636,40 @@ export class GameScene {
     curtain.position.set(0, 5.4, -HALF_H - 7.6);
     this.scene.add(curtain);
 
-    // shadow spilling out of the woods onto the spawn rows
-    const spill = new THREE.Mesh(
-      new THREE.PlaneGeometry(56, 9.5),
+    // near shroud right at the forest mouth: swallows most of the tree
+    // wall so only silhouettes of the first trunks survive, and the
+    // enemies walk out of a black void
+    const shroud = new THREE.Mesh(
+      new THREE.PlaneGeometry(110, 15),
       new THREE.MeshBasicMaterial({
-        map: gradTex([[0, 'rgba(8,6,20,0.95)'], [0.45, 'rgba(8,6,20,0.55)'], [1, 'rgba(8,6,20,0)']]),
+        map: gradTex([[0, 'rgba(10,8,24,0.98)'], [0.6, 'rgba(10,8,24,0.92)'], [1, 'rgba(10,8,24,0)']]),
         transparent: true, depthWrite: false,
       })
     );
+    shroud.position.set(0, 5.1, -HALF_H - 1.4);
+    this.scene.add(shroud);
+
+    // soft pool of darkness spilling out of the woods over the spawn
+    // rows — radial, fading in every direction, so no hard edge ever
+    // reads as a rectangle on the ground; it swallows the trees at the
+    // forest mouth and the enemies walking out of it alike
+    const spillCv = document.createElement('canvas');
+    spillCv.width = spillCv.height = 256;
+    const sctx = spillCv.getContext('2d');
+    const sg = sctx.createRadialGradient(128, 128, 0, 128, 128, 128);
+    sg.addColorStop(0, 'rgba(6,4,16,0.92)');
+    sg.addColorStop(0.45, 'rgba(6,4,16,0.62)');
+    sg.addColorStop(1, 'rgba(6,4,16,0)');
+    sctx.fillStyle = sg;
+    sctx.fillRect(0, 0, 256, 256);
+    const spillTex = new THREE.CanvasTexture(spillCv);
+    spillTex.colorSpace = THREE.SRGBColorSpace;
+    const spill = new THREE.Mesh(
+      new THREE.PlaneGeometry(64, 22),
+      new THREE.MeshBasicMaterial({ map: spillTex, transparent: true, depthWrite: false })
+    );
     spill.rotation.x = -Math.PI / 2;
-    spill.position.set(0, 0.035, -HALF_H - 1 + 9.5 / 2);
+    spill.position.set(0, 0.035, -HALF_H - 3);
     spill.renderOrder = 2;
     this.scene.add(spill);
 
@@ -651,8 +812,9 @@ export class GameScene {
       new THREE.Vector3(-HALF_W - 0.8, 0, HALF_H + 0.6),
       new THREE.Vector3(HALF_W + 0.8, 0, HALF_H + 0.6),
       new THREE.Vector3(0, 2.6, -HALF_H),
-      // keep most of the resting plaza on screen below the board
-      new THREE.Vector3(0, 0.4, HALF_H + PLAZA.DEPTH - 1),
+      // keep the plaza entrance on screen below the board (the deep
+      // part is toured with the checkpoint follow-cam instead)
+      new THREE.Vector3(0, 0.4, HALF_H + 4),
     ];
     let lo = 8, hi = 130;
     for (let it = 0; it < 22; it++) {
@@ -680,6 +842,19 @@ export class GameScene {
     if (this.shakeEnabled === false) return;
     this.shake = Math.min(this.shake + amount, 0.7);
   }
+
+  // checkpoint stroll: while set, the camera glides off its board
+  // framing and tracks the given point (the local player) up close
+  setFollow(x, z) {
+    if (!this.followGoal) {
+      this.followGoal = new THREE.Vector3(x, 0, z);
+      this.followPos.set(x, 0, z);
+    } else {
+      this.followGoal.set(x, 0, z);
+    }
+  }
+
+  clearFollow() { this.followGoal = null; }
 
   setShadows(on) { this.moon.castShadow = on; }
 
@@ -710,16 +885,28 @@ export class GameScene {
       f.spr.position.x = f.x0 + Math.sin(this.time * f.speed + f.phase) * f.amp;
     }
 
+    // camera: blend between the fixed board framing and the checkpoint
+    // follow-cam, then layer shake on top
+    this.followBlend += ((this.followGoal ? 1 : 0) - this.followBlend) * Math.min(dt * 2, 1);
+    this._camPos.copy(this.baseCamPos || this.camera.position);
+    this._camLook.copy(this.lookTarget);
+    if (this.followBlend > 0.003) {
+      if (this.followGoal) this.followPos.lerp(this.followGoal, Math.min(dt * 6, 1));
+      const b = this.followBlend;
+      const k = b * b * (3 - 2 * b); // smoothstep for a gentle glide
+      this._followCam.copy(this.followPos).addScaledVector(this.camDir, 15);
+      this._camPos.lerp(this._followCam, k);
+      this._camLook.lerp(this.followPos, k);
+    }
+    this.camera.position.copy(this._camPos);
+    this.camera.lookAt(this._camLook);
+
     // camera shake decay
     if (this.shake > 0.001) {
       this.shake *= Math.exp(-6 * dt);
-      this.camera.position.copy(this.baseCamPos).add(new THREE.Vector3(
-        (Math.random() - 0.5) * this.shake,
-        (Math.random() - 0.5) * this.shake * 0.5,
-        (Math.random() - 0.5) * this.shake
-      ));
-    } else if (this.baseCamPos) {
-      this.camera.position.copy(this.baseCamPos);
+      this.camera.position.x += (Math.random() - 0.5) * this.shake;
+      this.camera.position.y += (Math.random() - 0.5) * this.shake * 0.5;
+      this.camera.position.z += (Math.random() - 0.5) * this.shake;
     }
   }
 
