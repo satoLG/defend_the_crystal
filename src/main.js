@@ -618,9 +618,13 @@ function frame(t) {
   }
 
   // checkpoints are free time: the camera leaves the board framing and
-  // follows the hero while they stroll (and rest) around the sanctuary
+  // follows the hero while they stroll (and rest) around the sanctuary.
+  // The match start counts as the first checkpoint — the pre-wave-1
+  // build phase gets the same free-roam camera.
   const phase = state.role === 'host' ? state.sim?.phase : state.snapNext?.ph;
-  if (state.started && !state.over && phase === 'checkpoint' &&
+  const waveN = state.role === 'host' ? state.sim?.wave : state.snapNext?.w;
+  const freeRoam = phase === 'checkpoint' || (phase === 'build' && waveN === 0);
+  if (state.started && !state.over && freeRoam &&
       (state.role === 'host' || state.selfInit) && !state.self.dead) {
     gs.setFollow(state.self.x, state.self.z);
   } else {

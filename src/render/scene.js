@@ -251,6 +251,30 @@ export class GameScene {
       patch.scale.setScalar(1.5 + rng() * 3.5);
       this.scene.add(patch);
     }
+
+    // world-space dark fog on the ground: beyond the tree band the
+    // scenery simply sinks into blackness — there is nothing out there
+    const vg = document.createElement('canvas');
+    vg.width = vg.height = 256;
+    const vctx = vg.getContext('2d');
+    const vgrad = vctx.createRadialGradient(128, 128, 0, 128, 128, 128);
+    vgrad.addColorStop(0, 'rgba(21,17,40,0)');
+    vgrad.addColorStop(0.44, 'rgba(21,17,40,0)');
+    vgrad.addColorStop(0.62, 'rgba(21,17,40,0.6)');
+    vgrad.addColorStop(0.85, 'rgba(21,17,40,0.94)');
+    vgrad.addColorStop(1, 'rgba(21,17,40,0.98)');
+    vctx.fillStyle = vgrad;
+    vctx.fillRect(0, 0, 256, 256);
+    const vTex = new THREE.CanvasTexture(vg);
+    vTex.colorSpace = THREE.SRGBColorSpace;
+    const vignette = new THREE.Mesh(
+      new THREE.PlaneGeometry(150, 170),
+      new THREE.MeshBasicMaterial({ map: vTex, transparent: true, depthWrite: false })
+    );
+    vignette.rotation.x = -Math.PI / 2;
+    vignette.position.set(0, 0.02, 4);
+    vignette.renderOrder = 1;
+    this.scene.add(vignette);
   }
 
   // the crystal's pedestal is the ONLY prop on the grid; the sanctuary
@@ -437,7 +461,7 @@ export class GameScene {
         x = side * (HALF_W + 7 + rng() * 11);
         z = -HALF_H - 4 + rng() * 26;
       }
-      placeTree(x, z, 0.8 + rng() * 1.1, 0.5 + rng() * 0.25, rng() < 0.35);
+      placeTree(x, z, 0.8 + rng() * 1.1, 0.3 + rng() * 0.15, rng() < 0.35);
     }
 
     // --- a tree line closes off the back of the plaza
@@ -483,35 +507,68 @@ export class GameScene {
     }
   }
 
-  // Instanced filler forest: hundreds of pines packing everything the
-  // camera can see around the clearing and the plaza, denser and darker
-  // with distance, so no bare ground or square edge ever shows. A couple
-  // of InstancedMeshes keep it at a handful of draw calls.
+  // Instanced filler forest: a SOLID band of pines hugging the board and
+  // plaza edges out to the tree line (you can barely see the ground in
+  // it), then only sparse near-black silhouettes beyond — the dark fog
+  // owns the rest of the world. A couple of InstancedMeshes keep the
+  // whole thing at a handful of draw calls.
   buildForestFill() {
     const rng = mulberry32(99);
-    const clearX = HALF_W + 1.1;
-    const plazaX = PLAZA.HALF_W + 1.1;
+    const spawnXs = SPAWNS.map((s) => cellToWorld(s.c, s.r).x);
+    const edgeX = HALF_W + 0.7;   // trees touch the board border
+    const bandW = 11;             // packed band width (to the tree line)
+    const northD = 13;            // packed depth of the enemy woods
     const southZ = HALF_H + PLAZA.DEPTH;
     const specs = [];
-    for (let i = 0; i < 2600 && specs.length < 620; i++) {
-      const x = (rng() * 2 - 1) * 72;
-      const z = -HALF_H - 30 + rng() * (ROWS * CELL + PLAZA.DEPTH + 30 + 24);
-      // keep the battlefield and the sanctuary plaza open
-      if (Math.abs(x) < clearX && z > -HALF_H - 0.6 && z < HALF_H + 0.6) continue;
-      if (Math.abs(x) < plazaX && z >= HALF_H - 0.6 && z < southZ + 1) continue;
-      // distance from the open areas drives darkness; the north (where
-      // enemies come from) is darker still
-      const dx = Math.max(0, Math.abs(x) - clearX);
-      const dzN = Math.max(0, -HALF_H - z);
-      const dzS = Math.max(0, z - southZ);
-      const d = Math.hypot(dx, Math.max(dzN, dzS));
-      if (d < 1 && rng() < 0.5) continue; // props already dress the very edge
-      const north = Math.min(Math.max((-z - HALF_H + 6) / 18, 0), 1);
-      const dark = Math.max(0.12, (0.72 - d * 0.016 - north * 0.34) * (0.85 + rng() * 0.3));
+
+    const push = (x, z, base) => {
+      const north = Math.min(Math.max((-z - HALF_H + 4) / 12, 0), 1);
+      const out = Math.max(0, Math.abs(x) - (edgeX + bandW)) +
+        Math.max(0, z - (southZ + 8)) + Math.max(0, -z - (HALF_H + northD));
+      const dark = Math.max(0.08, (base - north * 0.38 - out * 0.05) * (0.85 + rng() * 0.3));
       specs.push({
-        x, z, s: 0.8 + rng() * 1.15, dark,
+        x, z, s: 0.72 + rng() * 0.9, dark,
         crooked: rng() < 0.3, rot: rng() * Math.PI * 2,
       });
+    };
+    const jit = () => (rng() - 0.5) * 1.2;
+
+    // flank bands: wall-to-wall foliage from the board edge outward
+    for (const side of [-1, 1]) {
+      for (let x = edgeX; x <= edgeX + bandW; x += 1.5) {
+        for (let z = -HALF_H - 1; z <= HALF_H + 1.2; z += 1.5) {
+          push(side * (x + Math.abs(jit())), z + jit(), 0.62);
+        }
+      }
+    }
+    // north band: the dark woods the enemies march out of (the two
+    // spawn corridors stay clear so they don't walk through trunks)
+    for (let x = -(edgeX + bandW); x <= edgeX + bandW; x += 1.55) {
+      for (let z = -HALF_H - northD; z <= -HALF_H - 0.2; z += 1.55) {
+        const px = x + jit(), pz = z + jit();
+        if (spawnXs.some((sx) => Math.abs(px - sx) < 1.7)) continue;
+        push(px, pz, 0.5);
+      }
+    }
+    // the sanctuary plaza is walled in too: flanks and back
+    for (const side of [-1, 1]) {
+      for (let x = PLAZA.HALF_W + 0.8; x <= edgeX + bandW; x += 1.6) {
+        for (let z = HALF_H + 1; z <= southZ + 2; z += 1.6) {
+          push(side * (x + Math.abs(jit())), z + jit(), 0.6);
+        }
+      }
+    }
+    for (let x = -(edgeX + bandW); x <= edgeX + bandW; x += 1.6) {
+      for (let z = southZ + 1.5; z <= southZ + 8; z += 1.6) {
+        push(x + jit(), z + jit(), 0.55);
+      }
+    }
+    // beyond the tree line: sparse silhouettes swallowed by the dark
+    for (let i = 0; i < 140; i++) {
+      const x = (rng() * 2 - 1) * 58;
+      const z = -HALF_H - 26 + rng() * (ROWS * CELL + PLAZA.DEPTH + 26 + 16);
+      if (Math.abs(x) < edgeX + bandW + 1 && z > -HALF_H - northD - 1 && z < southZ + 9) continue;
+      push(x, z, 0.28);
     }
 
     const grabParts = (key) => {
@@ -592,16 +649,27 @@ export class GameScene {
     shroud.position.set(0, 5.1, -HALF_H - 1.4);
     this.scene.add(shroud);
 
-    // shadow spilling out of the woods onto the spawn rows
+    // soft pool of darkness spilling out of the woods over the spawn
+    // rows — radial, fading in every direction, so no hard edge ever
+    // reads as a rectangle on the ground; it swallows the trees at the
+    // forest mouth and the enemies walking out of it alike
+    const spillCv = document.createElement('canvas');
+    spillCv.width = spillCv.height = 256;
+    const sctx = spillCv.getContext('2d');
+    const sg = sctx.createRadialGradient(128, 128, 0, 128, 128, 128);
+    sg.addColorStop(0, 'rgba(6,4,16,0.92)');
+    sg.addColorStop(0.45, 'rgba(6,4,16,0.62)');
+    sg.addColorStop(1, 'rgba(6,4,16,0)');
+    sctx.fillStyle = sg;
+    sctx.fillRect(0, 0, 256, 256);
+    const spillTex = new THREE.CanvasTexture(spillCv);
+    spillTex.colorSpace = THREE.SRGBColorSpace;
     const spill = new THREE.Mesh(
-      new THREE.PlaneGeometry(60, 11),
-      new THREE.MeshBasicMaterial({
-        map: gradTex([[0, 'rgba(6,4,16,1)'], [0.4, 'rgba(6,4,16,0.7)'], [1, 'rgba(6,4,16,0)']]),
-        transparent: true, depthWrite: false,
-      })
+      new THREE.PlaneGeometry(64, 22),
+      new THREE.MeshBasicMaterial({ map: spillTex, transparent: true, depthWrite: false })
     );
     spill.rotation.x = -Math.PI / 2;
-    spill.position.set(0, 0.035, -HALF_H - 1 + 11 / 2);
+    spill.position.set(0, 0.035, -HALF_H - 3);
     spill.renderOrder = 2;
     this.scene.add(spill);
 

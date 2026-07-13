@@ -569,9 +569,10 @@ export class GameView {
       a.group.position.z = z;
       a.group.position.y = a.isGhost ? 0.25 + Math.sin(this.time * 3 + id) * 0.12 : 0;
       a.group.rotation.y = yaw;
-      // enemies materialize out of the northern darkness: nearly
-      // invisible on the spawn rows, fully lit a few cells in
-      const fade = Math.min(Math.max((z + HALF_H - 0.6) / 5.5, 0), 1);
+      // enemies spawn hidden deep in the northern woods and slowly
+      // step out of the penumbra: invisible until the forest mouth,
+      // fully lit a few cells into the board
+      const fade = Math.min(Math.max((z + HALF_H + 2) / 7, 0), 1);
       if (a.fade !== fade) {
         a.fade = fade;
         const baseOp = a.isGhost ? 0.8 : 1;
