@@ -1,4 +1,6 @@
-import { ENEMIES, ENEMY, WAVES, SUBBOSS, BOSS, SCALING, scaleFor } from '../config.js';
+import {
+  ENEMIES, ENEMY, WAVES, SUBBOSS, BOSS, BOSSES, BOSS_ORDER, SCALING, scaleFor,
+} from '../config.js';
 
 // ============================================================
 // Wave composition: which enemies spawn, when, and how strong.
@@ -59,7 +61,9 @@ export function buildWavePlan(wave, playerCount) {
     plan.push({ kind: kinds[kinds.length - 1], at: window * 0.6, boss: 1 });
   }
   if (isBossWave) {
-    plan.push({ kind: 'keeper', at: window * 0.7, boss: 2 });
+    // checkpoint bosses rotate: Coveiro, Tiro Cego, Zé do Caixão, Abobrado…
+    const variant = BOSS_ORDER[(wave / WAVES.CHECKPOINT_EVERY - 1) % BOSS_ORDER.length];
+    plan.push({ kind: BOSSES[variant].kind, at: window * 0.7, boss: 2, variant });
   }
 
   plan.sort((a, b) => a.at - b.at);
@@ -67,14 +71,17 @@ export function buildWavePlan(wave, playerCount) {
 }
 
 // Concrete stats for one spawned enemy.
-export function enemyStats(kind, boss, wave, playerCount) {
+export function enemyStats(kind, boss, wave, playerCount, variant) {
   const def = ENEMIES[kind];
   const hpMult = waveHpMult(wave, playerCount);
   const speed = def.speed * (1 + ENEMY.SPEED_PER_WAVE * (wave - 1));
   if (boss === 2) {
+    const v = BOSSES[variant] || {};
     return {
-      hp: def.hp * hpMult, dmg: def.dmg, speed,
-      pts: def.pts, xp: def.xp, scale: BOSS.scale, breach: BOSS.breach,
+      hp: def.hp * hpMult * (v.hpMult || 1),
+      dmg: def.dmg * (v.dmgMult || 1),
+      speed: speed * (v.speedMult || 1),
+      pts: BOSS.pts, xp: BOSS.xp, scale: BOSS.scale, breach: BOSS.breach,
     };
   }
   if (boss === 1) {

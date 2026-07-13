@@ -43,6 +43,12 @@ const MANIFEST = {
   'prop-shield': M('props/shield.glb', { raw: true }),
   'prop-staff': M('props/staff.glb', { raw: true }),
   'prop-crystal': M('props/crystal-small.glb', { raw: true }),
+  // graveyard-kit props for the boss powers (kit units — normalized here)
+  'prop-gravestone': M('props/gravestone.glb', { h: 1.0 }),
+  'prop-grave-mound': M('props/grave-mound.glb', { fp: 1.5 }),
+  'prop-pumpkin': M('props/pumpkin.glb', { h: 0.55 }),
+  'prop-shovel': M('props/shovel.glb', { raw: true }),
+  'prop-coffin': M('props/coffin.glb', { raw: true }),
   // obstacles — big and chunky so they read as impassable
   'obstacle-barrel': M('obstacles/barrel.glb', { fp: 1.6 }),
   'obstacle-rocks': M('env/rocks-tall.glb', { h: 1.5 }),

@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { instantiate } from './assets.js';
-import { CLASSES, TOWERS, JUMP } from '../config.js';
+import { CLASSES, TOWERS, JUMP, ENEMIES, BOSSES } from '../config.js';
 import { cellToWorld, CRYSTAL_POS } from '../sim/grid.js';
 import { lerp, angleLerp } from '../utils.js';
 import { sfx } from '../audio.js';
@@ -91,6 +91,22 @@ const CLASS_TINT = {
   berserker: 0xff6a4d, tanker: 0x6a9cff, archer: 0x7de87d, mage: 0xc07dff,
 };
 
+// checkpoint bosses carry their name over their head
+const BOSS_BY_KIND = {};
+for (const b of Object.values(BOSSES)) BOSS_BY_KIND[b.kind] = b;
+
+// graveyard-kit props are authored in the same mini scale as the
+// character hand props, so they attach straight onto the bones
+const ENEMY_PROPS = {
+  keeper: [{ key: 'prop-shovel', bone: 'arm-right', pos: [0, -0.13, 0.04], rot: [0.85, 0, -0.4], scale: 0.9 }],
+  archer: [
+    { gen: makeBow, bone: 'arm-right', pos: [0, -0.14, 0.02], rot: [0.15, -0.5, -0.55], scale: 1.35 },
+    { gen: makeQuiver, bone: 'torso', pos: [-0.05, 0.05, -0.1], rot: [0.25, 0, 0.35] },
+  ],
+  // Zé do Caixão hauls his own coffin on his back
+  coffin: [{ key: 'prop-coffin', bone: 'torso', pos: [0, -0.18, -0.16], rot: [-Math.PI / 2, 0, 0.12], scale: 0.7 }],
+};
+
 // tower base color per upgrade level: grey→blue→green→red→purple→gold
 const TOWER_LEVEL_COLORS = [0x9aa1ab, 0x4a86e8, 0x3fbf5f, 0xe0503a, 0x9a4ae0, 0xe8b84b];
 const TOWERS_MAX_VISUAL = 6;
@@ -103,6 +119,7 @@ export class GameView {
     this.enemies = new Map();
     this.towers = new Map();
     this.obstacles = new Map();
+    this.graves = new Map();    // gravedigger tombs, id -> {group, riseT}
     this.projectiles = [];
     this.effects = [];
     this.corpses = [];
@@ -212,13 +229,12 @@ export class GameView {
     else fg.material.color.setHSL(lerp(0, 0.33, frac), 0.75, 0.5);
   }
 
-  makeNameLabel(name, lvl, tint) {
+  makeTextSprite(text, tint, width = 3.1) {
     const canvas = document.createElement('canvas');
     canvas.width = 384; canvas.height = 84;
     const ctx = canvas.getContext('2d');
     ctx.font = 'bold 52px "Trebuchet MS", sans-serif';
     ctx.textAlign = 'center';
-    const text = `${name}  Lv${lvl}`;
     ctx.lineWidth = 8;
     ctx.strokeStyle = 'rgba(0,0,0,0.75)';
     ctx.strokeText(text, 192, 60);
@@ -227,9 +243,13 @@ export class GameView {
     const tex = new THREE.CanvasTexture(canvas);
     tex.colorSpace = THREE.SRGBColorSpace;
     const spr = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthWrite: false }));
-    spr.scale.set(3.1, 0.68, 1);
+    spr.scale.set(width, width * 0.22, 1);
     spr.renderOrder = 11;
     return spr;
+  }
+
+  makeNameLabel(name, lvl, tint) {
+    return this.makeTextSprite(`${name}  Lv${lvl}`, tint);
   }
 
   ensurePlayer(row) {
@@ -239,7 +259,7 @@ export class GameView {
     const cls = row[PL.CLS];
     a = this.makeAnimated(CLASSES[cls]?.model || 'char-berserker');
     a.cls = cls;
-    this.attachProps(a, cls);
+    this.attachProps(a, CLASS_PROPS[cls]);
 
     const tint = CLASS_TINT[cls] || 0xffffff;
     // class-colored ring under the character
@@ -267,8 +287,8 @@ export class GameView {
     return a;
   }
 
-  attachProps(actor, cls) {
-    for (const spec of CLASS_PROPS[cls] || []) {
+  attachProps(actor, specs) {
+    for (const spec of specs || []) {
       const bone = actor.group.getObjectByName(spec.bone);
       if (!bone) continue;
       const holder = new THREE.Group();
@@ -301,24 +321,37 @@ export class GameView {
     let a = this.enemies.get(id);
     if (a) return a;
     const kind = row[EN.KIND];
-    a = this.makeAnimated(`enemy-${kind}`);
+    const def = ENEMIES[kind] || {};
+    const isBoss = row[EN.BOSS] === 2;
+    a = this.makeAnimated(def.model || `enemy-${kind}`);
     a.kind = kind;
     const scale = row[EN.SCALE] || 1;
     a.group.scale.setScalar(scale);
-    a.isGhost = kind === 'ghost';
+    a.isGhost = !!def.flying;
+    a.isArcher = !!def.archer;
     if (a.isGhost) {
       for (const m of a.mats) { m.transparent = true; m.opacity = 0.8; }
     }
+    if (a.isArcher) this.attachProps(a, ENEMY_PROPS.archer);
+    if (kind === 'keeper') this.attachProps(a, ENEMY_PROPS.keeper);
+    if (kind === 'vampire' && isBoss) this.attachProps(a, ENEMY_PROPS.coffin);
     if (row[EN.BOSS] > 0) {
       const crown = new THREE.Mesh(
         new THREE.ConeGeometry(0.16, 0.22, 5),
         new THREE.MeshStandardMaterial({
-          color: row[EN.BOSS] === 2 ? 0xffd24a : 0xff7a4a,
-          emissive: row[EN.BOSS] === 2 ? 0xaa7a00 : 0x882200, emissiveIntensity: 0.8,
+          color: isBoss ? 0xffd24a : 0xff7a4a,
+          emissive: isBoss ? 0xaa7a00 : 0x882200, emissiveIntensity: 0.8,
         })
       );
       crown.position.y = 1.75;
       a.group.add(crown);
+    }
+    if (isBoss) {
+      // the boss announces itself: name floating over its head
+      const bossName = BOSS_BY_KIND[kind]?.name || def.name || kind;
+      const label = this.makeTextSprite(bossName.toUpperCase(), 0xffd24a, 2.1);
+      label.position.y = 2.15;
+      a.group.add(label);
     }
     a.hpBar = this.makeHpBar(row[EN.BOSS] ? 1.3 : 0.85, 1.55);
     a.hpBar.visible = false;
@@ -327,6 +360,23 @@ export class GameView {
     this.enemies.set(id, a);
     this.setLoco(a, 'walk');
     return a;
+  }
+
+  // ---------------- gravedigger tombs ----------------
+
+  ensureGrave(row) {
+    const [id, x, z] = row;
+    if (this.graves.has(id)) return;
+    const group = new THREE.Group();
+    const mound = instantiate('prop-grave-mound').group;
+    const stone = instantiate('prop-gravestone').group;
+    stone.position.z = -0.4; // headstone at the head of the mound
+    group.add(mound, stone);
+    group.position.set(x, -1.3, z);
+    group.rotation.y = (id % 7) * 0.9;
+    this.scene.add(group);
+    this.graves.set(id, { group, riseT: 0 });
+    this.burst(x, z, 0.9, 0xa2764a); // dirt kicked up as it surfaces
   }
 
   ensureTower(row) {
@@ -487,6 +537,16 @@ export class GameView {
       if (!seenO.has(id)) { this.scene.remove(g); this.obstacles.delete(id); }
     }
 
+    // ---- gravedigger tombs (rise on appear, crumble away on remove)
+    const seenG = new Set();
+    for (const row of next.gr || []) { seenG.add(row[0]); this.ensureGrave(row); }
+    for (const [id, g] of this.graves) {
+      if (!seenG.has(id)) {
+        this.graves.delete(id);
+        this.effects.push({ type: 'grave-sink', mesh: g.group, t: 0, dur: 0.55 });
+      }
+    }
+
     this.updateDrops(prev?.dr, next.dr, alpha, selfId);
   }
 
@@ -530,13 +590,14 @@ export class GameView {
         if (!a) return;
         const name = a.cls
           ? { berserker: 'attack-melee-right', tanker: 'attack-melee-right', archer: 'holding-right-shoot', mage: 'interact-right' }[a.cls]
-          : 'attack-melee-right';
+          : (a.isArcher ? 'holding-right-shoot' : 'attack-melee-right');
         this.playOnce(a, name, 0.6);
         if (typeof ev.tx === 'number') {
           a.group.rotation.y = Math.atan2(ev.tx - a.group.position.x, ev.tz - a.group.position.z);
         }
         // melee swings get a visible slash arc + swing sound
-        const isMelee = a.cls ? (a.cls === 'berserker' || a.cls === 'tanker') : true;
+        // (ev.r marks ranged enemy attacks: arrows / lobbed pumpkins)
+        const isMelee = a.cls ? (a.cls === 'berserker' || a.cls === 'tanker') : !ev.r;
         if (isMelee) {
           this.spawnSlash(
             a.group.position.x, a.group.position.z, a.group.rotation.y,
@@ -586,6 +647,21 @@ export class GameView {
         this.burst(ev.x, ev.z, 1.4, 0x8fe98f);
         break;
       }
+      case 'spawn': {
+        // clawing out of a gravedigger tomb
+        if (ev.g) this.burst(ev.x, ev.z, 1.0, 0x9a4ae0);
+        break;
+      }
+      case 'ejump': {
+        // vampire vaulting the maze — swarm of bats around the hop
+        const a = this.enemies.get(ev.id);
+        if (!a) return;
+        a.jumpT = 0;
+        a.jumpDur = ev.dur || JUMP.DUR;
+        if (a.actions.jump) this.playOnce(a, 'jump', a.jumpDur);
+        this.spawnBats(a);
+        break;
+      }
     }
   }
 
@@ -597,6 +673,42 @@ export class GameView {
     a.jumpT = 0;
     a.jumpDur = dur || JUMP.DUR;
     if (a.actions.jump) this.playOnce(a, 'jump', a.jumpDur);
+  }
+
+  // flutter of little black bats swirling around a jumping vampire;
+  // the swarm follows the actor through the hop and disperses
+  spawnBats(actor) {
+    const g = new THREE.Group();
+    const mat = new THREE.MeshBasicMaterial({
+      color: 0x241a38, transparent: true, opacity: 0.95, side: THREE.DoubleSide,
+    });
+    const wingGeo = new THREE.PlaneGeometry(0.17, 0.1);
+    const bats = [];
+    for (let i = 0; i < 7; i++) {
+      const bat = new THREE.Group();
+      const wings = [];
+      for (const side of [-1, 1]) {
+        const holder = new THREE.Group();
+        const wing = new THREE.Mesh(wingGeo, mat);
+        wing.rotation.x = -Math.PI / 2; // lie flat so the top-down camera sees them
+        wing.position.x = side * 0.085;
+        holder.add(wing);
+        bat.add(holder);
+        wings.push(holder);
+      }
+      g.add(bat);
+      bats.push({
+        bat, wings,
+        a: Math.random() * Math.PI * 2,
+        rad: 0.15 + Math.random() * 0.3,
+        rise: 0.7 + Math.random() * 0.9,
+        spin: (2.5 + Math.random() * 3) * (Math.random() < 0.5 ? -1 : 1),
+        flap: 16 + Math.random() * 8,
+        y0: 0.5 + Math.random() * 0.6,
+      });
+    }
+    this.scene.add(g);
+    this.effects.push({ type: 'bats', mesh: g, mat, bats, actor, t: 0, dur: 1.05 });
   }
 
   spawnCorpse(a) {
@@ -663,10 +775,14 @@ export class GameView {
       });
       return;
     }
-    const key = { arrow: 'ammo-arrow', cannonball: 'ammo-cannonball', boulder: 'ammo-boulder' }[ev.k] || 'ammo-arrow';
+    const key = {
+      arrow: 'ammo-arrow', cannonball: 'ammo-cannonball',
+      boulder: 'ammo-boulder', pumpkin: 'prop-pumpkin',
+    }[ev.k] || 'ammo-arrow';
     const mesh = instantiate(key, { shadows: false }).group;
     if (ev.k === 'boulder') mesh.scale.setScalar(1.5);
     if (ev.k === 'arrow') mesh.scale.setScalar(0.55);
+    if (ev.k === 'pumpkin') mesh.scale.setScalar(1.6);
     this.scene.add(mesh);
     this.projectiles.push({
       mesh,
@@ -680,7 +796,7 @@ export class GameView {
   }
 
   spawnAoe(ev) {
-    const color = { mage: 0xc07dff, cannonball: 0xffa040, boulder: 0xcfa070 }[ev.k] || 0xffffff;
+    const color = { mage: 0xc07dff, cannonball: 0xffa040, boulder: 0xcfa070, pumpkin: 0xff8c1a }[ev.k] || 0xffffff;
     if (ev.ft > 0) {
       // telegraph circle, then burst
       const warn = new THREE.Mesh(
@@ -754,6 +870,24 @@ export class GameView {
       const k = Math.min(a.jumpT / a.jumpDur, 1);
       a.group.position.y = Math.sin(k * Math.PI) * JUMP.HEIGHT;
       if (k >= 1) { a.jumpT = null; a.group.position.y = 0; }
+    }
+    // vaulting vampires get the same arc (runs after applySnapshot, so
+    // it overrides the grounded y the snapshot wrote)
+    for (const a of this.enemies.values()) {
+      if (a.jumpT == null) continue;
+      a.jumpT += dt;
+      const k = Math.min(a.jumpT / a.jumpDur, 1);
+      a.group.position.y = Math.sin(k * Math.PI) * JUMP.HEIGHT;
+      if (k >= 1) { a.jumpT = null; a.group.position.y = 0; }
+    }
+
+    // tombs rising out of the earth
+    for (const g of this.graves.values()) {
+      if (g.riseT == null) continue;
+      g.riseT += dt;
+      const k = Math.min(g.riseT / 0.55, 1);
+      g.group.position.y = -1.3 * (1 - easeOut(k));
+      if (k >= 1) { g.riseT = null; g.group.position.y = 0; }
     }
 
     for (const group of [this.players, this.enemies]) {
@@ -830,6 +964,20 @@ export class GameView {
         e.mesh.material.opacity = 0.85 * (1 - k);
       } else if (e.type === 'warn') {
         e.mesh.material.opacity = 0.22 + Math.sin(this.time * 10) * 0.08;
+      } else if (e.type === 'bats') {
+        // swarm rides along with the vampire, spiraling out and up
+        if (e.actor) e.mesh.position.copy(e.actor.group.position);
+        for (const b of e.bats) {
+          const ang = b.a + this.time * b.spin;
+          const rad = b.rad + k * 1.3;
+          b.bat.position.set(Math.cos(ang) * rad, b.y0 + k * b.rise, Math.sin(ang) * rad);
+          const f = Math.sin(this.time * b.flap) * 0.85;
+          b.wings[0].rotation.z = f;
+          b.wings[1].rotation.z = -f;
+        }
+        e.mat.opacity = 0.95 * (1 - k * k);
+      } else if (e.type === 'grave-sink') {
+        e.mesh.position.y = -1.3 * easeOut(k);
       } else if (e.type === 'slash') {
         // sweep the arc across the front and fade it out
         e.mesh.rotation.y = e.baseYaw - 0.55 + easeOut(k) * 1.2;
@@ -856,10 +1004,12 @@ export class GameView {
     for (const a of this.enemies.values()) this.scene.remove(a.group);
     for (const a of this.towers.values()) this.scene.remove(a.group);
     for (const g of this.obstacles.values()) this.scene.remove(g);
+    for (const g of this.graves.values()) this.scene.remove(g.group);
     for (const p of this.projectiles) this.scene.remove(p.mesh);
     for (const e of this.effects) if (e.mesh) this.scene.remove(e.mesh);
     for (const c of this.corpses) this.scene.remove(c.actor.group);
-    this.players.clear(); this.enemies.clear(); this.towers.clear(); this.obstacles.clear();
+    this.players.clear(); this.enemies.clear(); this.towers.clear();
+    this.obstacles.clear(); this.graves.clear();
     this.projectiles = []; this.effects = []; this.corpses = [];
     this.xpOrbs.count = 0; this.ptsOrbs.count = 0;
     this.clearGhost();

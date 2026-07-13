@@ -67,9 +67,21 @@ at full strength.
 ### Enemies
 
 Skeletons (fast fodder), zombies (slow, tanky), 👻 ghosts (*fly straight
-over your maze*), orcs (heavy), vampires (fast **and** heavy), and the
-graveyard keeper as boss. Sub-bosses are scaled-up versions of the
+over your maze*), skeleton archers (stop and shoot arrows at your
+characters), orcs (heavy), and vampires (fast **and** heavy — every few
+seconds they *vault over your walls* in a swarm of bats when it's a
+shortcut). Sub-bosses (every 5th wave) are scaled-up versions of the
 strongest rank alive — bigger, meaner, worth more.
+
+Every 10th wave a **named boss** stomps in, on rotation:
+
+- **Coveiro** — the giant gravedigger raises tombs out of the ground
+  mid-path that keep disgorging zombies and skeletons
+- **Tiro Cego** — a giant skeleton archer that volleys arrows at *every*
+  character at once
+- **Zé do Caixão** — a giant vampire hauling his own coffin; chains two
+  wall-vaults back to back before the cooldown kicks in
+- **Abobrado** — a giant ghost lobbing carved pumpkins with area damage
 
 ## Controls
 

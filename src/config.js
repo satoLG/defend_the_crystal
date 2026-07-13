@@ -103,13 +103,16 @@ export const OBSTACLES = ['rocks', 'barrel']; // random cosmetic variety
 export const OBSTACLE_STOCK_CAP = 10;
 
 // ---------- enemies ----------
+// archer: stops and fires arrows at characters instead of melee
 export const ENEMIES = {
-  skeleton: { hp: 40,  speed: 2.3, dmg: 8,  pts: 4,  xp: 7,  fromWave: 1, model: 'enemy-skeleton' },
-  zombie:   { hp: 95,  speed: 1.5, dmg: 14, pts: 6,  xp: 11, fromWave: 2, model: 'enemy-zombie' },
-  ghost:    { hp: 33,  speed: 2.9, dmg: 6,  pts: 5,  xp: 9,  fromWave: 4, model: 'enemy-ghost', flying: true },
-  orc:      { hp: 190, speed: 1.9, dmg: 22, pts: 10, xp: 18, fromWave: 6, model: 'enemy-orc' },
-  vampire:  { hp: 290, speed: 2.5, dmg: 30, pts: 16, xp: 30, fromWave: 9, model: 'enemy-vampire' },
-  keeper:   { hp: 1150, speed: 1.6, dmg: 40, pts: 110, xp: 260, fromWave: 999, model: 'enemy-keeper' }, // boss only
+  skeleton:   { name: 'Skeleton', hp: 40,  speed: 2.3, dmg: 8,  pts: 4,  xp: 7,  fromWave: 1, model: 'enemy-skeleton' },
+  zombie:     { name: 'Zombie',   hp: 95,  speed: 1.5, dmg: 14, pts: 6,  xp: 11, fromWave: 2, model: 'enemy-zombie' },
+  ghost:      { name: 'Ghost',    hp: 33,  speed: 2.9, dmg: 6,  pts: 5,  xp: 9,  fromWave: 4, model: 'enemy-ghost', flying: true },
+  skelarcher: { name: 'Skeleton Archer', hp: 55, speed: 2.1, dmg: 11, pts: 8, xp: 13, fromWave: 5, model: 'enemy-skeleton',
+                archer: { range: 6.5, rate: 0.55, projSpeed: 13 } },
+  orc:        { name: 'Orc',      hp: 190, speed: 1.9, dmg: 22, pts: 10, xp: 18, fromWave: 6, model: 'enemy-orc' },
+  vampire:    { name: 'Vampire',  hp: 290, speed: 2.5, dmg: 30, pts: 16, xp: 30, fromWave: 9, model: 'enemy-vampire', jumper: true },
+  keeper:     { name: 'Coveiro',  hp: 1150, speed: 1.6, dmg: 40, pts: 110, xp: 260, fromWave: 999, model: 'enemy-keeper', summoner: true }, // boss only
 };
 
 export const ENEMY = {
@@ -123,10 +126,42 @@ export const ENEMY = {
   BREACH_DIST: 1.0,      // how close to the crystal counts as a breach
   HP_PER_WAVE: 0.16,     // +16% HP per wave past the first
   SPEED_PER_WAVE: 0.006, // slight creep
+  JUMP_EVERY: 10,        // seconds between vampire shortcut hops
+  // flow-dist saved for a hop to count as a shortcut (an orthogonal
+  // step costs 2 — going around a lone tower only saves 2, so single
+  // towers never trigger hops, real wall lines do)
+  JUMP_MIN_GAIN: 4,
+};
+
+// the gravedigger pulls tombs out of the ground that keep disgorging
+// zombies & skeletons until the tomb is spent (or he dies)
+export const SUMMON = {
+  FIRST: 3.5,        // seconds after spawning until the first tomb
+  EVERY: 8,          // seconds between tombs
+  PER_GRAVE: 3,      // enemies each tomb spawns
+  INTERVAL: 1.7,     // seconds between spawns out of one tomb
+  RADIUS: 2,         // tombs rise within this many cells of the keeper
+  MAX_ENEMIES: 42,   // stop summoning if the board is already flooded
+  KINDS: ['zombie', 'skeleton'],
 };
 
 export const SUBBOSS = { hpMult: 7, dmgMult: 1.8, scale: 1.65, ptsMult: 6, xpMult: 6, breach: 3 };
-export const BOSS = { scale: 2.1, breach: 5 };
+export const BOSS = { scale: 2.1, breach: 5, pts: 110, xp: 260 };
+
+// checkpoint-wave bosses (waves 10, 20, 30…), rotating in this order.
+// Multipliers sit on top of the base kind's wave-scaled stats so every
+// boss lands near the keeper's power budget.
+export const BOSSES = {
+  coveiro:  { kind: 'keeper', name: 'Coveiro' },
+  tirocego: { kind: 'skelarcher', name: 'Tiro Cego',
+              hpMult: 19, dmgMult: 2.6, speedMult: 0.85, multishot: true },
+  zecaixao: { kind: 'vampire', name: 'Zé do Caixão',
+              hpMult: 3.6, dmgMult: 1.5, speedMult: 0.9, jumps: 2 },
+  abobrado: { kind: 'ghost', name: 'Abobrado',
+              hpMult: 26, dmgMult: 1, speedMult: 0.72,
+              pumpkin: { range: 7.5, rate: 0.4, dmg: 26, aoe: 1.7, projSpeed: 8 } },
+};
+export const BOSS_ORDER = ['coveiro', 'tirocego', 'zecaixao', 'abobrado'];
 
 // ---------- waves ----------
 export const WAVES = {
