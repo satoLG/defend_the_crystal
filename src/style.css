@@ -602,3 +602,53 @@ input:focus { border-color: var(--gold); }
   text-transform: uppercase; letter-spacing: 1px;
 }
 .hero-edit .ico { width: 0.95em; height: 0.95em; }
+
+/* ---------- class glyphs replacing the old thumbnails ---------- */
+.pl-cls .ico { width: 1.9rem; height: 1.9rem; color: var(--gold); }
+.hero-thumb .ico { width: 42px; height: 42px; color: var(--gold); }
+#pb-class {
+  cursor: pointer; padding: 0; font-family: inherit;
+  transition: transform 0.06s, filter 0.15s;
+}
+#pb-class:hover { filter: brightness(1.2); border-color: var(--gold); }
+#pb-class:active { transform: scale(0.94); }
+#pb-class .ico { width: 26px; height: 26px; color: var(--gold); }
+
+/* back button sits opposite the settings gear */
+.corner-left { left: 12px; right: auto; }
+
+/* ---------- character select ---------- */
+#char-list {
+  display: flex; flex-direction: column; gap: 8px;
+  margin: 10px 0 14px; max-height: 48vh; overflow-y: auto;
+}
+.hero-row {
+  display: flex; align-items: center; gap: 12px; padding: 9px 11px;
+  border-radius: 14px; border: 2px solid rgba(232, 184, 75, 0.28);
+  background: rgba(0, 0, 0, 0.3); cursor: pointer; font-family: inherit; color: var(--text);
+}
+.hero-row:hover { border-color: var(--gold); }
+.hero-row .hr-icon { width: 40px; height: 40px; flex: 0 0 auto; display: flex; align-items: center; justify-content: center; }
+.hero-row .hr-icon .ico { width: 34px; height: 34px; color: var(--gold); }
+.hero-row .hr-meta { flex: 1; text-align: left; overflow: hidden; }
+.hero-row .hr-name { font-weight: 800; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hero-row .hr-cls { font-size: 0.76rem; color: var(--gold); }
+.hero-row .hr-actions { display: flex; gap: 6px; flex: 0 0 auto; }
+.hr-actions .btn.small { padding: 6px 9px; }
+#char-list:empty::after { content: "No heroes yet — create one below."; color: rgba(240,233,216,.5); font-size: .85rem; }
+
+/* ---------- character stats modal ---------- */
+#stats-title { display: flex; align-items: center; justify-content: center; gap: 8px; }
+#stats-title .ico { width: 1.7rem; height: 1.7rem; color: var(--gold); }
+.stats-rows {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 8px 12px;
+  margin: 14px 0 16px; text-align: left;
+}
+.stat-item {
+  display: flex; justify-content: space-between; align-items: baseline; gap: 8px;
+  padding: 7px 11px; background: rgba(0, 0, 0, 0.28);
+  border-radius: 9px; border: 1px solid rgba(240, 233, 216, 0.1);
+}
+.stat-item .sk { color: rgba(240, 233, 216, 0.6); font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.5px; }
+.stat-item .sv { font-weight: 800; color: var(--gold); white-space: nowrap; }
+.stat-item.wide { grid-column: 1 / -1; }

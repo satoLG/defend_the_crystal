@@ -1,11 +1,14 @@
-import { CLASSES, TOWERS, TOWER_LEVEL_MAX, TOWER_UPGRADE, CRYSTAL_BREACH_LIMIT, SKILLS } from './config.js';
+import { CLASSES, TOWERS, TOWER_LEVEL_MAX, TOWER_UPGRADE, CRYSTAL_BREACH_LIMIT, SKILLS, PLAYER } from './config.js';
 import { sfx, setSfxVolume } from './audio.js';
 import { normalizeRoomCode } from './utils.js';
 import { icon, mountIcons } from './icons.js';
 import { settings } from './settings.js';
 import { music } from './music.js';
-import { loadCharacter, saveCharacter } from './character.js';
+import { loadRoster, getActiveCharacter, upsertCharacter, deleteCharacter, setActive, defaultCharacter } from './character.js';
 import { getSlots } from './render/customize.js';
+
+// the class glyph (svg) used everywhere a hero's class is shown
+const classIcon = (cls) => icon('cls-' + cls);
 
 // per-class stat bars + one-line special-power blurbs for the
 // character screen (kept here so the DOM layer owns its own copy)
@@ -65,20 +68,24 @@ const entityImg = (name) =>
 export class UI {
   constructor(callbacks) {
     this.cb = callbacks;
-    this.character = loadCharacter();     // { name, cls, colors }
-    this.charDraft = null;                // working copy on the creation screen
-    this.preview = null;                  // 3D turntable (attached after assets load)
+    this.character = getActiveCharacter();  // active hero, or null if none yet
+    this.charDraft = null;                  // working copy on the creation screen
+    this.editingId = null;                  // id being edited (null = brand new)
+    this.preview = null;                    // 3D turntable (attached after assets load)
     this.selectedItem = null;   // build card
     this.pendingCell = null;    // two-tap confirm on touch
     this.panelCell = null;
     this.lastSnap = null;
+    this.lastMe = null;         // own player snapshot row (for the stats modal)
     this.isHost = false;
     this.skillReady = false;   // gated by this character's own 30s cooldown
-    this.myCls = this.character.cls;
+    this.myCls = this.character?.cls || 'berserker';
 
     mountIcons();
     this.bindMenu();
+    this.bindCharSelect();
     this.bindCharacter();
+    this.bindStats();
     this.bindLobby();
     this.bindHud();
     this.bindOverlays();
@@ -125,19 +132,26 @@ export class UI {
   // ---------------- menu ----------------
 
   bindMenu() {
-    const heroName = () => this.character.name.trim() || 'Hero';
+    const active = () => {
+      const c = this.character || getActiveCharacter();
+      return c ? { ...c, name: (c.name || '').trim() || 'Hero' } : null;
+    };
 
-    $('hero-card').addEventListener('click', () => { sfx.click(); this.showCharacter(); });
+    $('hero-card').addEventListener('click', () => { sfx.click(); this.showCharSelect(); });
 
     $('host-btn').addEventListener('click', () => {
+      const c = active();
+      if (!c) return this.showCharSelect();
       sfx.click();
-      this.cb.onHost({ ...this.character, name: heroName() });
+      this.cb.onHost(c);
     });
     $('join-btn').addEventListener('click', () => {
+      const c = active();
+      if (!c) return this.showCharSelect();
       sfx.click();
       const code = normalizeRoomCode($('join-code').value);
       if (code.length < 5) return this.menuError('Enter the 5-letter room code');
-      this.cb.onJoin(code, { ...this.character, name: heroName() });
+      this.cb.onJoin(code, c);
     });
     $('join-code').addEventListener('input', (e) => {
       e.target.value = normalizeRoomCode(e.target.value);
@@ -160,17 +174,71 @@ export class UI {
 
   updateHeroCard() {
     const c = this.character;
-    $('hero-thumb').innerHTML = entityImg('class-' + c.cls);
-    $('hero-name').textContent = c.name.trim() || 'Hero';
+    if (!c) return;
+    $('hero-thumb').innerHTML = classIcon(c.cls);
+    $('hero-name').textContent = (c.name || '').trim() || 'Hero';
     $('hero-cls').textContent = CLASSES[c.cls]?.name || '';
   }
 
   showMenu() {
-    this.hide('loading'); this.hide('character'); this.hide('lobby'); this.hide('hud');
+    this.character = getActiveCharacter();
+    this.myCls = this.character?.cls || this.myCls;
+    this.hide('loading'); this.hide('character'); this.hide('char-select');
+    this.hide('lobby'); this.hide('hud');
     this.hide('checkpoint'); this.hide('gameover'); this.hide('host-lost');
     this.preview?.stop();
     this.updateHeroCard();
     this.show('menu');
+  }
+
+  // ---------------- character select (roster) ----------------
+
+  bindCharSelect() {
+    $('cs-new').addEventListener('click', () => { sfx.click(); this.showCharacter(null); });
+    $('cs-settings').addEventListener('click', () => this.openSettings());
+  }
+
+  showCharSelect() {
+    this.hide('loading'); this.hide('menu'); this.hide('character'); this.hide('lobby'); this.hide('hud');
+    this.preview?.stop();
+    this.renderCharList();
+    this.show('char-select');
+  }
+
+  renderCharList() {
+    const roster = loadRoster();
+    const list = $('char-list');
+    list.innerHTML = '';
+    for (const c of roster.chars) {
+      const row = document.createElement('div');
+      row.className = 'hero-row';
+      row.innerHTML =
+        `<span class="hr-icon">${classIcon(c.cls)}</span>` +
+        `<span class="hr-meta"><span class="hr-name"></span><span class="hr-cls">${CLASSES[c.cls]?.name || ''}</span></span>` +
+        '<span class="hr-actions">' +
+        '<button class="btn small subtle hr-edit" title="Edit"><i data-icon="gear"></i></button>' +
+        '<button class="btn small danger hr-del" title="Delete"><i data-icon="x"></i></button>' +
+        '</span>';
+      row.querySelector('.hr-name').textContent = (c.name || '').trim() || 'Hero';
+      mountIcons(row);
+      // play this hero
+      row.addEventListener('click', () => {
+        setActive(c.id);
+        this.character = c;
+        sfx.success();
+        this.showMenu();
+      });
+      row.querySelector('.hr-edit').addEventListener('click', (e) => {
+        e.stopPropagation(); sfx.click(); this.showCharacter(c.id);
+      });
+      row.querySelector('.hr-del').addEventListener('click', (e) => {
+        e.stopPropagation(); sfx.click();
+        const r = deleteCharacter(c.id);
+        if (!r.chars.length) this.showCharacter(null);
+        else this.renderCharList();
+      });
+      list.appendChild(row);
+    }
   }
 
   // ---------------- character creation ----------------
@@ -190,7 +258,7 @@ export class UI {
     }
 
     $('char-name').addEventListener('input', (e) => {
-      this.charDraft.name = e.target.value.slice(0, 12);
+      this.charDraft.name = e.target.value.slice(0, 10);
     });
 
     $('char-random').addEventListener('click', () => {
@@ -204,9 +272,18 @@ export class UI {
 
     $('char-save').addEventListener('click', () => {
       sfx.success();
-      this.charDraft.name = ($('char-name').value.trim() || 'Hero').slice(0, 12);
-      this.character = saveCharacter(this.charDraft);
+      this.charDraft.name = ($('char-name').value.trim() || 'Hero').slice(0, 10);
+      this.character = upsertCharacter(this.charDraft);
       this.showMenu();
+    });
+
+    $('char-settings').addEventListener('click', () => this.openSettings());
+    $('char-back').addEventListener('click', () => {
+      sfx.click();
+      // back to the roster if any heroes exist, otherwise stay put
+      const roster = loadRoster();
+      if (roster.chars.length) this.showCharSelect();
+      else this.showMenu();
     });
   }
 
@@ -248,14 +325,18 @@ export class UI {
     }
   }
 
-  showCharacter() {
+  // id -> edit that hero; null/undefined -> brand new hero
+  showCharacter(id) {
+    let src = defaultCharacter();
+    if (id) {
+      const found = loadRoster().chars.find((c) => c.id === id);
+      if (found) src = found;
+    }
+    this.editingId = src.id;
     // work on a copy so "Save" is an explicit commit
-    this.charDraft = {
-      name: this.character.name,
-      cls: this.character.cls,
-      colors: { ...this.character.colors },
-    };
-    this.hide('loading'); this.hide('menu'); this.hide('lobby'); this.hide('hud');
+    this.charDraft = { id: src.id, name: src.name, cls: src.cls, colors: { ...src.colors } };
+    this.hide('loading'); this.hide('menu'); this.hide('char-select');
+    this.hide('lobby'); this.hide('hud');
     this.hide('checkpoint'); this.hide('gameover'); this.hide('host-lost');
     $('char-name').value = this.charDraft.name;
     this.selectCharClass(this.charDraft.cls);
@@ -264,6 +345,48 @@ export class UI {
     this.show('character');
     this.preview?.setClass(this.charDraft.cls, this.charDraft.colors);
     this.preview?.start();
+  }
+
+  // ---------------- character stats modal ----------------
+
+  bindStats() {
+    $('pb-class').addEventListener('click', () => {
+      if (!this.lastMe) return;
+      sfx.click();
+      this._statsOpen = true;
+      this.renderStats();
+      this.show('stats-panel');
+    });
+    $('stats-close').addEventListener('click', () => {
+      sfx.click(); this._statsOpen = false; this.hide('stats-panel');
+    });
+  }
+
+  // live stats for the local hero; HP and Attack grow with level, the
+  // rest stay at their class base (mirrors the sim's level-up rules)
+  renderStats() {
+    const me = this.lastMe;
+    if (!me) return;
+    const cls = me[1], mhp = me[6], lvl = me[7];
+    const base = CLASSES[cls];
+    if (!base) return;
+    const atk = Math.round(base.atk * Math.pow(PLAYER.LEVEL_ATK_MULT, lvl - 1));
+    $('stats-title').innerHTML = `${classIcon(cls)} ${base.name}`;
+    $('stats-sub').textContent = `Level ${lvl} — HP & Attack grow as you level up`;
+    const rows = [
+      ['Level', lvl],
+      ['Max HP', mhp],
+      ['Attack', atk],
+      ['Defense', Math.round(base.def * 100) + '%'],
+      ['Range', base.range.toFixed(1)],
+      ['Atk speed', base.rate.toFixed(2) + '/s'],
+      ['Move speed', base.speed.toFixed(1)],
+    ];
+    if (base.aoe) rows.push(['Area', base.aoe.toFixed(1)]);
+    let html = rows.map(([k, v]) => `<div class="stat-item"><span class="sk">${k}</span><span class="sv">${v}</span></div>`).join('');
+    const special = SKILLS[cls]?.name;
+    if (special) html += `<div class="stat-item wide"><span class="sk">Special</span><span class="sv">${special}</span></div>`;
+    $('stats-rows').innerHTML = html;
   }
 
   // ---------------- lobby ----------------
@@ -309,7 +432,7 @@ export class UI {
     for (const p of players) {
       const li = document.createElement('li');
       const cls = CLASSES[p.cls];
-      li.innerHTML = `<span class="pl-cls">${entityImg('class-' + p.cls)}</span>
+      li.innerHTML = `<span class="pl-cls">${classIcon(p.cls)}</span>
         <span class="pl-name"></span>
         <span class="pl-tag">${cls?.name || ''}${p.host ? ' · Host' : ''}${p.id === selfId ? ' · You' : ''}</span>`;
       li.querySelector('.pl-name').textContent = p.name;
@@ -494,11 +617,13 @@ export class UI {
     // own player row
     const me = snap.pl.find((r) => r[0] === selfId);
     if (me) {
+      this.lastMe = me; // for the character-stats modal
       const [, cls, , , , hp, mhp, lvl, xp, xpn, , dead, resp, obst] = me;
       if (this._pbCls !== cls) {
         this._pbCls = cls;
-        $('pb-class').innerHTML = entityImg('class-' + cls);
+        $('pb-class').innerHTML = classIcon(cls);
       }
+      if (this._statsOpen) this.renderStats();
       $('pb-hp').style.width = `${(hp / mhp) * 100}%`;
       $('pb-hp-text').textContent = `${hp}/${mhp}`;
       $('pb-xp').style.width = `${(xp / xpn) * 100}%`;
@@ -601,8 +726,8 @@ export class UI {
       paintMutes();
       this.show('settings-panel');
     };
+    this.openSettings = openPanel; // reused by the character screens' gears
     $('menu-settings').addEventListener('click', openPanel);
-    $('char-settings').addEventListener('click', openPanel);
     $('hud-settings').addEventListener('click', openPanel);
     $('settings-close').addEventListener('click', () => { sfx.click(); this.hide('settings-panel'); });
 

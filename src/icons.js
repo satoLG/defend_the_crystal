@@ -58,6 +58,14 @@ export function icon(name, cls = '') {
   return `<span class="ico ${cls}">${svg}</span>`;
 }
 
+// raw path data of an icon, for drawing into a <canvas> via Path2D
+// (used by the in-world name labels to stamp the class glyph)
+export function iconPathD(name) {
+  const svg = ICONS[name] || '';
+  const m = svg.match(/<path[^>]*\sd="([^"]+)"/);
+  return m ? m[1] : '';
+}
+
 // swap every <i data-icon="name"> placeholder in the document
 export function mountIcons(root = document) {
   for (const el of root.querySelectorAll('[data-icon]')) {

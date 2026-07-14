@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { instantiate } from './assets.js';
 import { buildTexture, applyTexture } from './customize.js';
+import { iconPathD } from '../icons.js';
 import { CLASSES, TOWERS, JUMP, ENEMIES, BOSSES } from '../config.js';
 import { cellToWorld, CRYSTAL_POS, HALF_H, PLAZA } from '../sim/grid.js';
 import { lerp, angleLerp } from '../utils.js';
@@ -288,8 +289,65 @@ export class GameView {
     return spr;
   }
 
-  makeNameLabel(name, lvl, tint) {
-    return this.makeTextSprite(`${name}  Lv${lvl}`, tint);
+  // floating name plate: class glyph + name + level badge on a pill.
+  // The canvas is sized to its content so two-digit levels never clip.
+  makeNameLabel(name, lvl, tint, cls) {
+    const dpr = 2, H = 88, pad = 20, gap = 14, iconSz = 50, badgePad = 14;
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    const nameFont = 'bold 46px "Trebuchet MS", sans-serif';
+    const lvlFont = 'bold 30px "Trebuchet MS", sans-serif';
+    ctx.font = nameFont;
+    const nameW = Math.ceil(ctx.measureText(name || 'Hero').width);
+    ctx.font = lvlFont;
+    const lvlText = 'Lv ' + lvl;
+    const badgeW = Math.ceil(ctx.measureText(lvlText).width) + badgePad * 2;
+    const W = pad + iconSz + gap + nameW + gap + badgeW + pad;
+
+    canvas.width = W * dpr; canvas.height = H * dpr;
+    ctx.scale(dpr, dpr);
+    const rr = (x, y, w, h, r) => {
+      ctx.beginPath();
+      ctx.moveTo(x + r, y);
+      ctx.arcTo(x + w, y, x + w, y + h, r);
+      ctx.arcTo(x + w, y + h, x, y + h, r);
+      ctx.arcTo(x, y + h, x, y, r);
+      ctx.arcTo(x, y, x + w, y, r);
+      ctx.closePath();
+    };
+    // pill
+    rr(2, 10, W - 4, H - 20, 22);
+    ctx.fillStyle = 'rgba(12,9,22,0.74)'; ctx.fill();
+    ctx.lineWidth = 2; ctx.strokeStyle = 'rgba(255,255,255,0.14)'; ctx.stroke();
+    // class glyph, tinted the class colour
+    const d = iconPathD('cls-' + cls);
+    if (d) {
+      ctx.save();
+      ctx.translate(pad, (H - iconSz) / 2);
+      ctx.scale(iconSz / 512, iconSz / 512);
+      ctx.fillStyle = '#' + new THREE.Color(tint).getHexString();
+      ctx.fill(new Path2D(d));
+      ctx.restore();
+    }
+    // name
+    ctx.font = nameFont; ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
+    ctx.fillStyle = '#f4eedd';
+    ctx.fillText(name || 'Hero', pad + iconSz + gap, H / 2 + 2);
+    // level badge
+    const bx = W - pad - badgeW, bh = 44, by = (H - bh) / 2;
+    rr(bx, by, badgeW, bh, 12);
+    ctx.fillStyle = '#e8b84b'; ctx.fill();
+    ctx.font = lvlFont; ctx.textAlign = 'center';
+    ctx.fillStyle = '#2a1f08';
+    ctx.fillText(lvlText, bx + badgeW / 2, H / 2 + 1);
+
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    const spr = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthWrite: false }));
+    const worldH = 0.4;
+    spr.scale.set(worldH * (W / H), worldH, 1);
+    spr.renderOrder = 11;
+    return spr;
   }
 
   ensurePlayer(row) {
@@ -318,10 +376,10 @@ export class GameView {
     a.group.add(ring);
 
     a.labelTop = top;
-    a.hpBar = this.makeHpBar(1.0, top + 0.3);
+    a.hpBar = this.makeHpBar(1.0, top + 0.32);
     a.group.add(a.hpBar);
-    a.label = this.makeNameLabel(row[PL.NAME], row[PL.LVL], tint);
-    a.label.position.y = top + 0.65;
+    a.label = this.makeNameLabel(row[PL.NAME], row[PL.LVL], tint, cls);
+    a.label.position.y = top + 0.8;
     a.labelLvl = row[PL.LVL];
     a.labelName = row[PL.NAME];
     a.tint = tint;
@@ -587,8 +645,8 @@ export class GameView {
       if (a.labelLvl !== row[PL.LVL] || a.labelName !== row[PL.NAME]) {
         a.group.remove(a.label);
         a.label.material.map.dispose();
-        a.label = this.makeNameLabel(row[PL.NAME], row[PL.LVL], a.tint);
-        a.label.position.y = (a.labelTop || 1.4) + 0.65;
+        a.label = this.makeNameLabel(row[PL.NAME], row[PL.LVL], a.tint, a.cls);
+        a.label.position.y = (a.labelTop || 1.4) + 0.8;
         a.labelLvl = row[PL.LVL];
         a.labelName = row[PL.NAME];
         a.group.add(a.label);

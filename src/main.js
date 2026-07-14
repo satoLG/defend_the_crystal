@@ -2,7 +2,7 @@ import { loadAssets } from './render/assets.js';
 import { GameScene } from './render/scene.js';
 import { GameView } from './render/view.js';
 import { CharacterPreview } from './render/preview.js';
-import { hasCharacter } from './character.js';
+import { getActiveCharacter } from './character.js';
 import { Sim } from './sim/sim.js';
 import { Grid, worldToCell, cellToWorld, canJumpFrom, computeDashEnd } from './sim/grid.js';
 import { Net, selfId } from './net.js';
@@ -99,9 +99,10 @@ async function boot() {
   ui.attachPreview(preview);
 
   // must pick/create a character before anything else; returning
-  // players already have one saved, so they land on the menu
-  if (hasCharacter()) ui.showMenu();
-  else ui.showCharacter();
+  // players already have one saved, so they land on the menu (and can
+  // switch/create heroes from there)
+  if (getActiveCharacter()) ui.showMenu();
+  else ui.showCharacter(null);
   requestAnimationFrame(frame);
 }
 

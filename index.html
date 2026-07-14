@@ -22,9 +22,21 @@
       </div>
     </div>
 
+    <!-- ============ CHARACTER SELECT ============ -->
+    <div id="char-select" class="screen hidden">
+      <div class="panel center-panel">
+        <button id="cs-settings" class="btn small corner-btn" title="Settings"><i data-icon="gear"></i></button>
+        <h2>Choose your hero</h2>
+        <div class="muted">Pick a hero to play, or create a new one</div>
+        <div id="char-list"></div>
+        <button id="cs-new" class="btn primary big"><i data-icon="sparkle"></i> New hero</button>
+      </div>
+    </div>
+
     <!-- ============ CHARACTER CREATION ============ -->
     <div id="character" class="screen hidden">
       <div class="panel char-panel">
+        <button id="char-back" class="btn small corner-btn corner-left" title="Back"><i data-icon="x"></i></button>
         <button id="char-settings" class="btn small corner-btn" title="Settings"><i data-icon="gear"></i></button>
         <h2>Your hero</h2>
 
@@ -55,7 +67,7 @@
         </div>
 
         <div class="char-foot">
-          <input id="char-name" maxlength="12" autocomplete="off" placeholder="Hero name" />
+          <input id="char-name" maxlength="10" autocomplete="off" placeholder="Hero name" />
           <button id="char-save" class="btn primary big">Save &amp; continue</button>
         </div>
       </div>
@@ -70,7 +82,7 @@
 
         <div class="field-label">Your hero</div>
         <button id="hero-card" class="hero-card">
-          <span class="hero-thumb" id="hero-thumb"><img class="entity-img" src="./img/class-berserker.png" alt=""></span>
+          <span class="hero-thumb" id="hero-thumb"><i data-icon="cls-berserker"></i></span>
           <span class="hero-meta">
             <span class="hero-name" id="hero-name">Hero</span>
             <span class="hero-cls" id="hero-cls">Berserker</span>
@@ -121,7 +133,7 @@
 
       <div id="player-bar">
         <div class="pb-row">
-          <span id="pb-class"><img class="entity-img" src="./img/class-berserker.png" alt=""></span>
+          <button id="pb-class" title="Character stats"><i data-icon="cls-berserker"></i></button>
           <div class="pb-bars">
             <div class="bar hp"><div id="pb-hp"></div><span id="pb-hp-text"></span></div>
             <div class="bar xp"><div id="pb-xp"></div></div>
@@ -214,6 +226,16 @@
           <input type="checkbox" id="set-shadows" />
         </div>
         <button id="settings-close" class="btn primary big">Done</button>
+      </div>
+    </div>
+
+    <!-- ============ CHARACTER STATS ============ -->
+    <div id="stats-panel" class="screen overlay hidden">
+      <div class="panel center-panel">
+        <h2 id="stats-title">Stats</h2>
+        <div id="stats-sub" class="muted"></div>
+        <div id="stats-rows" class="stats-rows"></div>
+        <button id="stats-close" class="btn primary big">Close</button>
       </div>
     </div>
 
