@@ -22,6 +22,45 @@
       </div>
     </div>
 
+    <!-- ============ CHARACTER CREATION ============ -->
+    <div id="character" class="screen hidden">
+      <div class="panel char-panel">
+        <button id="char-settings" class="btn small corner-btn" title="Settings"><i data-icon="gear"></i></button>
+        <h2>Your hero</h2>
+
+        <div id="char-class-grid" class="char-class-grid">
+          <button class="cc-card selected" data-cls="berserker"><i data-icon="cls-berserker"></i><span>Berserker</span></button>
+          <button class="cc-card" data-cls="tanker"><i data-icon="cls-tanker"></i><span>Tanker</span></button>
+          <button class="cc-card" data-cls="archer"><i data-icon="cls-archer"></i><span>Archer</span></button>
+          <button class="cc-card" data-cls="mage"><i data-icon="cls-mage"></i><span>Mage</span></button>
+        </div>
+
+        <div class="char-stage-row">
+          <div class="char-stage">
+            <canvas id="preview-canvas"></canvas>
+            <div class="char-drag-hint muted"><i data-icon="rotate"></i> drag</div>
+          </div>
+          <div class="char-side">
+            <div id="char-colors" class="char-colors"></div>
+            <button id="char-random" class="btn small subtle" title="Randomize colours"><i data-icon="dice"></i></button>
+          </div>
+        </div>
+
+        <div class="char-info">
+          <div class="ci-head"><span class="ci-name" id="ci-name">Berserker</span></div>
+          <div class="ci-line"><span class="ci-key">Weapon</span><span id="ci-weapon"></span></div>
+          <div class="ci-line"><span class="ci-key">Special</span><span id="ci-power"></span></div>
+          <p class="ci-blurb muted" id="ci-blurb"></p>
+          <div class="ci-stats" id="ci-stats"></div>
+        </div>
+
+        <div class="char-foot">
+          <input id="char-name" maxlength="12" autocomplete="off" placeholder="Hero name" />
+          <button id="char-save" class="btn primary big">Save &amp; continue</button>
+        </div>
+      </div>
+    </div>
+
     <!-- ============ MAIN MENU ============ -->
     <div id="menu" class="screen hidden">
       <div class="panel menu-panel">
@@ -29,40 +68,15 @@
         <h1 class="title">Defend<br/>the Crystal</h1>
         <div id="best-wave" class="muted"></div>
 
-        <label class="field-label" for="name-input">Your name</label>
-        <input id="name-input" maxlength="12" autocomplete="off" placeholder="Hero name" />
-
-        <div class="field-label">Choose your class</div>
-        <div id="class-grid">
-          <button class="class-card selected" data-cls="berserker">
-            <span class="cls-icon"><img class="entity-img" src="./img/class-berserker.png" alt=""></span><span class="cls-name">Berserker</span>
-            <span class="cls-desc">Huge damage up close</span>
-            <span class="stat-rows">
-              <i style="--v:.95">ATK</i><i style="--v:.55">DEF</i><i style="--v:.2">RNG</i><i style="--v:.6">SPD</i>
-            </span>
-          </button>
-          <button class="class-card" data-cls="tanker">
-            <span class="cls-icon"><img class="entity-img" src="./img/class-tanker.png" alt=""></span><span class="cls-name">Tanker</span>
-            <span class="cls-desc">Unbreakable wall</span>
-            <span class="stat-rows">
-              <i style="--v:.5">ATK</i><i style="--v:.95">DEF</i><i style="--v:.2">RNG</i><i style="--v:.4">SPD</i>
-            </span>
-          </button>
-          <button class="class-card" data-cls="archer">
-            <span class="cls-icon"><img class="entity-img" src="./img/class-archer.png" alt=""></span><span class="cls-name">Archer</span>
-            <span class="cls-desc">Fast &amp; far shooter</span>
-            <span class="stat-rows">
-              <i style="--v:.5">ATK</i><i style="--v:.25">DEF</i><i style="--v:.8">RNG</i><i style="--v:.95">SPD</i>
-            </span>
-          </button>
-          <button class="class-card" data-cls="mage">
-            <span class="cls-icon"><img class="entity-img" src="./img/class-mage.png" alt=""></span><span class="cls-name">Mage</span>
-            <span class="cls-desc">Area damage from afar</span>
-            <span class="stat-rows">
-              <i style="--v:.5">ATK</i><i style="--v:.5">DEF</i><i style="--v:1">RNG</i><i style="--v:.6">SPD</i>
-            </span>
-          </button>
-        </div>
+        <div class="field-label">Your hero</div>
+        <button id="hero-card" class="hero-card">
+          <span class="hero-thumb" id="hero-thumb"><img class="entity-img" src="./img/class-berserker.png" alt=""></span>
+          <span class="hero-meta">
+            <span class="hero-name" id="hero-name">Hero</span>
+            <span class="hero-cls" id="hero-cls">Berserker</span>
+          </span>
+          <span class="hero-edit"><i data-icon="gear"></i> Change</span>
+        </button>
 
         <div class="menu-actions">
           <button id="host-btn" class="btn primary big"><i data-icon="swords"></i> Host a match</button>

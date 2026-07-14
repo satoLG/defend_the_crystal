@@ -8,6 +8,13 @@ import { GRID } from '../config.js';
 // different unit sizes), and hands out clones ready to render.
 // norm: { h } scale to world height | { fp } scale to XZ footprint
 //       | { tile: true } use the tower-defense kit tile factor
+//       | { char: true } use ONE shared scale factor for every
+//         humanoid — the factor that puts the berserker at 1.35 world
+//         height. Kenney characters come from different kits with
+//         different silhouettes (hair spikes, helmet crests), so
+//         normalizing each to the same bounding-box height over-scales
+//         the shorter-authored ones (the archer read noticeably bigger).
+//         A shared factor keeps every body the same size instead.
 //       | { raw: true } keep authored origin & scale — hand props
 //         are authored with the grip exactly at the origin, so
 //         they can be parented straight onto an arm bone
@@ -15,19 +22,24 @@ import { GRID } from '../config.js';
 
 const M = (url, norm) => ({ url: `models/${url}`, norm });
 
+// world height the berserker (our reference character) renders at; the
+// shared { char } factor is derived from it at load time
+const CHAR_HEIGHT = 1.35;
+
 const MANIFEST = {
-  // playable classes (rigged + animated)
-  'char-berserker': M('characters/berserker.glb', { h: 1.35 }),
-  'char-tanker': M('characters/tanker.glb', { h: 1.35 }),
-  'char-archer': M('characters/archer.glb', { h: 1.35 }),
-  'char-mage': M('characters/mage.glb', { h: 1.35 }),
-  // enemies (rigged + animated)
-  'enemy-skeleton': M('enemies/skeleton.glb', { h: 1.25 }),
-  'enemy-zombie': M('enemies/zombie.glb', { h: 1.35 }),
-  'enemy-ghost': M('enemies/ghost.glb', { h: 1.2 }),
-  'enemy-orc': M('enemies/orc.glb', { h: 1.55 }),
-  'enemy-vampire': M('enemies/vampire.glb', { h: 1.5 }),
-  'enemy-keeper': M('enemies/keeper.glb', { h: 1.75 }),
+  // playable classes (rigged + animated) — all share the berserker scale
+  'char-berserker': M('characters/character-human.glb', { char: true }),
+  'char-tanker': M('characters/character-soldier.glb', { char: true }),
+  'char-archer': M('characters/archer.glb', { char: true }),
+  'char-mage': M('characters/mage.glb', { char: true }),
+  // enemies (rigged + animated) — normal-size enemies share it too;
+  // bosses/subbosses still scale up on top (per-entity scale in the sim)
+  'enemy-skeleton': M('enemies/skeleton.glb', { char: true }),
+  'enemy-zombie': M('enemies/zombie.glb', { char: true }),
+  'enemy-ghost': M('enemies/ghost.glb', { char: true }),
+  'enemy-orc': M('enemies/orc.glb', { char: true }),
+  'enemy-vampire': M('enemies/vampire.glb', { char: true }),
+  'enemy-keeper': M('enemies/keeper.glb', { char: true }),
   // towers
   'tower-ballista': M('towers/ballista.glb', { tile: true }),
   'tower-cannon': M('towers/cannon.glb', { tile: true }),
@@ -39,6 +51,7 @@ const MANIFEST = {
   'ammo-cannonball': M('ammo/cannonball.glb', { tile: true }),
   'ammo-boulder': M('ammo/boulder.glb', { tile: true }),
   // hand props (raw: grip at origin, sized for the mini characters)
+  'prop-bow': M('props/bow.glb', { raw: true }),
   'prop-sword': M('props/sword.glb', { raw: true }),
   'prop-shield': M('props/shield.glb', { raw: true }),
   'prop-staff': M('props/staff.glb', { raw: true }),
@@ -89,13 +102,19 @@ export async function loadAssets(onProgress) {
   const tileSize = tileBox.getSize(new THREE.Vector3());
   const tileFactor = GRID.CELL / Math.max(tileSize.x, tileSize.z);
 
+  // one shared scale for every humanoid: the factor that renders the
+  // berserker at CHAR_HEIGHT, applied to all { char } models so they
+  // stay the same size regardless of their authored silhouette
+  const berBox = new THREE.Box3().setFromObject(raw['char-berserker'].scene);
+  const charFactor = CHAR_HEIGHT / Math.max(berBox.getSize(new THREE.Vector3()).y, 1e-4);
+
   for (const key of keys) {
-    templates[key] = prepare(raw[key], MANIFEST[key].norm, tileFactor);
+    templates[key] = prepare(raw[key], MANIFEST[key].norm, tileFactor, charFactor);
   }
   return templates;
 }
 
-function prepare(gltf, norm, tileFactor) {
+function prepare(gltf, norm, tileFactor, charFactor) {
   const scene = gltf.scene;
   const group = new THREE.Group();
   group.add(scene);
@@ -104,7 +123,8 @@ function prepare(gltf, norm, tileFactor) {
   const box = new THREE.Box3().setFromObject(scene);
   const size = box.getSize(new THREE.Vector3());
   let s = 1;
-  if (norm.h) s = norm.h / Math.max(size.y, 1e-4);
+  if (norm.char) s = charFactor;
+  else if (norm.h) s = norm.h / Math.max(size.y, 1e-4);
   else if (norm.fp) s = norm.fp / Math.max(size.x, size.z, 1e-4);
   else if (norm.tile) s = tileFactor;
   scene.scale.setScalar(s);

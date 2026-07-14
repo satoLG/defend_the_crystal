@@ -4,6 +4,34 @@ import { normalizeRoomCode } from './utils.js';
 import { icon, mountIcons } from './icons.js';
 import { settings } from './settings.js';
 import { music } from './music.js';
+import { loadCharacter, saveCharacter } from './character.js';
+import { getSlots } from './render/customize.js';
+
+// per-class stat bars + one-line special-power blurbs for the
+// character screen (kept here so the DOM layer owns its own copy)
+const STAT_BARS = {
+  berserker: [['ATK', 0.95], ['DEF', 0.55], ['RNG', 0.2], ['SPD', 0.6]],
+  tanker: [['ATK', 0.5], ['DEF', 0.95], ['RNG', 0.2], ['SPD', 0.4]],
+  archer: [['ATK', 0.5], ['DEF', 0.25], ['RNG', 0.8], ['SPD', 0.95]],
+  mage: [['ATK', 0.5], ['DEF', 0.5], ['RNG', 1], ['SPD', 0.6]],
+};
+const POWER_DESC = {
+  berserker: 'Rampage Dash — charge through the horde, hurling enemies aside.',
+  tanker: 'Wall Mode — become immovable with doubled defense for a while.',
+  archer: 'Arrow Storm — unleash rapid volleys at the nearest foes.',
+  mage: 'Arcane Orb — a giant blast dealing massive area damage.',
+};
+
+function randomHex() {
+  const h = Math.random(), s = 0.5 + Math.random() * 0.4, l = 0.42 + Math.random() * 0.26;
+  const f = (n) => {
+    const k = (n + h * 12) % 12;
+    const a = s * Math.min(l, 1 - l);
+    const v = l - a * Math.max(-1, Math.min(k - 3, 9 - k, 1));
+    return Math.round(v * 255).toString(16).padStart(2, '0');
+  };
+  return `#${f(0)}${f(8)}${f(4)}`;
+}
 
 const $ = (id) => document.getElementById(id);
 
@@ -37,22 +65,28 @@ const entityImg = (name) =>
 export class UI {
   constructor(callbacks) {
     this.cb = callbacks;
-    this.selectedClass = localStorage.getItem('dtc-class') || 'berserker';
+    this.character = loadCharacter();     // { name, cls, colors }
+    this.charDraft = null;                // working copy on the creation screen
+    this.preview = null;                  // 3D turntable (attached after assets load)
     this.selectedItem = null;   // build card
     this.pendingCell = null;    // two-tap confirm on touch
     this.panelCell = null;
     this.lastSnap = null;
     this.isHost = false;
     this.skillReady = false;   // gated by this character's own 30s cooldown
-    this.myCls = this.selectedClass;
+    this.myCls = this.character.cls;
 
     mountIcons();
     this.bindMenu();
+    this.bindCharacter();
     this.bindLobby();
     this.bindHud();
     this.bindOverlays();
     this.bindSettings();
   }
+
+  // the live 3D preview is created once assets are ready (main.js)
+  attachPreview(preview) { this.preview = preview; }
 
   // ---------------- helpers ----------------
 
@@ -91,37 +125,19 @@ export class UI {
   // ---------------- menu ----------------
 
   bindMenu() {
-    $('name-input').value = localStorage.getItem('dtc-name') || '';
+    const heroName = () => this.character.name.trim() || 'Hero';
 
-    for (const card of document.querySelectorAll('.class-card')) {
-      if (card.dataset.cls === this.selectedClass) {
-        document.querySelector('.class-card.selected')?.classList.remove('selected');
-        card.classList.add('selected');
-      }
-      card.addEventListener('click', () => {
-        sfx.click();
-        document.querySelector('.class-card.selected')?.classList.remove('selected');
-        card.classList.add('selected');
-        this.selectedClass = card.dataset.cls;
-        localStorage.setItem('dtc-class', this.selectedClass);
-      });
-    }
-
-    const getName = () => {
-      const n = $('name-input').value.trim() || 'Hero';
-      localStorage.setItem('dtc-name', n);
-      return n;
-    };
+    $('hero-card').addEventListener('click', () => { sfx.click(); this.showCharacter(); });
 
     $('host-btn').addEventListener('click', () => {
       sfx.click();
-      this.cb.onHost(getName(), this.selectedClass);
+      this.cb.onHost({ ...this.character, name: heroName() });
     });
     $('join-btn').addEventListener('click', () => {
       sfx.click();
       const code = normalizeRoomCode($('join-code').value);
       if (code.length < 5) return this.menuError('Enter the 5-letter room code');
-      this.cb.onJoin(code, getName(), this.selectedClass);
+      this.cb.onJoin(code, { ...this.character, name: heroName() });
     });
     $('join-code').addEventListener('input', (e) => {
       e.target.value = normalizeRoomCode(e.target.value);
@@ -142,10 +158,112 @@ export class UI {
 
   menuError(msg) { $('menu-error').textContent = msg; sfx.error(); }
 
+  updateHeroCard() {
+    const c = this.character;
+    $('hero-thumb').innerHTML = entityImg('class-' + c.cls);
+    $('hero-name').textContent = c.name.trim() || 'Hero';
+    $('hero-cls').textContent = CLASSES[c.cls]?.name || '';
+  }
+
   showMenu() {
-    this.hide('loading'); this.hide('lobby'); this.hide('hud');
+    this.hide('loading'); this.hide('character'); this.hide('lobby'); this.hide('hud');
     this.hide('checkpoint'); this.hide('gameover'); this.hide('host-lost');
+    this.preview?.stop();
+    this.updateHeroCard();
     this.show('menu');
+  }
+
+  // ---------------- character creation ----------------
+
+  bindCharacter() {
+    for (const card of document.querySelectorAll('.cc-card')) {
+      card.addEventListener('click', () => {
+        if (card.classList.contains('selected')) return;
+        sfx.click();
+        this.charDraft.cls = card.dataset.cls;
+        this.charDraft.colors = {}; // parts differ per model — start from its defaults
+        this.selectCharClass(card.dataset.cls);
+        this.renderCharInfo();
+        this.renderColorSlots();
+        this.preview?.setClass(this.charDraft.cls, this.charDraft.colors);
+      });
+    }
+
+    $('char-name').addEventListener('input', (e) => {
+      this.charDraft.name = e.target.value.slice(0, 12);
+    });
+
+    $('char-random').addEventListener('click', () => {
+      sfx.click();
+      for (const slot of getSlots(CLASSES[this.charDraft.cls].model)) {
+        this.charDraft.colors[slot.id] = randomHex();
+      }
+      this.renderColorSlots();
+      this.preview?.setColors(this.charDraft.colors);
+    });
+
+    $('char-save').addEventListener('click', () => {
+      sfx.success();
+      this.charDraft.name = ($('char-name').value.trim() || 'Hero').slice(0, 12);
+      this.character = saveCharacter(this.charDraft);
+      this.showMenu();
+    });
+  }
+
+  selectCharClass(cls) {
+    for (const card of document.querySelectorAll('.cc-card')) {
+      card.classList.toggle('selected', card.dataset.cls === cls);
+    }
+  }
+
+  renderCharInfo() {
+    const cls = this.charDraft.cls;
+    const def = CLASSES[cls];
+    $('ci-name').textContent = def.name;
+    $('ci-weapon').textContent = def.weapon || '—';
+    $('ci-power').textContent = POWER_DESC[cls] || SKILLS[cls]?.name || '—';
+    $('ci-blurb').textContent = def.blurb || '';
+    $('ci-stats').innerHTML = (STAT_BARS[cls] || [])
+      .map(([k, v]) => `<i style="--v:${v}">${k}</i>`).join('');
+  }
+
+  // colour circles stacked top-to-bottom, in the model's own head→feet
+  // order (getSlots is already sorted that way), sitting beside the 3D view
+  renderColorSlots() {
+    const host = $('char-colors');
+    host.innerHTML = '';
+    const slots = getSlots(CLASSES[this.charDraft.cls].model);
+    if (!slots.length) return;
+    for (const slot of slots) {
+      const input = document.createElement('input');
+      input.type = 'color';
+      input.className = 'color-dot';
+      input.title = slot.label;
+      input.value = this.charDraft.colors[slot.id] || slot.base;
+      input.addEventListener('input', (e) => {
+        this.charDraft.colors[slot.id] = e.target.value;
+        this.preview?.setColors(this.charDraft.colors);
+      });
+      host.appendChild(input);
+    }
+  }
+
+  showCharacter() {
+    // work on a copy so "Save" is an explicit commit
+    this.charDraft = {
+      name: this.character.name,
+      cls: this.character.cls,
+      colors: { ...this.character.colors },
+    };
+    this.hide('loading'); this.hide('menu'); this.hide('lobby'); this.hide('hud');
+    this.hide('checkpoint'); this.hide('gameover'); this.hide('host-lost');
+    $('char-name').value = this.charDraft.name;
+    this.selectCharClass(this.charDraft.cls);
+    this.renderCharInfo();
+    this.renderColorSlots();
+    this.show('character');
+    this.preview?.setClass(this.charDraft.cls, this.charDraft.colors);
+    this.preview?.start();
   }
 
   // ---------------- lobby ----------------
@@ -175,7 +293,8 @@ export class UI {
   showLobby(code, isHost) {
     this.roomCode = code;
     this.isHost = isHost;
-    this.hide('menu');
+    this.preview?.stop();
+    this.hide('menu'); this.hide('character');
     this.show('lobby');
     $('room-code').textContent = code;
     $('start-btn').classList.toggle('hidden', !isHost);
@@ -483,6 +602,7 @@ export class UI {
       this.show('settings-panel');
     };
     $('menu-settings').addEventListener('click', openPanel);
+    $('char-settings').addEventListener('click', openPanel);
     $('hud-settings').addEventListener('click', openPanel);
     $('settings-close').addEventListener('click', () => { sfx.click(); this.hide('settings-panel'); });
 

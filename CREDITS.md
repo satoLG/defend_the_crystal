@@ -12,16 +12,21 @@ Models were taken from the following Kenney asset packs:
 | Tower Defense Kit (2.1) | towers, weapons, ammo, ground tiles, spawn pads, crystals |
 | Mini Characters (1.x) | the four playable classes, mage staff (cane) |
 | Graveyard Kit (5.0) | skeleton / zombie / ghost / vampire / keeper enemies, obstacles, decor, sanctuary stonework (altar, pillars, obelisk, bowl), boss props (gravestone, grave mound, carved pumpkin, shovel, coffin) |
-| Mini Dungeon (1.x) | orc enemy, sword, shield, barrel obstacle |
-| Mini Arena (1.x) | sanctuary statue and columns |
+| Mini Dungeon (1.x) | orc enemy, Berserker character, sword, shield, barrel obstacle |
+| Mini Arena (1.x) | Tanker character, sanctuary statue and columns |
+
+The Archer / skeleton-archer bow (`props/bow.glb`) is a CC0 Kenney-style
+low-poly model in the same art direction as the packs above.
 
 CC0 means the content can be used for personal, educational and commercial
 purposes. Crediting Kenney is not required, but very much deserved —
 consider donating at https://www.kenney.nl/donate.
 
 UI icons are from [Lucide](https://lucide.dev) (ISC license), inlined in
-`src/icons.js`. Class/tower thumbnails in `public/img/` are the preview
-renders that ship with the Kenney packs above (CC0).
+`src/icons.js`. The class-selector glyphs (axe / shield / archer / wizard
+hat) are from [game-icons.net](https://game-icons.net) by **Lorc** and
+**Sbed**, licensed **CC BY 3.0**. Class/tower thumbnails in `public/img/`
+are the preview renders that ship with the Kenney packs above (CC0).
 
 ## Libraries
 

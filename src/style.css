@@ -488,3 +488,117 @@ input:focus { border-color: var(--gold); }
   #startwave-btn { min-width: 64px; font-size: 0.78rem; }
   .hud-chip { font-size: 0.82rem; padding: 4px 9px; }
 }
+
+/* ---------- character creation ---------- */
+.char-panel {
+  position: relative;
+  max-width: 440px;
+  display: flex; flex-direction: column; gap: 8px;
+  max-height: calc(100dvh - 20px);
+  padding: 14px 16px 16px;
+  overflow-y: auto;
+}
+.char-panel h2 { margin: 0; }
+
+/* class picker: svg glyph + name, four across */
+.char-class-grid {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; flex: 0 0 auto;
+}
+.cc-card {
+  display: flex; flex-direction: column; align-items: center; gap: 3px;
+  padding: 7px 3px; border-radius: 11px; cursor: pointer;
+  border: 2px solid rgba(240, 233, 216, 0.15);
+  background: rgba(0, 0, 0, 0.3); color: var(--text);
+  font-family: inherit; font-size: 0.62rem; font-weight: 700;
+  touch-action: none;
+}
+.cc-card .ico { width: 26px; height: 26px; color: rgba(240, 233, 216, 0.7); }
+.cc-card.selected {
+  border-color: var(--gold);
+  background: rgba(232, 184, 75, 0.14);
+  box-shadow: 0 0 12px rgba(232, 184, 75, 0.25);
+}
+.cc-card.selected .ico { color: var(--gold); }
+
+/* 3D viewer with the colour dots stacked down its right edge */
+.char-stage-row { display: flex; gap: 8px; flex: 1 1 auto; min-height: 150px; }
+.char-stage {
+  position: relative; flex: 1 1 auto; border-radius: 14px;
+  border: 1px solid rgba(232, 184, 75, 0.2);
+  background: radial-gradient(ellipse at 50% 24%, rgba(120, 96, 190, 0.35), rgba(10, 8, 20, 0.6) 72%);
+  overflow: hidden;
+}
+#preview-canvas { width: 100%; height: 100%; display: block; touch-action: none; cursor: grab; }
+#preview-canvas:active { cursor: grabbing; }
+.char-drag-hint {
+  position: absolute; bottom: 6px; left: 50%; transform: translateX(-50%);
+  font-size: 0.62rem; letter-spacing: 1px; text-transform: uppercase;
+  display: inline-flex; align-items: center; gap: 4px; pointer-events: none; opacity: 0.55;
+}
+.char-drag-hint .ico { width: 0.9em; height: 0.9em; }
+
+.char-side {
+  display: flex; flex-direction: column; align-items: center; gap: 8px;
+  flex: 0 0 auto; padding: 2px 0; overflow-y: auto;
+}
+.char-colors { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.color-dot {
+  width: 34px; height: 34px; padding: 0; margin: 0; border: none; border-radius: 50%;
+  background: none; cursor: pointer; flex: 0 0 auto;
+}
+.color-dot::-webkit-color-swatch-wrapper { padding: 0; }
+.color-dot::-webkit-color-swatch { border: 2px solid rgba(255, 255, 255, 0.4); border-radius: 50%; }
+.color-dot::-moz-color-swatch { border: 2px solid rgba(255, 255, 255, 0.4); border-radius: 50%; }
+#char-random { padding: 5px 8px; margin: 0; }
+
+.char-info {
+  text-align: left; flex: 0 0 auto;
+  background: rgba(0, 0, 0, 0.25); border-radius: 12px;
+  border: 1px solid rgba(240, 233, 216, 0.1);
+  padding: 8px 11px;
+}
+.ci-head { margin-bottom: 2px; }
+.ci-name { font-weight: 800; color: var(--gold); font-size: 1rem; }
+.ci-line { display: flex; gap: 8px; font-size: 0.78rem; margin: 1px 0; }
+.ci-key {
+  min-width: 58px; color: rgba(240, 233, 216, 0.55);
+  text-transform: uppercase; font-size: 0.64rem; letter-spacing: 1px; padding-top: 2px;
+}
+.ci-blurb { font-size: 0.74rem; margin: 5px 0 3px; line-height: 1.3; }
+.ci-stats { display: flex; gap: 6px; margin-top: 5px; }
+.ci-stats i {
+  flex: 1; font-style: normal; font-size: 0.55rem; text-align: center;
+  color: rgba(240, 233, 216, 0.65); padding-top: 12px; position: relative;
+}
+.ci-stats i::before {
+  content: ""; position: absolute; left: 8%; right: 8%; top: 4px; height: 5px;
+  border-radius: 3px; background: rgba(255, 255, 255, 0.12);
+}
+.ci-stats i::after {
+  content: ""; position: absolute; left: 8%; top: 4px; height: 5px;
+  width: calc(84% * var(--v)); border-radius: 3px; background: var(--gold);
+}
+
+.char-foot { flex: 0 0 auto; }
+.char-foot input { margin: 0 0 8px; }
+.char-foot .btn.big { margin-top: 0; }
+
+/* ---------- hero card (menu) ---------- */
+.hero-card {
+  display: flex; align-items: center; gap: 12px; width: 100%;
+  padding: 10px 12px; margin: 4px 0 6px;
+  border-radius: 14px; cursor: pointer; font-family: inherit;
+  border: 2px solid rgba(232, 184, 75, 0.3);
+  background: rgba(0, 0, 0, 0.3); color: var(--text); text-align: left;
+}
+.hero-card:hover { border-color: var(--gold); }
+.hero-thumb img { width: 46px; height: 46px; object-fit: contain; }
+.hero-meta { flex: 1; display: flex; flex-direction: column; }
+.hero-name { font-weight: 800; font-size: 1.05rem; }
+.hero-cls { font-size: 0.78rem; color: var(--gold); }
+.hero-edit {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 0.72rem; color: rgba(240, 233, 216, 0.7);
+  text-transform: uppercase; letter-spacing: 1px;
+}
+.hero-edit .ico { width: 0.95em; height: 0.95em; }

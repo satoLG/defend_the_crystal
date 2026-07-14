@@ -54,13 +54,14 @@ export class Sim {
 
   // ---------------- players ----------------
 
-  addPlayer(id, name, cls) {
+  addPlayer(id, name, cls, colors) {
     if (this.getPlayer(id)) return;
     if (!CLASSES[cls]) cls = 'berserker';
     const base = CLASSES[cls];
     const spawn = this.playerSpawnPos();
     const p = this.world.add({
       player: true, id, name: (name || 'Hero').slice(0, 12), cls,
+      colors: colors || {},
       x: spawn.x, z: spawn.z, yaw: Math.PI, moving: false,
       hp: base.hp, maxHp: base.hp, atk: base.atk, def: base.def,
       range: base.range, rate: base.rate, speed: base.speed,
@@ -145,7 +146,7 @@ export class Sim {
 
   restart() {
     // wipe entities, keep the roster
-    const roster = this.players.entities.map((p) => ({ id: p.id, name: p.name, cls: p.cls }));
+    const roster = this.players.entities.map((p) => ({ id: p.id, name: p.name, cls: p.cls, colors: p.colors }));
     for (const e of [...this.enemies.entities]) this.removeEnemy(e);
     for (const t of [...this.towers.entities]) this.world.remove(t);
     for (const o of [...this.obstacles.entities]) this.world.remove(o);
@@ -157,7 +158,7 @@ export class Sim {
     this.pending = [];
     this.drops = [];
     this.contReady.clear();
-    for (const r of roster) this.addPlayer(r.id, r.name, r.cls);
+    for (const r of roster) this.addPlayer(r.id, r.name, r.cls, r.colors);
     this.start();
     this.emit({ t: 'restart' });
   }

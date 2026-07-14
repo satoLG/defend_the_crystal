@@ -25,21 +25,29 @@ export const CLASSES = {
     name: 'Berserker', icon: 'axe',
     hp: 230, def: 0.25, atk: 36, range: 1.8, rate: 1.15, speed: 4.3,
     knockback: 1.8, model: 'char-berserker',
+    weapon: 'Heavy sword',
+    blurb: 'A frontline bruiser who trades safety for devastating melee hits.',
   },
   tanker: {
     name: 'Tanker', icon: 'shield',
     hp: 340, def: 0.45, atk: 18, range: 1.8, rate: 1.0, speed: 3.4,
     knockback: 1.3, model: 'char-tanker',
+    weapon: 'Sword & shield',
+    blurb: 'An immovable wall that soaks damage and holds the line.',
   },
   archer: {
     name: 'Archer', icon: 'bow',
     hp: 150, def: 0.10, atk: 15, range: 7.0, rate: 2.3, speed: 5.3,
     knockback: 0.6, model: 'char-archer',
+    weapon: 'Longbow',
+    blurb: 'A nimble sharpshooter raining fast arrows from a safe distance.',
   },
   mage: {
     name: 'Mage', icon: 'orb',
     hp: 175, def: 0.22, atk: 16, range: 8.5, rate: 0.85, speed: 4.4,
     knockback: 0.8, aoe: 1.9, model: 'char-mage',
+    weapon: 'Arcane staff',
+    blurb: 'A ranged caster that melts whole clusters with area blasts.',
   },
 };
 
@@ -174,8 +182,11 @@ export const SUMMON = {
   KINDS: ['zombie', 'skeleton'],
 };
 
-export const SUBBOSS = { hpMult: 7, dmgMult: 1.8, scale: 1.65, ptsMult: 6, xpMult: 6, breach: 3 };
-export const BOSS = { scale: 2.1, breach: 5, pts: 110, xp: 260 };
+// scale is a visual multiplier on the (now uniform, native-sized)
+// enemy model; bumped so bosses stay as imposing as before even though
+// the shared character scale makes the base models a bit smaller
+export const SUBBOSS = { hpMult: 7, dmgMult: 1.8, scale: 2.4, ptsMult: 6, xpMult: 6, breach: 3 };
+export const BOSS = { scale: 3.0, breach: 5, pts: 110, xp: 260 };
 
 // checkpoint-wave bosses (waves 10, 20, 30…), rotating in this order.
 // Multipliers sit on top of the base kind's wave-scaled stats so every
