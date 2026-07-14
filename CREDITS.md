@@ -14,6 +14,7 @@ Models were taken from the following Kenney asset packs:
 | Graveyard Kit (5.0) | skeleton / zombie / ghost / vampire / keeper enemies, obstacles, decor, sanctuary stonework (altar, pillars, obelisk, bowl), boss props (gravestone, grave mound, carved pumpkin, shovel, coffin) |
 | Mini Dungeon (1.x) | orc enemy, Berserker character, sword, shield, barrel obstacle |
 | Mini Arena (1.x) | Tanker character, sanctuary statue and columns |
+| Survival Kit (2.0) | Berserker battle axe |
 
 The Archer / skeleton-archer bow (`props/bow.glb`) is a CC0 Kenney-style
 low-poly model in the same art direction as the packs above.

@@ -20,16 +20,16 @@ const EN = { ID: 0, KIND: 1, X: 2, Z: 3, YAW: 4, HP: 5, MHP: 6, SCALE: 7, BOSS: 
 // The hand sits ~0.14 units down the arm bone; rot compensates the
 // arm's resting tilt so weapons read upright and stay visible.
 export const CLASS_PROPS = {
-  berserker: [{ key: 'prop-sword', bone: 'arm-right', pos: [0, -0.13, 0.04], rot: [0.85, 0, -0.4], scale: 1.3 }],
+  berserker: [{ gen: makeAxe, label: 'Axe', bone: 'arm-right', pos: [0, -0.13, 0.04], rot: [0.85, 0, -0.4], scale: 1 }],
   tanker: [
-    { key: 'prop-sword', bone: 'arm-right', pos: [0, -0.13, 0.04], rot: [0.85, 0, -0.4], scale: 1.05 },
-    { key: 'prop-shield', bone: 'arm-left', pos: [0.05, -0.1, 0.05], rot: [0.15, 0.35, 0], scale: 1.15 },
+    { key: 'prop-sword', label: 'Sword', bone: 'arm-right', pos: [0, -0.13, 0.04], rot: [0.85, 0, -0.4], scale: 1.05 },
+    { key: 'prop-shield', label: 'Shield', bone: 'arm-left', pos: [0.05, -0.1, 0.05], rot: [0.15, 0.35, 0], scale: 1.15 },
   ],
   archer: [
-    { gen: makeBow, bone: 'arm-right', pos: [0, -0.16, 0.05], rot: [0.15, -0.5, -0.5], scale: 1.15 },
-    { gen: makeQuiver, bone: 'torso', pos: [-0.05, 0.05, -0.1], rot: [0.25, 0, 0.35] },
+    { gen: makeBow, label: 'Bow', bone: 'arm-right', pos: [0, -0.16, 0.05], rot: [0.15, -0.5, -0.5], scale: 1.15 },
+    { gen: makeQuiver, label: 'Quiver', bone: 'torso', pos: [-0.05, 0.05, -0.1], rot: [0.25, 0, 0.35] },
   ],
-  mage: [{ key: 'prop-staff', bone: 'arm-right', pos: [0, -0.08, 0.03], rot: [0, Math.PI, Math.PI], scale: 1.2, crystalTip: true }],
+  mage: [{ key: 'prop-staff', label: 'Staff', bone: 'arm-right', pos: [0, -0.08, 0.03], rot: [0, Math.PI, Math.PI], scale: 1.2, crystalTip: true }],
 };
 
 // The real bow model (Bow.glb). It's authored on its side with an odd
@@ -53,6 +53,30 @@ export function makeBow() {
   const center = box.getCenter(new THREE.Vector3());
   inner.position.sub(center);                        // grip (center) to origin
   holder.scale.setScalar(0.5 / Math.max(size.y, 1e-3)); // ~0.5 units tall
+  return holder;
+}
+
+// The survival-kit axe (axe.glb) comes from a different Kenney kit than
+// the mini characters, so its authored units don't match bone space.
+// Normalize it the same way makeBow does: stand the long axis (handle)
+// upright, drop the grip on the origin (sitting low on the handle so it
+// reads like it's being held) and scale to a hand-prop height.
+export function makeAxe() {
+  const inner = instantiate('prop-axe', { shadows: false }).group;
+  const pre = new THREE.Box3().setFromObject(inner);
+  const s = pre.getSize(new THREE.Vector3());
+  // whichever axis is longest is the handle — rotate it upright (+Y)
+  if (s.x >= s.y && s.x >= s.z) inner.rotation.z = Math.PI / 2;
+  else if (s.z >= s.y && s.z >= s.x) inner.rotation.x = Math.PI / 2;
+
+  const holder = new THREE.Group();
+  holder.add(inner);
+  const box = new THREE.Box3().setFromObject(holder);
+  const size = box.getSize(new THREE.Vector3());
+  const center = box.getCenter(new THREE.Vector3());
+  inner.position.sub(center);            // center to origin…
+  inner.position.y += size.y * 0.28;     // …then bias so the grip sits low
+  holder.scale.setScalar(0.6 / Math.max(size.y, 1e-3)); // ~0.6 units tall
   return holder;
 }
 
@@ -87,11 +111,14 @@ export function makeQuiver() {
 }
 
 // Parent hand props onto a character's bones. Shared by the in-game
-// actors and the character-creation preview.
+// actors and the character-creation preview. Returns the created holder
+// groups aligned to `specs` (null where the target bone was missing) so
+// callers like the weapon tuner can nudge them live.
 export function attachProps(group, specs) {
+  const holders = [];
   for (const spec of specs || []) {
     const bone = group.getObjectByName(spec.bone);
-    if (!bone) continue;
+    if (!bone) { holders.push(null); continue; }
     const holder = new THREE.Group();
     holder.add(spec.gen ? spec.gen() : instantiate(spec.key, { shadows: false }).group);
     if (spec.crystalTip) {
@@ -114,7 +141,9 @@ export function attachProps(group, specs) {
     holder.position.set(spec.pos[0], spec.pos[1], spec.pos[2]);
     holder.rotation.set(spec.rot[0], spec.rot[1], spec.rot[2]);
     bone.add(holder);
+    holders.push(holder);
   }
+  return holders;
 }
 
 // world-space head height of a built actor group, so HP bars / name

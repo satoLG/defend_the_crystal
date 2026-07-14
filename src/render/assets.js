@@ -53,6 +53,8 @@ const MANIFEST = {
   // hand props (raw: grip at origin, sized for the mini characters)
   'prop-bow': M('props/bow.glb', { raw: true }),
   'prop-sword': M('props/sword.glb', { raw: true }),
+  // survival-kit axe (different unit scale) — normalized at runtime by makeAxe
+  'prop-axe': M('props/axe.glb', { raw: true }),
   'prop-shield': M('props/shield.glb', { raw: true }),
   'prop-staff': M('props/staff.glb', { raw: true }),
   'prop-crystal': M('props/crystal-small.glb', { raw: true }),

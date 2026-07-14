@@ -49,6 +49,7 @@ export class CharacterPreview {
     this.running = false;
     this.cls = null;
     this.colors = {};
+    this.onPropsChanged = null; // (cls) => void — fired when weapons rebuild
 
     this._bindDrag();
     window.addEventListener('resize', () => this.resize());
@@ -82,11 +83,41 @@ export class CharacterPreview {
     const mixer = new THREE.AnimationMixer(inst.group);
     const idle = inst.animations.find((c) => c.name === 'idle') || inst.animations[0];
     if (idle) mixer.clipAction(idle).play();
-    attachProps(inst.group, CLASS_PROPS[cls]);
-    this.actor = { group: inst.group, mixer, modelKey };
+    const specs = CLASS_PROPS[cls] || [];
+    const holders = attachProps(inst.group, specs);
+    this.actor = { group: inst.group, mixer, modelKey, specs, holders };
     this.charPivot.add(inst.group);
     this.charPivot.rotation.y = 0.3;
     this.setColors(this.colors);
+    this.onPropsChanged?.(cls);
+  }
+
+  // ---- weapon tuning (used by the dev overlay) ----------------
+
+  // Snapshot of the current class's weapons: default transforms plus
+  // enough metadata for the tuner to label controls and emit code.
+  getProps() {
+    const specs = this.actor?.specs || [];
+    return specs.map((s, i) => ({
+      i,
+      label: s.label || (s.key ? s.key.replace('prop-', '') : 'prop'),
+      bone: s.bone,
+      source: s.gen ? `gen:${s.gen.name}` : `key:${s.key}`,
+      crystalTip: !!s.crystalTip,
+      pos: [...s.pos],
+      rot: [...s.rot],
+      scale: s.scale ?? 1,
+      available: !!this.actor?.holders?.[i],
+    }));
+  }
+
+  // Live-nudge one weapon's holder (bone-space transform).
+  setPropTransform(i, { pos, rot, scale } = {}) {
+    const h = this.actor?.holders?.[i];
+    if (!h) return;
+    if (pos) h.position.set(pos[0], pos[1], pos[2]);
+    if (rot) h.rotation.set(rot[0], rot[1], rot[2]);
+    if (scale != null) h.scale.setScalar(scale);
   }
 
   setColors(colors) {

@@ -2,6 +2,7 @@ import { loadAssets } from './render/assets.js';
 import { GameScene } from './render/scene.js';
 import { GameView } from './render/view.js';
 import { CharacterPreview } from './render/preview.js';
+import { initWeaponTuner } from './render/weapon_tuner.js'; // DEV: weapon placement overlay
 import { hasCharacter } from './character.js';
 import { Sim } from './sim/sim.js';
 import { Grid, worldToCell, cellToWorld, canJumpFrom, computeDashEnd } from './sim/grid.js';
@@ -97,6 +98,7 @@ async function boot() {
   // live 3D turntable for the character-creation screen
   const preview = new CharacterPreview(document.getElementById('preview-canvas'));
   ui.attachPreview(preview);
+  initWeaponTuner(preview); // DEV: live weapon-placement overlay on the char screen
 
   // must pick/create a character before anything else; returning
   // players already have one saved, so they land on the menu
