@@ -337,8 +337,8 @@ export class Sim {
 
   // ---------------- class special attacks ----------------
 
-  // one shared cooldown; a skill that finds no valid target refuses
-  // to fire (and refuses to burn the cooldown)
+  // each character has its own cooldown timer (p.skillCd); a skill that
+  // finds no valid target refuses to fire (and refuses to burn it)
   trySkill(p, act) {
     if (p.dead || p.skillCd > 0 || p.jumpT > 0 || p.dashT > 0) return;
     if (this.phase === 'over' || this.phase === 'lobby') return;
@@ -629,23 +629,44 @@ export class Sim {
       if (d.until <= this.time) continue;
       const p = this.getPlayer(d.owner);
       if (!p) continue; // owner left the match
-      if (!p.dead) {
+      // an orb the owner can reach (see collectRange) is "claimed": it
+      // rushes toward them and pops the instant it arrives
+      if (!p.dead && this.collectRange(p, d)) {
         const dist = dist2d(d.x, d.z, p.x, p.z);
-        if (dist <= DROPS.PICKUP_RADIUS) {
+        if (dist <= DROPS.ABSORB_RADIUS) {
           if (d.kind === 'xp') this.grantXp(p, d.amount);
           else this.points += d.amount;
           this.emit({ t: 'pickup', id: p.id, k: d.kind, amt: d.amount });
           continue;
         }
-        if (dist <= DROPS.MAGNET_RADIUS) {
-          const pull = Math.min((DROPS.MAGNET_SPEED * dt) / Math.max(dist, 0.001), 1);
-          d.x += (p.x - d.x) * pull;
-          d.z += (p.z - d.z) * pull;
-        }
+        const pull = Math.min((DROPS.MAGNET_SPEED * dt) / Math.max(dist, 0.001), 1);
+        d.x += (p.x - d.x) * pull;
+        d.z += (p.z - d.z) * pull;
       }
       keep.push(d);
     }
     this.drops = keep;
+  }
+
+  // Can player `p` reach its orb `d` from where it currently stands?
+  // Grid-based, not a plain radius: an orb anywhere in the 3×3 block of
+  // cells around the character (one cell to every side) is reachable,
+  // and so is one exactly two cells away along a straight line whose
+  // single middle cell is a tower/obstacle — reaching over a lone wall.
+  // Anything else means the character has to move closer.
+  collectRange(p, d) {
+    const pc = worldToCell(p.x, p.z);
+    const oc = worldToCell(d.x, d.z);
+    const dc = oc.c - pc.c, dr = oc.r - pc.r;
+    const ac = Math.abs(dc), ar = Math.abs(dr);
+    if (Math.max(ac, ar) <= DROPS.COLLECT_CELLS) return true;
+    // two cells out (orthogonal or diagonal) over exactly one blocked cell
+    if (DROPS.REACH_OVER_BLOCKER &&
+        (ac === 0 || ac === 2) && (ar === 0 || ar === 2) &&
+        Math.max(ac, ar) === 2) {
+      return this.grid.isBlocked(pc.c + dc / 2, pc.r + dr / 2);
+    }
+    return false;
   }
 
   grantXp(p, xp) {
