@@ -58,6 +58,16 @@ export function icon(name, cls = '') {
   return `<span class="ico ${cls}">${svg}</span>`;
 }
 
+// raw SVG path `d` strings for an icon, so a glyph can be rendered
+// straight onto a <canvas> (used for the overhead class badges, which
+// live in the 3D scene as sprites). The fill-based class glyphs use a
+// 512×512 viewBox; scale accordingly when drawing.
+export function iconPaths(name) {
+  const svg = ICONS[name];
+  if (!svg) return [];
+  return [...svg.matchAll(/ d="([^"]+)"/g)].map((m) => m[1]);
+}
+
 // swap every <i data-icon="name"> placeholder in the document
 export function mountIcons(root = document) {
   for (const el of root.querySelectorAll('[data-icon]')) {

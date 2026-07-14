@@ -25,6 +25,7 @@
     <!-- ============ CHARACTER CREATION ============ -->
     <div id="character" class="screen hidden">
       <div class="panel char-panel">
+        <button id="char-back" class="btn small corner-btn corner-left hidden" title="Back"><i data-icon="x"></i></button>
         <button id="char-settings" class="btn small corner-btn" title="Settings"><i data-icon="gear"></i></button>
         <h2>Your hero</h2>
 
@@ -55,7 +56,7 @@
         </div>
 
         <div class="char-foot">
-          <input id="char-name" maxlength="12" autocomplete="off" placeholder="Hero name" />
+          <input id="char-name" maxlength="10" autocomplete="off" placeholder="Hero name" />
           <button id="char-save" class="btn primary big">Save &amp; continue</button>
         </div>
       </div>
@@ -68,15 +69,8 @@
         <h1 class="title">Defend<br/>the Crystal</h1>
         <div id="best-wave" class="muted"></div>
 
-        <div class="field-label">Your hero</div>
-        <button id="hero-card" class="hero-card">
-          <span class="hero-thumb" id="hero-thumb"><img class="entity-img" src="./img/class-berserker.png" alt=""></span>
-          <span class="hero-meta">
-            <span class="hero-name" id="hero-name">Hero</span>
-            <span class="hero-cls" id="hero-cls">Berserker</span>
-          </span>
-          <span class="hero-edit"><i data-icon="gear"></i> Change</span>
-        </button>
+        <div class="field-label">Your heroes</div>
+        <div id="hero-roster" class="hero-roster"></div>
 
         <div class="menu-actions">
           <button id="host-btn" class="btn primary big"><i data-icon="swords"></i> Host a match</button>
@@ -121,7 +115,7 @@
 
       <div id="player-bar">
         <div class="pb-row">
-          <span id="pb-class"><img class="entity-img" src="./img/class-berserker.png" alt=""></span>
+          <span id="pb-class" title="View character stats"><i data-icon="cls-berserker"></i></span>
           <div class="pb-bars">
             <div class="bar hp"><div id="pb-hp"></div><span id="pb-hp-text"></span></div>
             <div class="bar xp"><div id="pb-xp"></div></div>
@@ -214,6 +208,21 @@
           <input type="checkbox" id="set-shadows" />
         </div>
         <button id="settings-close" class="btn primary big">Done</button>
+      </div>
+    </div>
+
+    <!-- ============ CHARACTER STATS SHEET ============ -->
+    <div id="stats-panel" class="screen overlay hidden">
+      <div class="panel center-panel stats-modal">
+        <button id="stats-close" class="btn small corner-btn" title="Close"><i data-icon="x"></i></button>
+        <div class="stats-head">
+          <span id="stats-icon" class="stats-icon"></span>
+          <div class="stats-headmeta">
+            <span id="stats-title">Hero</span>
+            <span id="stats-sub" class="muted"></span>
+          </div>
+        </div>
+        <div id="stats-body" class="stats-grid"></div>
       </div>
     </div>
 

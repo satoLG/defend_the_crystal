@@ -18,6 +18,10 @@ export const GRID = {
 
 export const CRYSTAL_BREACH_LIMIT = 10;
 
+// keep hero names short so they never overflow the overhead labels
+// (name + a separate level badge) or the roster/HUD chrome
+export const NAME_MAX = 10;
+
 // ---------- player classes ----------
 // def = fraction of incoming damage absorbed.
 export const CLASSES = {
