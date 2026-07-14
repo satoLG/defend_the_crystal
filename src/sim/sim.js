@@ -3,7 +3,7 @@ import { EntityManager, Vehicle, SeekBehavior, SeparationBehavior } from 'yuka';
 import {
   CLASSES, PLAYER, TOWERS, TOWER_LEVEL_MAX, TOWER_UPGRADE, OBSTACLES,
   OBSTACLE_STOCK_CAP, ENEMIES, ENEMY, WAVES, SCALING, scaleFor,
-  CRYSTAL_BREACH_LIMIT, GRID, JUMP, DROPS, SUMMON, BOSSES, SKILLS,
+  CRYSTAL_BREACH_LIMIT, GRID, JUMP, DROPS, SUMMON, BOSSES, SKILLS, NAME_MAX,
 } from '../config.js';
 import {
   Grid, cellToWorld, worldToCell, canJumpFrom, enemyJumpShortcut, idx,
@@ -60,7 +60,7 @@ export class Sim {
     const base = CLASSES[cls];
     const spawn = this.playerSpawnPos();
     const p = this.world.add({
-      player: true, id, name: (name || 'Hero').slice(0, 12), cls,
+      player: true, id, name: (name || 'Hero').slice(0, NAME_MAX), cls,
       colors: colors || {},
       x: spawn.x, z: spawn.z, yaw: Math.PI, moving: false,
       hp: base.hp, maxHp: base.hp, atk: base.atk, def: base.def,
@@ -1185,6 +1185,7 @@ export class Sim {
         Math.ceil(p.hp), p.maxHp, p.lvl, Math.round(p.xp), p.xpNext,
         p.moving ? 1 : 0, p.dead ? 1 : 0, rnd2(Math.max(p.respawnT, 0)),
         p.obst, p.kills, p.name, rnd2(Math.max(p.skillCd, 0)), p.wallT > 0 ? 1 : 0,
+        Math.round(p.atk),
       ]),
       en: this.enemies.entities.map((e) => [
         e.id, e.kind, rnd2(e.vehicle.position.x), rnd2(e.vehicle.position.z),

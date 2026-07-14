@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { instantiate } from './assets.js';
 import { buildTexture, applyTexture } from './customize.js';
+import { iconPaths } from '../icons.js';
 import { CLASSES, TOWERS, JUMP, ENEMIES, BOSSES } from '../config.js';
 import { cellToWorld, CRYSTAL_POS, HALF_H, PLAZA } from '../sim/grid.js';
 import { lerp, angleLerp } from '../utils.js';
@@ -12,7 +13,7 @@ import { sfx } from '../audio.js';
 // rules live here.
 // ============================================================
 
-const PL = { ID: 0, CLS: 1, X: 2, Z: 3, YAW: 4, HP: 5, MHP: 6, LVL: 7, XP: 8, XPN: 9, MOV: 10, DEAD: 11, RESP: 12, OBST: 13, KILLS: 14, NAME: 15, SKCD: 16, WALL: 17 };
+const PL = { ID: 0, CLS: 1, X: 2, Z: 3, YAW: 4, HP: 5, MHP: 6, LVL: 7, XP: 8, XPN: 9, MOV: 10, DEAD: 11, RESP: 12, OBST: 13, KILLS: 14, NAME: 15, SKCD: 16, WALL: 17, ATK: 18 };
 const EN = { ID: 0, KIND: 1, X: 2, Z: 3, YAW: 4, HP: 5, MHP: 6, SCALE: 7, BOSS: 8, MOV: 9 };
 
 // Hand props live in BONE space: raw Kenney units, grip at the origin.
@@ -288,15 +289,73 @@ export class GameView {
     return spr;
   }
 
-  makeNameLabel(name, lvl, tint) {
-    return this.makeTextSprite(`${name}  Lv${lvl}`, tint);
+  // overhead label for OTHER players: a class-tinted badge (glyph) on
+  // the left, the hero name, then a separate gold level pill — so the
+  // level never runs into the name and long numbers can't clip.
+  makePlayerLabel(name, lvl, cls, tint) {
+    const ss = 2;                       // supersample for crisp text
+    const H = 76, pad = 10, badge = 58, gap = 12;
+    const nameFont = 'bold 46px "Trebuchet MS", sans-serif';
+    const lvlFont = 'bold 32px "Trebuchet MS", sans-serif';
+    const meas = document.createElement('canvas').getContext('2d');
+    meas.font = nameFont;
+    const nameW = Math.ceil(meas.measureText(name || '').width);
+    const lvlText = `Lv ${lvl}`;
+    meas.font = lvlFont;
+    const lvlPad = 14;
+    const pillW = Math.ceil(meas.measureText(lvlText).width) + lvlPad * 2;
+    const W = pad + badge + gap + nameW + gap + pillW + pad;
+
+    const canvas = document.createElement('canvas');
+    canvas.width = W * ss; canvas.height = H * ss;
+    const ctx = canvas.getContext('2d');
+    ctx.scale(ss, ss);
+
+    const rgb = new THREE.Color(tint);
+    const rgbCss = `${(rgb.r * 255) | 0}, ${(rgb.g * 255) | 0}, ${(rgb.b * 255) | 0}`;
+
+    // class badge
+    const by = (H - badge) / 2;
+    roundRect(ctx, pad, by, badge, badge, 15);
+    ctx.fillStyle = `rgba(${rgbCss}, 0.92)`;
+    ctx.fill();
+    ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(0, 0, 0, 0.6)'; ctx.stroke();
+    drawClassGlyph(ctx, cls, pad + badge * 0.17, by + badge * 0.17, badge * 0.66, '#ffffff');
+
+    // name
+    ctx.font = nameFont;
+    ctx.textBaseline = 'middle';
+    ctx.textAlign = 'left';
+    const nameX = pad + badge + gap;
+    ctx.lineWidth = 7; ctx.strokeStyle = 'rgba(0, 0, 0, 0.75)';
+    ctx.strokeText(name || '', nameX, H / 2);
+    ctx.fillStyle = '#' + rgb.getHexString();
+    ctx.fillText(name || '', nameX, H / 2);
+
+    // separate level pill
+    const pillH = 42, pillX = nameX + nameW + gap, pillY = (H - pillH) / 2;
+    roundRect(ctx, pillX, pillY, pillW, pillH, pillH / 2);
+    ctx.fillStyle = 'rgba(232, 184, 75, 0.96)';
+    ctx.fill();
+    ctx.font = lvlFont;
+    ctx.fillStyle = '#2a1f08';
+    ctx.fillText(lvlText, pillX + lvlPad, H / 2 + 1);
+
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    const spr = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthWrite: false }));
+    const worldW = W * 0.0085;
+    spr.scale.set(worldW, worldW * H / W, 1);
+    spr.renderOrder = 11;
+    return spr;
   }
 
-  ensurePlayer(row) {
+  ensurePlayer(row, selfId) {
     const id = row[PL.ID];
     let a = this.players.get(id);
     if (a) return a;
     const cls = row[PL.CLS];
+    const isSelf = id === selfId;
     a = this.makeAnimated(CLASSES[cls]?.model || 'char-berserker');
     a.cls = cls;
     // anchor the bar/label just above THIS model's head (heights now
@@ -318,14 +377,21 @@ export class GameView {
     a.group.add(ring);
 
     a.labelTop = top;
-    a.hpBar = this.makeHpBar(1.0, top + 0.3);
-    a.group.add(a.hpBar);
-    a.label = this.makeNameLabel(row[PL.NAME], row[PL.LVL], tint);
-    a.label.position.y = top + 0.65;
-    a.labelLvl = row[PL.LVL];
-    a.labelName = row[PL.NAME];
+    a.isSelf = isSelf;
     a.tint = tint;
-    a.group.add(a.label);
+    // HP bar for everyone, but only shown once someone is hurt
+    a.hpBar = this.makeHpBar(1.0, top + 0.3);
+    a.hpBar.visible = false;
+    a.group.add(a.hpBar);
+    // name / level / class badge float over OTHER players only — you
+    // read your own stats from the HUD, not over your own head
+    if (!isSelf) {
+      a.label = this.makePlayerLabel(row[PL.NAME], row[PL.LVL], cls, tint);
+      a.label.position.y = top + 0.72;
+      a.labelLvl = row[PL.LVL];
+      a.labelName = row[PL.NAME];
+      a.group.add(a.label);
+    }
 
     this.scene.add(a.group);
     this.players.set(id, a);
@@ -560,7 +626,7 @@ export class GameView {
     for (const row of next.pl) {
       const id = row[PL.ID];
       seenP.add(id);
-      const a = this.ensurePlayer(row);
+      const a = this.ensurePlayer(row, selfId);
       const dead = row[PL.DEAD] === 1;
       a.group.visible = !dead;
       let x = row[PL.X], z = row[PL.Z], yaw = row[PL.YAW], moving = row[PL.MOV] === 1;
@@ -579,16 +645,20 @@ export class GameView {
         const spd = CLASSES[a.cls]?.speed || 4;
         this.setLoco(a, moving ? (spd > 4.8 ? 'sprint' : 'walk') : 'idle', moving ? spd / 3.2 : 1);
       }
-      this.setHpBar(a.hpBar, row[PL.HP] / row[PL.MHP]);
+      const frac = row[PL.HP] / row[PL.MHP];
+      this.setHpBar(a.hpBar, frac);
+      // the HP bar only appears once the hero has actually taken damage
+      a.hpBar.visible = !dead && frac < 0.999;
       // "wall mode" aura follows the tanker skill flag in the snapshot
       const wall = row[PL.WALL] === 1;
       if (wall && !a.wallFx) this.addWallAura(a);
       else if (!wall && a.wallFx) this.removeWallAura(a);
-      if (a.labelLvl !== row[PL.LVL] || a.labelName !== row[PL.NAME]) {
+      // rebuild the overhead label (other players only) when name/level change
+      if (a.label && (a.labelLvl !== row[PL.LVL] || a.labelName !== row[PL.NAME])) {
         a.group.remove(a.label);
         a.label.material.map.dispose();
-        a.label = this.makeNameLabel(row[PL.NAME], row[PL.LVL], a.tint);
-        a.label.position.y = (a.labelTop || 1.4) + 0.65;
+        a.label = this.makePlayerLabel(row[PL.NAME], row[PL.LVL], a.cls, a.tint);
+        a.label.position.y = (a.labelTop || 1.4) + 0.72;
         a.labelLvl = row[PL.LVL];
         a.labelName = row[PL.NAME];
         a.group.add(a.label);
@@ -1201,3 +1271,35 @@ export class GameView {
 }
 
 const easeOut = (t) => 1 - Math.pow(1 - t, 3);
+
+function roundRect(ctx, x, y, w, h, r) {
+  r = Math.min(r, w / 2, h / 2);
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
+// the fill-based class glyphs are authored in a 512×512 viewBox; parse
+// their paths once and stamp them onto the label canvas at any size.
+const CLASS_GLYPH_CACHE = {};
+function classGlyphPaths(cls) {
+  if (!(cls in CLASS_GLYPH_CACHE)) {
+    CLASS_GLYPH_CACHE[cls] = iconPaths('cls-' + cls).map((d) => new Path2D(d));
+  }
+  return CLASS_GLYPH_CACHE[cls];
+}
+
+function drawClassGlyph(ctx, cls, x, y, size, color) {
+  const paths = classGlyphPaths(cls);
+  if (!paths.length) return;
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.scale(size / 512, size / 512);
+  ctx.fillStyle = color;
+  for (const p of paths) ctx.fill(p);
+  ctx.restore();
+}

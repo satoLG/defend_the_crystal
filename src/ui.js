@@ -1,11 +1,17 @@
-import { CLASSES, TOWERS, TOWER_LEVEL_MAX, TOWER_UPGRADE, CRYSTAL_BREACH_LIMIT, SKILLS } from './config.js';
+import { CLASSES, TOWERS, TOWER_LEVEL_MAX, TOWER_UPGRADE, CRYSTAL_BREACH_LIMIT, SKILLS, NAME_MAX } from './config.js';
 import { sfx, setSfxVolume } from './audio.js';
 import { normalizeRoomCode } from './utils.js';
 import { icon, mountIcons } from './icons.js';
 import { settings } from './settings.js';
 import { music } from './music.js';
-import { loadCharacter, saveCharacter } from './character.js';
+import { loadRoster, saveRoster, defaultCharacter } from './character.js';
 import { getSlots } from './render/customize.js';
+
+// class accent colours (mirror the 3D CLASS_TINT) used to tint the
+// class glyph in the roster, lobby and HUD chrome
+const CLASS_COLORS = {
+  berserker: '#ff6a4d', tanker: '#6a9cff', archer: '#7de87d', mage: '#c07dff',
+};
 
 // per-class stat bars + one-line special-power blurbs for the
 // character screen (kept here so the DOM layer owns its own copy)
@@ -65,8 +71,11 @@ const entityImg = (name) =>
 export class UI {
   constructor(callbacks) {
     this.cb = callbacks;
-    this.character = loadCharacter();     // { name, cls, colors }
+    this.roster = loadRoster();           // { chars: [...], activeId }
+    this.character = this.activeChar();   // active hero { id, name, cls, colors }
     this.charDraft = null;                // working copy on the creation screen
+    this.editingId = null;                // id being edited, null when creating new
+    this.statsOpen = false;
     this.preview = null;                  // 3D turntable (attached after assets load)
     this.selectedItem = null;   // build card
     this.pendingCell = null;    // two-tap confirm on touch
@@ -92,6 +101,67 @@ export class UI {
 
   show(id) { $(id).classList.remove('hidden'); }
   hide(id) { $(id).classList.add('hidden'); }
+
+  // ---------------- character roster ----------------
+
+  activeChar() {
+    const { chars, activeId } = this.roster;
+    return chars.find((c) => c.id === activeId) || chars[0] || defaultCharacter();
+  }
+
+  setActiveChar(id) {
+    this.roster = saveRoster(this.roster.chars, id);
+    this.character = this.activeChar();
+    this.myCls = this.character.cls;
+    this.renderRoster();
+  }
+
+  deleteChar(id) {
+    const chars = this.roster.chars.filter((c) => c.id !== id);
+    let activeId = this.roster.activeId === id ? (chars[0]?.id || null) : this.roster.activeId;
+    this.roster = saveRoster(chars, activeId);
+    this.character = this.activeChar();
+    this.renderRoster();
+  }
+
+  // paint the menu's hero roster: one card per saved hero (tap to make
+  // active, edit/delete affordances), plus a "new hero" card
+  renderRoster() {
+    const host = $('hero-roster');
+    if (!host) return;
+    host.innerHTML = '';
+    const { chars, activeId } = this.roster;
+    const canDelete = chars.length > 1;
+    for (const c of chars) {
+      const card = document.createElement('button');
+      card.className = 'hero-card' + (c.id === activeId ? ' active' : '');
+      card.dataset.id = c.id;
+      const color = CLASS_COLORS[c.cls] || 'var(--gold)';
+      card.innerHTML =
+        `<span class="hero-thumb" style="color:${color}">${icon('cls-' + c.cls)}</span>
+         <span class="hero-meta">
+           <span class="hero-name"></span>
+           <span class="hero-cls">${CLASSES[c.cls]?.name || ''}</span>
+         </span>
+         <span class="hero-actions">
+           <span class="hc-btn" data-act="edit" title="Edit">${icon('gear')}</span>
+           ${canDelete ? `<span class="hc-btn hc-del" data-act="del" title="Delete">${icon('x')}</span>` : ''}
+         </span>`;
+      // names are user input — set as text, never as HTML
+      card.querySelector('.hero-name').textContent = c.name.trim() || 'Hero';
+      host.appendChild(card);
+    }
+    const add = document.createElement('button');
+    add.className = 'hero-card add-hero';
+    add.dataset.id = '';
+    add.innerHTML =
+      `<span class="hero-thumb add-thumb">${icon('sparkle')}</span>
+       <span class="hero-meta">
+         <span class="hero-name">New hero</span>
+         <span class="hero-cls muted">Create a character</span>
+       </span>`;
+    host.appendChild(add);
+  }
 
   toast(msg, kind = '') {
     const el = document.createElement('div');
@@ -127,7 +197,19 @@ export class UI {
   bindMenu() {
     const heroName = () => this.character.name.trim() || 'Hero';
 
-    $('hero-card').addEventListener('click', () => { sfx.click(); this.showCharacter(); });
+    // roster: tap a card to make it active, its gear to edit, its × to
+    // delete, or the "new hero" card to create another character
+    $('hero-roster').addEventListener('click', (e) => {
+      const card = e.target.closest('.hero-card');
+      if (!card) return;
+      const id = card.dataset.id;
+      if (!id) { sfx.click(); this.showCharacter(null); return; } // add-new
+      const act = e.target.closest('[data-act]')?.dataset.act;
+      if (act === 'edit') { sfx.click(); this.showCharacter(id); return; }
+      if (act === 'del') { sfx.click(); this.deleteChar(id); return; }
+      sfx.click();
+      this.setActiveChar(id);
+    });
 
     $('host-btn').addEventListener('click', () => {
       sfx.click();
@@ -158,18 +240,11 @@ export class UI {
 
   menuError(msg) { $('menu-error').textContent = msg; sfx.error(); }
 
-  updateHeroCard() {
-    const c = this.character;
-    $('hero-thumb').innerHTML = entityImg('class-' + c.cls);
-    $('hero-name').textContent = c.name.trim() || 'Hero';
-    $('hero-cls').textContent = CLASSES[c.cls]?.name || '';
-  }
-
   showMenu() {
     this.hide('loading'); this.hide('character'); this.hide('lobby'); this.hide('hud');
     this.hide('checkpoint'); this.hide('gameover'); this.hide('host-lost');
     this.preview?.stop();
-    this.updateHeroCard();
+    this.renderRoster();
     this.show('menu');
   }
 
@@ -190,8 +265,10 @@ export class UI {
     }
 
     $('char-name').addEventListener('input', (e) => {
-      this.charDraft.name = e.target.value.slice(0, 12);
+      this.charDraft.name = e.target.value.slice(0, NAME_MAX);
     });
+
+    $('char-back').addEventListener('click', () => { sfx.click(); this.showMenu(); });
 
     $('char-random').addEventListener('click', () => {
       sfx.click();
@@ -204,8 +281,15 @@ export class UI {
 
     $('char-save').addEventListener('click', () => {
       sfx.success();
-      this.charDraft.name = ($('char-name').value.trim() || 'Hero').slice(0, 12);
-      this.character = saveCharacter(this.charDraft);
+      this.charDraft.name = ($('char-name').value.trim() || 'Hero').slice(0, NAME_MAX);
+      const chars = [...this.roster.chars];
+      const i = this.editingId ? chars.findIndex((c) => c.id === this.editingId) : -1;
+      if (i >= 0) chars[i] = { ...this.charDraft, id: this.editingId };
+      else chars.push(this.charDraft);
+      // the saved/created hero becomes the active one
+      this.roster = saveRoster(chars, this.charDraft.id);
+      this.character = this.activeChar();
+      this.myCls = this.character.cls;
       this.showMenu();
     });
   }
@@ -248,15 +332,18 @@ export class UI {
     }
   }
 
-  showCharacter() {
+  // id = edit that hero; null/undefined = create a fresh one
+  showCharacter(id = null) {
+    this.editingId = id;
+    const src = id ? this.roster.chars.find((c) => c.id === id) : null;
     // work on a copy so "Save" is an explicit commit
-    this.charDraft = {
-      name: this.character.name,
-      cls: this.character.cls,
-      colors: { ...this.character.colors },
-    };
+    this.charDraft = src
+      ? { id: src.id, name: src.name, cls: src.cls, colors: { ...src.colors } }
+      : defaultCharacter();
     this.hide('loading'); this.hide('menu'); this.hide('lobby'); this.hide('hud');
     this.hide('checkpoint'); this.hide('gameover'); this.hide('host-lost');
+    // returning to the menu is only allowed once at least one hero exists
+    $('char-back').classList.toggle('hidden', this.roster.chars.length === 0);
     $('char-name').value = this.charDraft.name;
     this.selectCharClass(this.charDraft.cls);
     this.renderCharInfo();
@@ -309,7 +396,8 @@ export class UI {
     for (const p of players) {
       const li = document.createElement('li');
       const cls = CLASSES[p.cls];
-      li.innerHTML = `<span class="pl-cls">${entityImg('class-' + p.cls)}</span>
+      const color = CLASS_COLORS[p.cls] || 'var(--gold)';
+      li.innerHTML = `<span class="pl-cls" style="color:${color}">${icon('cls-' + p.cls)}</span>
         <span class="pl-name"></span>
         <span class="pl-tag">${cls?.name || ''}${p.host ? ' · Host' : ''}${p.id === selfId ? ' · You' : ''}</span>`;
       li.querySelector('.pl-name').textContent = p.name;
@@ -340,6 +428,13 @@ export class UI {
     bindTap($('skill-btn'), () => this.cb.onSkill?.());
     $('room-chip').addEventListener('click', async () => {
       try { await navigator.clipboard.writeText(this.roomCode); this.toast('Code copied!', 'gold'); } catch { /* ok */ }
+    });
+
+    // tap the class badge to open the live character stats sheet
+    $('pb-class').addEventListener('click', () => { sfx.click(); this.openStats(); });
+    $('stats-close').addEventListener('click', () => { sfx.click(); this.closeStats(); });
+    $('stats-panel').addEventListener('click', (e) => {
+      if (e.target === $('stats-panel')) this.closeStats();
     });
 
     $('upg-btn').addEventListener('click', () => {
@@ -449,6 +544,53 @@ export class UI {
     this.cb.onPanelClose?.();
   }
 
+  // ---------------- character stats sheet ----------------
+
+  openStats() {
+    if (!this._lastMe) return;
+    this.statsOpen = true;
+    this._statsKey = null;
+    this.renderStats(this._lastMe);
+    this.show('stats-panel');
+  }
+
+  closeStats() { this.statsOpen = false; this.hide('stats-panel'); }
+
+  // full stat breakdown for the local hero — the level-scaled values
+  // (HP, attack) come live from the snapshot, the rest from the class
+  renderStats(me) {
+    const cls = me[1];
+    const def = CLASSES[cls] || {};
+    const lvl = me[7], hp = me[5], mhp = me[6], xp = me[8], xpn = me[9];
+    const kills = me[14];
+    const atk = typeof me[18] === 'number' ? me[18] : Math.round(def.atk || 0);
+    const color = CLASS_COLORS[cls] || 'var(--gold)';
+    $('stats-icon').innerHTML = icon('cls-' + cls);
+    $('stats-icon').style.color = color;
+    $('stats-title').textContent = (me[15] || 'Hero');
+    $('stats-sub').textContent = `${def.name || ''} · Level ${lvl}`;
+
+    const rows = [
+      ['Health', `${hp} / ${mhp}`],
+      ['Attack', `${Math.round(atk)}`],
+      ['Defense', `${Math.round((def.def || 0) * 100)}%`],
+      ['Range', `${(def.range || 0).toFixed(1)}`],
+      ['Attack speed', `${(def.rate || 0).toFixed(2)}/s`],
+      ['Move speed', `${(def.speed || 0).toFixed(1)}`],
+      ['Knockback', `${(def.knockback || 0).toFixed(1)}`],
+    ];
+    if (def.aoe) rows.push(['Blast area', `${def.aoe.toFixed(1)}`]);
+    rows.push(['Experience', `${xp} / ${xpn}`]);
+    rows.push(['Kills', `${kills}`]);
+
+    $('stats-body').innerHTML =
+      rows.map(([k, v]) => `<div class="stat-line"><span class="sk">${k}</span><span class="sv">${v}</span></div>`).join('') +
+      `<div class="stat-power">
+         <span class="sp-name">${SKILLS[cls]?.name || 'Special'}</span>
+         <span class="sp-desc">${POWER_DESC[cls] || ''}</span>
+       </div>`;
+  }
+
   // called every frame with the freshest snapshot
   updateHud(snap, selfId) {
     if (!snap) return;
@@ -494,10 +636,18 @@ export class UI {
     // own player row
     const me = snap.pl.find((r) => r[0] === selfId);
     if (me) {
+      this._lastMe = me;
       const [, cls, , , , hp, mhp, lvl, xp, xpn, , dead, resp, obst] = me;
       if (this._pbCls !== cls) {
         this._pbCls = cls;
-        $('pb-class').innerHTML = entityImg('class-' + cls);
+        const el = $('pb-class');
+        el.innerHTML = icon('cls-' + cls);
+        el.style.color = CLASS_COLORS[cls] || 'var(--gold)';
+      }
+      // keep an open stats sheet in sync as HP / level / attack change
+      if (this.statsOpen) {
+        const key = `${lvl}|${hp}|${mhp}|${xp}|${me[14]}|${me[18]}`;
+        if (key !== this._statsKey) { this._statsKey = key; this.renderStats(me); }
       }
       $('pb-hp').style.width = `${(hp / mhp) * 100}%`;
       $('pb-hp-text').textContent = `${hp}/${mhp}`;

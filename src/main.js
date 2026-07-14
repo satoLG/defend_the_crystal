@@ -411,7 +411,6 @@ function handleEvent(ev) {
     case 'ejump': sfx.jump(); break;
     case 'skill':
       sfx.skill(ev.cls);
-      if (ev.id === selfId) ui.toast(`${SKILLS[ev.cls]?.name || 'Special'}!`, 'gold');
       if (ev.cls === 'berserker') gs.addShake(0.2);
       if (ev.cls === 'mage') setTimeout(() => gs.addShake(0.4), SKILLS.mage.flightT * 1000);
       break;
