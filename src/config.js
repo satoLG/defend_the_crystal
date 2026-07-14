@@ -182,8 +182,11 @@ export const SUMMON = {
   KINDS: ['zombie', 'skeleton'],
 };
 
-export const SUBBOSS = { hpMult: 7, dmgMult: 1.8, scale: 1.65, ptsMult: 6, xpMult: 6, breach: 3 };
-export const BOSS = { scale: 2.1, breach: 5, pts: 110, xp: 260 };
+// scale is a visual multiplier on the (now uniform, native-sized)
+// enemy model; bumped so bosses stay as imposing as before even though
+// the shared character scale makes the base models a bit smaller
+export const SUBBOSS = { hpMult: 7, dmgMult: 1.8, scale: 2.4, ptsMult: 6, xpMult: 6, breach: 3 };
+export const BOSS = { scale: 3.0, breach: 5, pts: 110, xp: 260 };
 
 // checkpoint-wave bosses (waves 10, 20, 30…), rotating in this order.
 // Multipliers sit on top of the base kind's wave-scaled stats so every

@@ -116,6 +116,14 @@ export function attachProps(group, specs) {
   }
 }
 
+// world-space head height of a built actor group, so HP bars / name
+// labels / crowns can sit right on top whatever the model's size
+function modelTop(group) {
+  group.updateMatrixWorld(true);
+  const box = new THREE.Box3().setFromObject(group);
+  return Number.isFinite(box.max.y) ? box.max.y : 1.4;
+}
+
 const CLASS_TINT = {
   berserker: 0xff6a4d, tanker: 0x6a9cff, archer: 0x7de87d, mage: 0xc07dff,
 };
@@ -291,6 +299,9 @@ export class GameView {
     const cls = row[PL.CLS];
     a = this.makeAnimated(CLASSES[cls]?.model || 'char-berserker');
     a.cls = cls;
+    // anchor the bar/label just above THIS model's head (heights now
+    // vary a little between classes, so a fixed offset would float)
+    const top = modelTop(a.group);
     this.attachProps(a, CLASS_PROPS[cls]);
     const cos = this.cosmetics.get(id);
     if (cos) this.applyCosmetic(a, cls, cos.colors);
@@ -306,10 +317,11 @@ export class GameView {
     ring.scale.setScalar(0.5);
     a.group.add(ring);
 
-    a.hpBar = this.makeHpBar(1.0, 1.75);
+    a.labelTop = top;
+    a.hpBar = this.makeHpBar(1.0, top + 0.3);
     a.group.add(a.hpBar);
     a.label = this.makeNameLabel(row[PL.NAME], row[PL.LVL], tint);
-    a.label.position.y = 2.1;
+    a.label.position.y = top + 0.65;
     a.labelLvl = row[PL.LVL];
     a.labelName = row[PL.NAME];
     a.tint = tint;
@@ -360,6 +372,9 @@ export class GameView {
     a.kind = kind;
     const scale = row[EN.SCALE] || 1;
     a.group.scale.setScalar(scale);
+    // measure the head height now (after scale) so overhead bits sit
+    // right on top no matter the model's size
+    const top = modelTop(a.group);
     a.isGhost = !!def.flying;
     a.isArcher = !!def.archer;
     if (a.isGhost) {
@@ -376,17 +391,17 @@ export class GameView {
           emissive: isBoss ? 0xaa7a00 : 0x882200, emissiveIntensity: 0.8,
         })
       );
-      crown.position.y = 1.75;
+      crown.position.y = (top + 0.2) / scale; // constant world margin
       a.group.add(crown);
     }
     if (isBoss) {
       // the boss announces itself: name floating over its head
       const bossName = BOSS_BY_KIND[kind]?.name || def.name || kind;
       const label = this.makeTextSprite(bossName.toUpperCase(), 0xffd24a, 2.1);
-      label.position.y = 2.15;
+      label.position.y = (top + 0.62) / scale;
       a.group.add(label);
     }
-    a.hpBar = this.makeHpBar(row[EN.BOSS] ? 1.3 : 0.85, 1.55);
+    a.hpBar = this.makeHpBar(row[EN.BOSS] ? 1.3 : 0.85, (top + 0.25) / scale);
     a.hpBar.visible = false;
     a.group.add(a.hpBar);
     this.scene.add(a.group);
@@ -573,7 +588,7 @@ export class GameView {
         a.group.remove(a.label);
         a.label.material.map.dispose();
         a.label = this.makeNameLabel(row[PL.NAME], row[PL.LVL], a.tint);
-        a.label.position.y = 2.1;
+        a.label.position.y = (a.labelTop || 1.4) + 0.65;
         a.labelLvl = row[PL.LVL];
         a.labelName = row[PL.NAME];
         a.group.add(a.label);
