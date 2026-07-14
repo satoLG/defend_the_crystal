@@ -1,6 +1,8 @@
 import { loadAssets } from './render/assets.js';
 import { GameScene } from './render/scene.js';
 import { GameView } from './render/view.js';
+import { CharacterPreview } from './render/preview.js';
+import { hasCharacter } from './character.js';
 import { Sim } from './sim/sim.js';
 import { Grid, worldToCell, cellToWorld, canJumpFrom, computeDashEnd } from './sim/grid.js';
 import { Net, selfId } from './net.js';
@@ -91,7 +93,15 @@ async function boot() {
     if (k === 'shadows') gs.setShadows(v);
   });
   view = new GameView(gs);
-  ui.showMenu();
+
+  // live 3D turntable for the character-creation screen
+  const preview = new CharacterPreview(document.getElementById('preview-canvas'));
+  ui.attachPreview(preview);
+
+  // must pick/create a character before anything else; returning
+  // players already have one saved, so they land on the menu
+  if (hasCharacter()) ui.showMenu();
+  else ui.showCharacter();
   requestAnimationFrame(frame);
 }
 
@@ -99,18 +109,18 @@ async function boot() {
 // hosting / joining
 // ---------------------------------------------------------
 
-function hostGame(name, cls) {
+function hostGame(character) {
   state.role = 'host';
   state.hostId = selfId;
   const code = makeRoomCode();
   state.net = new Net(code);
   state.sim = new Sim();
-  state.sim.addPlayer(selfId, name, cls);
+  state.sim.addPlayer(selfId, character.name, character.cls, character.colors);
   syncSelfFromSim();
 
   state.net.on('hello', (data, peerId) => {
     if (!state.sim.getPlayer(peerId)) {
-      state.sim.addPlayer(peerId, data?.name, data?.cls);
+      state.sim.addPlayer(peerId, data?.name, data?.cls, data?.colors);
     }
     broadcastLobby();
   });
@@ -129,27 +139,31 @@ function hostGame(name, cls) {
 function broadcastLobby() {
   if (state.role !== 'host') return;
   const players = state.sim.players.entities.map((p) => ({
-    id: p.id, name: p.name, cls: p.cls, host: p.id === selfId,
+    id: p.id, name: p.name, cls: p.cls, colors: p.colors, host: p.id === selfId,
   }));
   state.lobbyPlayers = players;
   const payload = { host: selfId, code: state.net.code, players, started: state.started };
   state.net.send('lobby', payload);
   ui.updateLobby(players, selfId);
+  view.setCosmetics(players);
 }
 
-function joinGame(code, name, cls) {
+function joinGame(code, character) {
   state.role = 'client';
   state.net = new Net(code);
   ui.showLobby(code, false);
   $status('Looking for the host…');
 
-  const hello = () => state.net.send('hello', { name, cls });
+  const hello = () => state.net.send('hello', {
+    name: character.name, cls: character.cls, colors: character.colors,
+  });
   state.net.onPeerJoin = () => hello();
 
   state.net.on('lobby', (data) => {
     state.hostId = data.host;
     state.lobbyPlayers = data.players || [];
     ui.updateLobby(state.lobbyPlayers, selfId);
+    view.setCosmetics(state.lobbyPlayers);
     $status('');
     if (data.started && !state.started) enterGame();
   });

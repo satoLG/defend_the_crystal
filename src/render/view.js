@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { instantiate } from './assets.js';
+import { buildTexture, applyTexture } from './customize.js';
 import { CLASSES, TOWERS, JUMP, ENEMIES, BOSSES } from '../config.js';
 import { cellToWorld, CRYSTAL_POS, HALF_H, PLAZA } from '../sim/grid.js';
 import { lerp, angleLerp } from '../utils.js';
@@ -17,48 +18,45 @@ const EN = { ID: 0, KIND: 1, X: 2, Z: 3, YAW: 4, HP: 5, MHP: 6, SCALE: 7, BOSS: 
 // Hand props live in BONE space: raw Kenney units, grip at the origin.
 // The hand sits ~0.14 units down the arm bone; rot compensates the
 // arm's resting tilt so weapons read upright and stay visible.
-const CLASS_PROPS = {
+export const CLASS_PROPS = {
   berserker: [{ key: 'prop-sword', bone: 'arm-right', pos: [0, -0.13, 0.04], rot: [0.85, 0, -0.4], scale: 1.3 }],
   tanker: [
     { key: 'prop-sword', bone: 'arm-right', pos: [0, -0.13, 0.04], rot: [0.85, 0, -0.4], scale: 1.05 },
     { key: 'prop-shield', bone: 'arm-left', pos: [0.05, -0.1, 0.05], rot: [0.15, 0.35, 0], scale: 1.15 },
   ],
   archer: [
-    { gen: makeBow, bone: 'arm-right', pos: [0, -0.14, 0.02], rot: [0.15, -0.5, -0.55], scale: 1.35 },
+    { gen: makeBow, bone: 'arm-right', pos: [0, -0.16, 0.05], rot: [0.15, -0.5, -0.5], scale: 1.15 },
     { gen: makeQuiver, bone: 'torso', pos: [-0.05, 0.05, -0.1], rot: [0.25, 0, 0.35] },
   ],
   mage: [{ key: 'prop-staff', bone: 'arm-right', pos: [0, -0.08, 0.03], rot: [0, Math.PI, Math.PI], scale: 1.2, crystalTip: true }],
 };
 
-// stylized low-poly bow (raw units: grip at origin, curve toward +Z)
-function makeBow() {
-  const g = new THREE.Group();
-  const wood = new THREE.MeshStandardMaterial({ color: 0x7a4f2a, roughness: 0.9, flatShading: true });
-  const curve = new THREE.CubicBezierCurve3(
-    new THREE.Vector3(0, -0.23, 0.02),
-    new THREE.Vector3(0, -0.13, 0.12),
-    new THREE.Vector3(0, 0.13, 0.12),
-    new THREE.Vector3(0, 0.23, 0.02)
-  );
-  g.add(new THREE.Mesh(new THREE.TubeGeometry(curve, 16, 0.016, 6), wood));
-  const grip = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.024, 0.024, 0.085, 6),
-    new THREE.MeshStandardMaterial({ color: 0x4a3320, roughness: 1, flatShading: true })
-  );
-  grip.position.set(0, 0, 0.083);
-  g.add(grip);
-  const str = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.006, 0.006, 0.46, 4),
-    new THREE.MeshStandardMaterial({ color: 0xe8e2d0, roughness: 0.8 })
-  );
-  str.position.set(0, 0, 0.02);
-  g.add(str);
-  for (const c of g.children) c.position.z -= 0.083; // grip to origin
-  return g;
+// The real bow model (Bow.glb). It's authored on its side with an odd
+// FBX2glTF node scale, so normalize at runtime: stand the long axis up
+// (+Y), face the limbs forward (+Z), drop the grip on the origin and
+// scale to a hand-prop height — matching the convention the archer's
+// prop transform expects.
+export function makeBow() {
+  const inner = instantiate('prop-bow', { shadows: false }).group;
+  const pre = new THREE.Box3().setFromObject(inner);
+  const s = pre.getSize(new THREE.Vector3());
+  // whichever axis is longest is the bow's length — rotate it upright
+  if (s.x >= s.y && s.x >= s.z) inner.rotation.z = Math.PI / 2;
+  else if (s.z >= s.y && s.z >= s.x) inner.rotation.x = Math.PI / 2;
+  inner.rotation.y = Math.PI / 2; // limbs bow toward +Z, thin across X
+
+  const holder = new THREE.Group();
+  holder.add(inner);
+  const box = new THREE.Box3().setFromObject(holder);
+  const size = box.getSize(new THREE.Vector3());
+  const center = box.getCenter(new THREE.Vector3());
+  inner.position.sub(center);                        // grip (center) to origin
+  holder.scale.setScalar(0.5 / Math.max(size.y, 1e-3)); // ~0.5 units tall
+  return holder;
 }
 
 // back quiver with a couple of arrows peeking out
-function makeQuiver() {
+export function makeQuiver() {
   const g = new THREE.Group();
   const leather = new THREE.MeshStandardMaterial({ color: 0x5a3a22, roughness: 1, flatShading: true });
   const tube = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.038, 0.24, 7), leather);
@@ -87,6 +85,37 @@ function makeQuiver() {
   return g;
 }
 
+// Parent hand props onto a character's bones. Shared by the in-game
+// actors and the character-creation preview.
+export function attachProps(group, specs) {
+  for (const spec of specs || []) {
+    const bone = group.getObjectByName(spec.bone);
+    if (!bone) continue;
+    const holder = new THREE.Group();
+    holder.add(spec.gen ? spec.gen() : instantiate(spec.key, { shadows: false }).group);
+    if (spec.crystalTip) {
+      // glowing crystal floating over the staff's hook
+      const tip = instantiate('prop-crystal', { shadows: false, cloneMaterials: true }).group;
+      tip.scale.setScalar(0.4);
+      tip.position.set(0, 0.02, -0.13); // pre-rotation: ends up above the forward-facing hook
+      tip.rotation.x = Math.PI;         // counter the holder flip so the crystal points up
+      tip.traverse((o) => {
+        if (o.isMesh && o.material.emissive) {
+          o.material.emissive.set(0x8a2be2);
+          o.material.emissiveIntensity = 0.7;
+        }
+      });
+      holder.add(tip);
+    }
+    // raw props: bone space == raw model units, and the bone already
+    // carries the character's scale, so placement is direct
+    holder.scale.setScalar(spec.scale || 1);
+    holder.position.set(spec.pos[0], spec.pos[1], spec.pos[2]);
+    holder.rotation.set(spec.rot[0], spec.rot[1], spec.rot[2]);
+    bone.add(holder);
+  }
+}
+
 const CLASS_TINT = {
   berserker: 0xff6a4d, tanker: 0x6a9cff, archer: 0x7de87d, mage: 0xc07dff,
 };
@@ -100,7 +129,7 @@ for (const b of Object.values(BOSSES)) BOSS_BY_KIND[b.kind] = b;
 const ENEMY_PROPS = {
   keeper: [{ key: 'prop-shovel', bone: 'arm-right', pos: [0, -0.13, 0.04], rot: [0.85, 0, -0.4], scale: 0.9 }],
   archer: [
-    { gen: makeBow, bone: 'arm-right', pos: [0, -0.14, 0.02], rot: [0.15, -0.5, -0.55], scale: 1.35 },
+    { gen: makeBow, bone: 'arm-right', pos: [0, -0.16, 0.05], rot: [0.15, -0.5, -0.5], scale: 1.15 },
     { gen: makeQuiver, bone: 'torso', pos: [-0.05, 0.05, -0.1], rot: [0.25, 0, 0.35] },
   ],
   // Zé do Caixão hauls his own coffin on his back
@@ -120,6 +149,7 @@ export class GameView {
     this.towers = new Map();
     this.obstacles = new Map();
     this.graves = new Map();    // gravedigger tombs, id -> {group, riseT}
+    this.cosmetics = new Map(); // id -> { cls, colors } custom part colours
     this.projectiles = [];
     this.effects = [];
     this.corpses = [];
@@ -262,6 +292,8 @@ export class GameView {
     a = this.makeAnimated(CLASSES[cls]?.model || 'char-berserker');
     a.cls = cls;
     this.attachProps(a, CLASS_PROPS[cls]);
+    const cos = this.cosmetics.get(id);
+    if (cos) this.applyCosmetic(a, cls, cos.colors);
 
     const tint = CLASS_TINT[cls] || 0xffffff;
     // class-colored ring under the character
@@ -289,33 +321,32 @@ export class GameView {
     return a;
   }
 
-  attachProps(actor, specs) {
-    for (const spec of specs || []) {
-      const bone = actor.group.getObjectByName(spec.bone);
-      if (!bone) continue;
-      const holder = new THREE.Group();
-      holder.add(spec.gen ? spec.gen() : instantiate(spec.key, { shadows: false }).group);
-      if (spec.crystalTip) {
-        // glowing crystal floating over the staff's hook
-        const tip = instantiate('prop-crystal', { shadows: false, cloneMaterials: true }).group;
-        tip.scale.setScalar(0.4);
-        tip.position.set(0, 0.02, -0.13); // pre-rotation: ends up above the forward-facing hook
-        tip.rotation.x = Math.PI;         // counter the holder flip so the crystal points up
-        tip.traverse((o) => {
-          if (o.isMesh && o.material.emissive) {
-            o.material.emissive.set(0x8a2be2);
-            o.material.emissiveIntensity = 0.7;
-          }
-        });
-        holder.add(tip);
-      }
-      // raw props: bone space == raw model units, and the bone already
-      // carries the character's scale, so placement is direct
-      holder.scale.setScalar(spec.scale || 1);
-      holder.position.set(spec.pos[0], spec.pos[1], spec.pos[2]);
-      holder.rotation.set(spec.rot[0], spec.rot[1], spec.rot[2]);
-      bone.add(holder);
+  // thin wrapper so existing callers using an actor still work
+  attachProps(actor, specs) { attachProps(actor.group, specs); }
+
+  // Remember each player's custom part colours (from the lobby roster)
+  // and (re)paint any actor already on screen.
+  setCosmetics(list) {
+    for (const p of list || []) {
+      if (!p || !p.id) continue;
+      const colors = p.colors || {};
+      const key = p.cls + '|' + JSON.stringify(colors);
+      const prev = this.cosmetics.get(p.id);
+      if (prev && prev.key === key) continue;
+      this.cosmetics.set(p.id, { cls: p.cls, colors, key });
+      const a = this.players.get(p.id);
+      if (a) this.applyCosmetic(a, p.cls, colors);
     }
+  }
+
+  applyCosmetic(actor, cls, colors) {
+    const modelKey = CLASSES[cls]?.model;
+    if (!modelKey) return;
+    let tex = null;
+    try { tex = buildTexture(modelKey, colors); } catch { tex = null; }
+    applyTexture(actor.group, modelKey, tex);
+    if (actor.customTex && actor.customTex !== tex) actor.customTex.dispose();
+    actor.customTex = tex;
   }
 
   ensureEnemy(row) {
@@ -1135,7 +1166,10 @@ export class GameView {
   }
 
   reset() {
-    for (const a of this.players.values()) this.scene.remove(a.group);
+    for (const a of this.players.values()) {
+      if (a.customTex) a.customTex.dispose();
+      this.scene.remove(a.group);
+    }
     for (const a of this.enemies.values()) this.scene.remove(a.group);
     for (const a of this.towers.values()) this.scene.remove(a.group);
     for (const g of this.obstacles.values()) this.scene.remove(g);

@@ -17,8 +17,8 @@ const M = (url, norm) => ({ url: `models/${url}`, norm });
 
 const MANIFEST = {
   // playable classes (rigged + animated)
-  'char-berserker': M('characters/berserker.glb', { h: 1.35 }),
-  'char-tanker': M('characters/tanker.glb', { h: 1.35 }),
+  'char-berserker': M('characters/character-human.glb', { h: 1.35 }),
+  'char-tanker': M('characters/character-soldier.glb', { h: 1.35 }),
   'char-archer': M('characters/archer.glb', { h: 1.35 }),
   'char-mage': M('characters/mage.glb', { h: 1.35 }),
   // enemies (rigged + animated)
@@ -39,6 +39,7 @@ const MANIFEST = {
   'ammo-cannonball': M('ammo/cannonball.glb', { tile: true }),
   'ammo-boulder': M('ammo/boulder.glb', { tile: true }),
   // hand props (raw: grip at origin, sized for the mini characters)
+  'prop-bow': M('props/bow.glb', { raw: true }),
   'prop-sword': M('props/sword.glb', { raw: true }),
   'prop-shield': M('props/shield.glb', { raw: true }),
   'prop-staff': M('props/staff.glb', { raw: true }),
