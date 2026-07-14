@@ -47,7 +47,9 @@ export const CLASSES = {
 export const JUMP = { DUR: 0.55, HEIGHT: 1.4 };
 
 // ---------- class special attacks (button next to jump) ----------
-// One shared cooldown; each class gets its own signature move.
+// Every class shares the same cooldown *length*, but the timer itself
+// is per-character: each player's skill recharges on its own clock
+// (see p.skillCd in the sim), never a single timer shared by the party.
 export const SKILLS = {
   COOLDOWN: 30,
   berserker: { // dash forward, flinging everything on the path backward
@@ -64,15 +66,24 @@ export const SKILLS = {
   },
 };
 
-// XP/point orbs dropped by dying enemies; collected by walking near.
-// Orbs are per-player (each player only sees & collects their own).
+// XP/point orbs dropped by dying enemies. Orbs are per-player: every
+// player gets their own orb from each kill, and only ever sees &
+// collects their own (see spawnDrops / stepDrops).
+//
+// Collection is grid-based rather than a tight pickup circle. A
+// character sweeps up its own orbs anywhere in the 3×3 block of cells
+// it stands on (one grid cell to every side), and can even reach an orb
+// two cells away when a single tower/obstacle sits between them — you
+// shouldn't have to walk around your own wall to grab a drop. Anything
+// farther has to be walked over.
 export const DROPS = {
-  TTL: 10,             // seconds before an uncollected orb fades away
-  PICKUP_RADIUS: 1.15,
-  MAGNET_RADIUS: 2.6,  // orbs drift toward their owner inside this
-  MAGNET_SPEED: 6.5,
-  MERGE_RADIUS: 1.6,   // nearby same-kind orbs merge to keep counts low
-  MAX: 240,            // hard cap on live orbs (oldest are culled)
+  TTL: 10,                  // seconds before an uncollected orb fades away
+  COLLECT_CELLS: 1,         // auto-collect radius in grid cells (1 = 3×3 block)
+  REACH_OVER_BLOCKER: true, // also reach 2 cells over one tower/obstacle
+  ABSORB_RADIUS: 0.6,       // a claimed orb pops once it reaches its owner
+  MAGNET_SPEED: 7.5,        // how fast a claimed orb flies to its owner
+  MERGE_RADIUS: 1.6,        // nearby same-kind orbs merge to keep counts low
+  MAX: 240,                 // hard cap on live orbs (oldest are culled)
 };
 
 export const PLAYER = {

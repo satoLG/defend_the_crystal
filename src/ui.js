@@ -43,7 +43,7 @@ export class UI {
     this.panelCell = null;
     this.lastSnap = null;
     this.isHost = false;
-    this.skillReady = false;   // gated by the shared 30s cooldown
+    this.skillReady = false;   // gated by this character's own 30s cooldown
     this.myCls = this.selectedClass;
 
     mountIcons();
