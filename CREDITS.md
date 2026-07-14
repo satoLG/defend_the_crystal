@@ -23,8 +23,10 @@ purposes. Crediting Kenney is not required, but very much deserved —
 consider donating at https://www.kenney.nl/donate.
 
 UI icons are from [Lucide](https://lucide.dev) (ISC license), inlined in
-`src/icons.js`. Class/tower thumbnails in `public/img/` are the preview
-renders that ship with the Kenney packs above (CC0).
+`src/icons.js`. The class-selector glyphs (axe / shield / archer / wizard
+hat) are from [game-icons.net](https://game-icons.net) by **Lorc** and
+**Sbed**, licensed **CC BY 3.0**. Class/tower thumbnails in `public/img/`
+are the preview renders that ship with the Kenney packs above (CC0).
 
 ## Libraries
 

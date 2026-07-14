@@ -28,24 +28,22 @@
         <button id="char-settings" class="btn small corner-btn" title="Settings"><i data-icon="gear"></i></button>
         <h2>Your hero</h2>
 
-        <div class="char-stage">
-          <canvas id="preview-canvas"></canvas>
-          <div class="char-drag-hint muted"><i data-icon="rotate"></i> drag to rotate</div>
+        <div id="char-class-grid" class="char-class-grid">
+          <button class="cc-card selected" data-cls="berserker"><i data-icon="cls-berserker"></i><span>Berserker</span></button>
+          <button class="cc-card" data-cls="tanker"><i data-icon="cls-tanker"></i><span>Tanker</span></button>
+          <button class="cc-card" data-cls="archer"><i data-icon="cls-archer"></i><span>Archer</span></button>
+          <button class="cc-card" data-cls="mage"><i data-icon="cls-mage"></i><span>Mage</span></button>
         </div>
 
-        <div id="char-class-grid" class="char-class-grid">
-          <button class="cc-card selected" data-cls="berserker">
-            <img class="entity-img" src="./img/class-berserker.png" alt=""><span>Berserker</span>
-          </button>
-          <button class="cc-card" data-cls="tanker">
-            <img class="entity-img" src="./img/class-tanker.png" alt=""><span>Tanker</span>
-          </button>
-          <button class="cc-card" data-cls="archer">
-            <img class="entity-img" src="./img/class-archer.png" alt=""><span>Archer</span>
-          </button>
-          <button class="cc-card" data-cls="mage">
-            <img class="entity-img" src="./img/class-mage.png" alt=""><span>Mage</span>
-          </button>
+        <div class="char-stage-row">
+          <div class="char-stage">
+            <canvas id="preview-canvas"></canvas>
+            <div class="char-drag-hint muted"><i data-icon="rotate"></i> drag</div>
+          </div>
+          <div class="char-side">
+            <div id="char-colors" class="char-colors"></div>
+            <button id="char-random" class="btn small subtle" title="Randomize colours"><i data-icon="dice"></i></button>
+          </div>
         </div>
 
         <div class="char-info">
@@ -56,16 +54,8 @@
           <div class="ci-stats" id="ci-stats"></div>
         </div>
 
-        <label class="field-label" for="char-name">Hero name</label>
-        <input id="char-name" maxlength="12" autocomplete="off" placeholder="Hero name" />
-
-        <div class="ci-colors-head">
-          <span class="field-label">Colours</span>
-          <button id="char-random" class="btn small subtle" title="Randomize colours"><i data-icon="dice"></i></button>
-        </div>
-        <div id="char-colors" class="char-colors"></div>
-
-        <div class="menu-actions">
+        <div class="char-foot">
+          <input id="char-name" maxlength="12" autocomplete="off" placeholder="Hero name" />
           <button id="char-save" class="btn primary big">Save &amp; continue</button>
         </div>
       </div>

@@ -227,29 +227,24 @@ export class UI {
       .map(([k, v]) => `<i style="--v:${v}">${k}</i>`).join('');
   }
 
+  // colour circles stacked top-to-bottom, in the model's own head→feet
+  // order (getSlots is already sorted that way), sitting beside the 3D view
   renderColorSlots() {
     const host = $('char-colors');
     host.innerHTML = '';
     const slots = getSlots(CLASSES[this.charDraft.cls].model);
-    if (!slots.length) {
-      host.innerHTML = '<div class="muted" style="font-size:.75rem">This model has no separate colour zones.</div>';
-      return;
-    }
+    if (!slots.length) return;
     for (const slot of slots) {
-      const wrap = document.createElement('div');
-      wrap.className = 'color-slot';
       const input = document.createElement('input');
       input.type = 'color';
+      input.className = 'color-dot';
+      input.title = slot.label;
       input.value = this.charDraft.colors[slot.id] || slot.base;
-      const label = document.createElement('label');
-      label.textContent = slot.label;
       input.addEventListener('input', (e) => {
         this.charDraft.colors[slot.id] = e.target.value;
         this.preview?.setColors(this.charDraft.colors);
       });
-      wrap.appendChild(input);
-      wrap.appendChild(label);
-      host.appendChild(wrap);
+      host.appendChild(input);
     }
   }
 
