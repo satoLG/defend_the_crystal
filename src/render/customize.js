@@ -5,28 +5,46 @@ import { getTemplate } from './assets.js';
 // Per-character colour customization.
 //
 // Kenney mini-characters are painted from a single "colormap"
-// palette texture: every surface (skin, hair, outfit, shoes…)
-// samples one flat swatch out of that atlas. So recolouring a
-// body part just means repainting the handful of texels that the
-// part's vertices sample.
+// palette texture: every surface samples one flat swatch out of
+// that atlas. A body part is therefore one solid colour in the
+// atlas, and recolouring it means replacing *that colour* wherever
+// it appears — not painting a region by pixel position (which bled
+// across neighbouring swatches and produced stripes).
 //
-// analyzeModel() walks a model's body/head geometry once, groups
-// the swatches it uses into a few height-based slots (hair,
-// outfit, trim, shoes) and remembers the exact texels + a safe
-// paint radius for each. buildTexture() then clones the palette
-// and stamps the chosen colours over those texels, yielding a
-// per-player CanvasTexture that leaves every other swatch — and
-// every animation — untouched.
+// analyzeModel() walks the character's body/head geometry, groups
+// the swatches it samples into a handful of distinct, well-used
+// colour regions (small speckles — outlines, seams, tiny accents —
+// are ignored so they can never be half-painted), and exposes each
+// as a slot. buildTexture() clones the atlas and swaps every pixel
+// of a slot's colours for the chosen one, so the whole region turns
+// uniformly and nothing else — skin, face detail, and especially
+// the weapons — is touched.
 // ============================================================
 
 const cache = new Map(); // modelKey -> analysis
 
+const MERGE_DIST = 52;   // atlas colours closer than this are one region
+const DEDUP_DIST = 46;   // two exposed slots must differ by at least this
+const MATCH_TOL = 12;    // pixel<->slot colour match tolerance when repainting
+const MAX_SLOTS = 6;
+
 const clamp = (v, lo, hi) => Math.min(Math.max(v, lo), hi);
+const colorDist = (a, b) => Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]) + Math.abs(a[2] - b[2]);
+const hex2 = (n) => Math.round(n).toString(16).padStart(2, '0');
+const toHex = (r, g, b) => `#${hex2(r)}${hex2(g)}${hex2(b)}`;
+
+// only the character's own skinned meshes carry the palette; props
+// (weapons) are separate objects and must never be recoloured
+const isCharMesh = (o) => {
+  if (!(o.isMesh || o.isSkinnedMesh)) return false;
+  const n = (o.name || '').toLowerCase();
+  return n.includes('body') || n.includes('head');
+};
 
 function meshesOf(group) {
   let body = null, head = null, map = null;
   group.traverse((o) => {
-    if (!(o.isMesh || o.isSkinnedMesh)) return;
+    if (!isCharMesh(o)) return;
     const n = (o.name || '').toLowerCase();
     if (n.includes('body') && !body) body = o;
     if (n.includes('head') && !head) head = o;
@@ -36,24 +54,8 @@ function meshesOf(group) {
   return { body, head, map };
 }
 
-// pull the palette atlas into a canvas so we can read/repaint pixels
-function paletteCanvas(image) {
-  const W = image.width, H = image.height;
-  const cv = document.createElement('canvas');
-  cv.width = W; cv.height = H;
-  const ctx = cv.getContext('2d', { willReadFrequently: true });
-  ctx.drawImage(image, 0, 0);
-  return { cv, ctx, W, H };
-}
-
-const hex2 = (n) => n.toString(16).padStart(2, '0');
-const toHex = (r, g, b) => `#${hex2(r)}${hex2(g)}${hex2(b)}`;
-const colorDist = (a, b) =>
-  Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]) + Math.abs(a[2] - b[2]);
-
-// collect the swatch texels a mesh samples, with a vertex count and
-// the average world-height of the vertices that land on each texel
-function gatherTexels(mesh, W, H, yMin, ySpan, out) {
+// gather the flat swatch texels a mesh samples: {x,y,color,n,nySum}
+function gatherTexels(mesh, W, H, yMin, ySpan, colorAt, out) {
   const pos = mesh.geometry.attributes.position;
   const uv = mesh.geometry.attributes.uv;
   if (!pos || !uv) return;
@@ -62,9 +64,9 @@ function gatherTexels(mesh, W, H, yMin, ySpan, out) {
     const y = clamp(Math.round(uv.getY(i) * H), 0, H - 1);
     const key = x + ',' + y;
     let t = out.get(key);
-    if (!t) { t = { x, y, n: 0, ySum: 0 }; out.set(key, t); }
+    if (!t) { t = { x, y, color: colorAt(x, y), n: 0, nySum: 0 }; out.set(key, t); }
     t.n += 1;
-    t.ySum += (pos.getY(i) - yMin) / ySpan; // 0 = feet … 1 = head top
+    t.nySum += (pos.getY(i) - yMin) / ySpan; // 0 = feet … 1 = head top
   }
 }
 
@@ -77,11 +79,15 @@ function analyzeModel(modelKey) {
   cache.set(modelKey, result);
   if (!map || !map.image) return result;
 
-  const { ctx, W, H } = paletteCanvas(map.image);
+  const W = map.image.width, H = map.image.height;
+  const cv = document.createElement('canvas');
+  cv.width = W; cv.height = H;
+  const ctx = cv.getContext('2d', { willReadFrequently: true });
+  ctx.drawImage(map.image, 0, 0);
   const px = ctx.getImageData(0, 0, W, H).data;
   const colorAt = (x, y) => { const i = (y * W + x) * 4; return [px[i], px[i + 1], px[i + 2]]; };
 
-  // shared height range across both meshes so zones line up
+  // shared height range so zones line up across both meshes
   let yMin = Infinity, yMax = -Infinity;
   for (const m of [body, head]) {
     if (!m) continue;
@@ -90,64 +96,46 @@ function analyzeModel(modelKey) {
   }
   const ySpan = Math.max(yMax - yMin, 1e-4);
 
-  const bodyTex = new Map(), headTex = new Map();
-  if (body) gatherTexels(body, W, H, yMin, ySpan, bodyTex);
-  if (head) gatherTexels(head, W, H, yMin, ySpan, headTex);
+  const texMap = new Map();
+  if (body) gatherTexels(body, W, H, yMin, ySpan, colorAt, texMap);
+  if (head) gatherTexels(head, W, H, yMin, ySpan, colorAt, texMap);
 
-  const finalize = (t) => ({ x: t.x, y: t.y, n: t.n, ny: t.ySum / t.n, color: colorAt(t.x, t.y) });
-  const bodyArr = [...bodyTex.values()].map(finalize).filter((t) => t.n >= 5);
-  const headArr = [...headTex.values()].map(finalize).filter((t) => t.n >= 5);
+  const texels = [...texMap.values()].filter((t) => t.n >= 5).sort((a, b) => b.n - a.n);
+  let total = 0;
+  for (const t of texels) total += t.n;
 
-  // dominant face tone (mid head) — used to tell hair/helmet apart from skin
-  const faceCand = headArr.filter((t) => t.ny < 0.85).sort((a, b) => b.n - a.n)[0];
-  const faceColor = faceCand ? faceCand.color : [0, 0, 0];
-
-  // ---- hair / head-top: distinct-from-face swatches near the crown
-  const hairTexels = headArr.filter((t) => t.ny >= 0.82 && colorDist(t.color, faceColor) > 60);
-
-  // ---- shoes: lowest body band
-  const shoeTexels = bodyArr.filter((t) => t.ny < 0.24);
-  // ---- outfit + trim: the rest of the body, split by colour into two groups
-  const torso = bodyArr.filter((t) => t.ny >= 0.24).sort((a, b) => b.n - a.n);
-  const outfitTexels = [], trimTexels = [];
-  if (torso.length) {
-    const primary = torso[0].color;
-    for (const t of torso) (colorDist(t.color, primary) <= 70 ? outfitTexels : trimTexels).push(t);
+  // cluster swatches by colour (dominant-seeded so region colours are stable)
+  const clusters = [];
+  for (const t of texels) {
+    let cl = null;
+    for (const c of clusters) { if (colorDist(c.color, t.color) < MERGE_DIST) { cl = c; break; } }
+    if (!cl) { cl = { color: t.color, n: 0, nySum: 0, members: [] }; clusters.push(cl); }
+    cl.n += t.n;
+    cl.nySum += t.nySum;
+    cl.members.push(t.color);
   }
 
-  const slotDefs = [
-    { id: 'hair', label: 'Hair', texels: hairTexels },
-    { id: 'outfit', label: 'Outfit', texels: outfitTexels },
-    { id: 'trim', label: 'Trim', texels: trimTexels },
-    { id: 'shoes', label: 'Shoes', texels: shoeTexels },
-  ].filter((s) => s.texels.length);
-
-  // Tag every sampled swatch with its slot (or null for parts we leave
-  // alone, e.g. skin/face). A stamp's paint radius is half the distance
-  // to the nearest swatch of *any other* colour group, so a recolour can
-  // never bleed onto the face or a neighbouring part.
-  const slotOf = new Map();
-  for (const s of slotDefs) for (const t of s.texels) slotOf.set(t, s.id);
-  const sampled = [...bodyArr, ...headArr];
-  for (const s of slotDefs) {
-    for (const t of s.texels) {
-      let nearest = Infinity;
-      for (const o of sampled) {
-        if (o === t || slotOf.get(o) === s.id) continue; // same swatch or same slot
-        const d = Math.hypot(o.x - t.x, o.y - t.y);
-        if (d < nearest) nearest = d;
-      }
-      t.r = clamp(Math.floor(nearest / 2) - 1, 1, 14);
-    }
+  // keep only substantial, clearly-separated regions (skip speckle:
+  // outlines, seams, tiny accents — the stuff that used to stripe)
+  const minVerts = Math.max(45, total * 0.045);
+  const kept = [];
+  for (const c of clusters.sort((a, b) => b.n - a.n)) {
+    if (c.n < minVerts) continue;
+    if (kept.some((k) => colorDist(k.color, c.color) < DEDUP_DIST)) continue;
+    kept.push(c);
+    if (kept.length >= MAX_SLOTS) break;
   }
 
-  result.slots = slotDefs.map((s) => {
-    const dom = s.texels.slice().sort((a, b) => b.n - a.n)[0];
-    return {
-      id: s.id, label: s.label,
-      base: toHex(dom.color[0], dom.color[1], dom.color[2]),
-      texels: s.texels.map((t) => ({ x: t.x, y: t.y, r: t.r })),
-    };
+  // Semantic labels aren't reliable on these detailed textures (a
+  // brown swatch could be hair or a tunic), so number the regions
+  // top-to-bottom and let the live preview show which is which as the
+  // player tweaks it — honest, and never mislabels a part.
+  kept.sort((a, b) => (b.nySum / b.n) - (a.nySum / a.n));
+  result.slots = kept.map((c, i) => {
+    // dedup the member colours for the repaint match list
+    const match = [];
+    for (const m of c.members) if (!match.some((x) => colorDist(x, m) < 6)) match.push(m);
+    return { id: 'slot' + i, label: 'Colour ' + (i + 1), base: toHex(c.color[0], c.color[1], c.color[2]), match };
   });
   result.map = map;
   result.image = map.image;
@@ -159,22 +147,40 @@ export function getSlots(modelKey) {
   return analyzeModel(modelKey).slots;
 }
 
-// A palette-atlas texture recoloured for the given per-slot hex colours.
-// Returns null when nothing is customized (keep the original texture).
+function hexToRgb(hex) {
+  const n = parseInt(hex.slice(1), 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+
+// A palette-atlas texture recoloured for the given per-slot colours by
+// swapping each slot's swatch colours wholesale. Returns null when
+// nothing is customized (keep the original atlas).
 export function buildTexture(modelKey, colors) {
   const info = analyzeModel(modelKey);
   if (!info.image || !colors) return null;
-  const active = info.slots.filter((s) => colors[s.id] && colors[s.id] !== s.base);
+  const active = info.slots
+    .filter((s) => colors[s.id] && colors[s.id].toLowerCase() !== s.base.toLowerCase())
+    .map((s) => ({ match: s.match, to: hexToRgb(colors[s.id]) }));
   if (!active.length) return null;
 
   const cv = document.createElement('canvas');
   cv.width = info.W; cv.height = info.H;
   const ctx = cv.getContext('2d');
   ctx.drawImage(info.image, 0, 0);
-  for (const slot of active) {
-    ctx.fillStyle = colors[slot.id];
-    for (const t of slot.texels) ctx.fillRect(t.x - t.r, t.y - t.r, t.r * 2 + 1, t.r * 2 + 1);
+  const imgData = ctx.getImageData(0, 0, info.W, info.H);
+  const d = imgData.data;
+  for (let i = 0; i < d.length; i += 4) {
+    const r = d[i], g = d[i + 1], b = d[i + 2];
+    let best = null, bestD = MATCH_TOL;
+    for (const s of active) {
+      for (const m of s.match) {
+        const dist = Math.abs(r - m[0]) + Math.abs(g - m[1]) + Math.abs(b - m[2]);
+        if (dist < bestD) { bestD = dist; best = s; }
+      }
+    }
+    if (best) { d[i] = best.to[0]; d[i + 1] = best.to[1]; d[i + 2] = best.to[2]; }
   }
+  ctx.putImageData(imgData, 0, 0);
 
   const tex = new THREE.CanvasTexture(cv);
   const src = info.map;
@@ -187,16 +193,16 @@ export function buildTexture(modelKey, colors) {
   return tex;
 }
 
-// Swap the recoloured atlas onto an actor's (already cloned) materials.
-// Pass tex=null to restore the model's original look.
+// Swap the recoloured atlas onto a character's body/head materials only —
+// never the attached weapons. Pass tex=null to restore the original look.
 export function applyTexture(group, modelKey, tex) {
   const next = tex || analyzeModel(modelKey).map;
-  if (!next) return; // never strip a working texture if analysis came up empty
+  if (!next) return;
   group.traverse((o) => {
-    if (!(o.isMesh || o.isSkinnedMesh) || !o.material) return;
+    if (!isCharMesh(o) || !o.material) return;
     const mats = Array.isArray(o.material) ? o.material : [o.material];
     for (const m of mats) {
-      if (!('map' in m) || !m.map) continue; // only meshes that were textured
+      if (!('map' in m) || !m.map) continue;
       m.map = next;
       m.needsUpdate = true;
     }
