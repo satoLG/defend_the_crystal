@@ -123,15 +123,12 @@ export function attachProps(group, specs) {
     const propObj = spec.gen ? spec.gen() : instantiate(spec.key, { shadows: false }).group;
     holder.add(propObj);
     if (spec.crystalTip) {
-      // Nestle a glowing crystal in the staff's hook. The shaft runs up
-      // +Y and the hook curls toward -Z, so read the prop's own bounds
-      // and seat the crystal at the head instead of guessing an offset —
-      // this stays aligned no matter how the holder is later rotated.
-      propObj.updateMatrixWorld(true);
-      const b = new THREE.Box3().setFromObject(propObj);
+      // glowing crystal nestled in the staff's hook (values dialed in
+      // with the weapon tuner, relative to the staff holder)
       const tip = instantiate('prop-crystal', { shadows: false, cloneMaterials: true }).group;
-      tip.scale.setScalar(0.4);
-      tip.position.set(0, b.max.y * 0.74, b.min.z * 0.5); // in the crook, up the shaft
+      tip.scale.setScalar(0.45);
+      tip.position.set(0, 0.055, -0.005);
+      tip.rotation.set(-3.15, 0.29, 0.05);
       tip.traverse((o) => {
         if (o.isMesh && o.material.emissive) {
           o.material.emissive.set(0x8a2be2);
