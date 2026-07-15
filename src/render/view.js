@@ -672,7 +672,8 @@ export class GameView {
       stall.add(banner);
     }
     const chest = instantiate('dungeon-chest').group;
-    chest.position.set(-0.85, 0, 0.55);
+    chest.scale.setScalar(0.75);
+    chest.position.set(-0.95, 0, 0.55);
     chest.rotation.y = 0.5;
     stall.add(chest);
     // a big slowly-spinning coin as the shop sign
@@ -690,16 +691,16 @@ export class GameView {
       yaw: faceCenter, bubble: 'Pets!',
     });
 
-    // his display critters: a dog and a cat pottering about out front,
-    // idling / eating / dancing / strolling little circles
-    const front = { x: x + Math.sin(faceCenter) * 1.9, z: z + Math.cos(faceCenter) * 1.9 };
-    for (const [key, ox, oz] of [['pet-dog', -0.9, 0.2], ['pet-cat', 0.9, -0.3]]) {
+    // his display critters: a dog and a cat pottering about out front —
+    // on the CAMERA side of the stall (south), never hidden by the
+    // canopy — idling / eating / dancing / strolling little circles
+    for (const [key, ox, oz] of [['pet-dog', -2.3, 0.5], ['pet-cat', 1.6, 1.4]]) {
       const actor = this.makeAnimated(key);
-      actor.group.position.set(front.x + ox, 0, front.z + oz);
+      actor.group.position.set(x + ox, 0, z + oz);
       this.scene.add(actor.group);
       this.setLoco(actor, 'idle');
       this.showPets.push({
-        actor, ax: front.x + ox, az: front.z + oz,
+        actor, ax: x + ox, az: z + oz,
         mode: 'idle', t: 1 + Math.random() * 2, ang: Math.random() * Math.PI * 2,
       });
     }

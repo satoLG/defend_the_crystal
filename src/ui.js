@@ -883,7 +883,8 @@ export class UI {
       ['Defense', `${Math.round((def.def || 0) * 100)}%`],
       ['Range', `${(def.range || 0).toFixed(1)}`],
       ['Attack speed', `${(def.rate || 0).toFixed(2)}/s`],
-      ['Move speed', `${(def.speed || 0).toFixed(1)}`],
+      // snapshot row 19 carries the live (pet-buffed) move speed
+      ['Move speed', `${(typeof me[19] === 'number' && me[19] > 0 ? me[19] : def.speed || 0).toFixed(1)}`],
       ['Knockback', `${(def.knockback || 0).toFixed(1)}`],
     ];
     if (def.aoe) rows.push(['Blast area', `${def.aoe.toFixed(1)}`]);
