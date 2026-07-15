@@ -47,7 +47,30 @@ const state = {
   lobbyPlayers: [],
   lastInputSend: 0,
   lastSnapSend: 0,
+  lastStaticSend: 0,
+  // clients cache the static geometry (towers/obstacles/graves) from the
+  // last snapshot that carried it, and re-merge it into the lean per-tick
+  // snapshots so the rest of the pipeline still sees a full snapshot.
+  staticCache: { tw: [], ob: [], gr: [] },
 };
+
+// static geometry keys sent only every NET.STATIC_INTERVAL (they change
+// rarely); stripped from the lean per-tick snapshots to save bandwidth.
+const STATIC_KEYS = ['tw', 'ob', 'gr'];
+
+function leanSnap(snap) {
+  const out = {};
+  for (const k in snap) if (!STATIC_KEYS.includes(k)) out[k] = snap[k];
+  return out;
+}
+
+function withStatic(snap) {
+  for (const k of STATIC_KEYS) {
+    if (snap[k]) state.staticCache[k] = snap[k];
+    else snap[k] = state.staticCache[k];
+  }
+  return snap;
+}
 
 let gs, view, ui, input;
 
@@ -136,7 +159,7 @@ function hostGame(character) {
   });
   state.net.on('input', (data, peerId) => state.sim.setInput(peerId, data));
   state.net.on('act', (data, peerId) => state.sim.handleAction(peerId, data));
-  state.net.onPeerJoin = () => broadcastLobby();
+  state.net.onPeerJoin = () => { state.lastStaticSend = 0; broadcastLobby(); };
   state.net.onPeerLeave = (peerId) => {
     state.sim.removePlayer(peerId);
     broadcastLobby();
@@ -179,6 +202,7 @@ function joinGame(code, character) {
     if (data.started && !state.started) enterGame();
   });
   state.net.on('snap', (snap) => {
+    withStatic(snap); // re-fill cached towers/obstacles/graves if this was a lean tick
     state.snaps.push(snap, performance.now() / 1000);
     if (!state.started) enterGame();
     syncClientGrid(snap);
@@ -639,9 +663,16 @@ function frame(t) {
     if (now - state.lastSnapSend > 1 / NET.SNAP_HZ) {
       state.lastSnapSend = now;
       const snap = state.sim.buildSnapshot();
-      state.net.send('snap', snap);
-      // buffer the broadcast (stamped with the render clock) so the host
-      // interpolates remotes the same way clients do
+      // include static geometry only periodically; lean ticks omit it and
+      // clients re-merge from their cache
+      if (now - state.lastStaticSend > NET.STATIC_INTERVAL) {
+        state.lastStaticSend = now;
+        state.net.send('snap', snap);
+      } else {
+        state.net.send('snap', leanSnap(snap));
+      }
+      // the host buffers the full snapshot (local, no wire cost) so its own
+      // interpolation of remotes is unaffected
       state.snaps.push(snap, now);
     }
     const s = state.snaps.sample(now - NET.INTERP_DELAY, NET.INTERP_MAX);

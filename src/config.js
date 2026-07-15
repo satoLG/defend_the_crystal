@@ -405,12 +405,18 @@ export function scaleFor(table, playerCount) {
 // ---------- networking ----------
 export const NET = {
   APP_ID: 'dtc-defend-the-crystal-v1',
-  SNAP_HZ: 12,
+  // host -> clients position rate. Raised now that per-tick snapshots omit
+  // the static geometry (towers/obstacles/graves), which the client caches
+  // and re-merges — so more frequent snapshots cost little extra bandwidth.
+  SNAP_HZ: 18,
   INPUT_HZ: 15,
+  // how often the host includes the static geometry collections in a
+  // snapshot; between these the payload carries only moving state.
+  STATIC_INTERVAL: 0.5,
   // seconds rendered behind the newest snapshot. ~2 snapshot intervals
   // (1/SNAP_HZ) so a late/jittered packet still has a buffered point to
   // interpolate toward instead of freezing.
-  INTERP_DELAY: 0.16,
+  INTERP_DELAY: 0.12,
   // alpha clamp ceiling: >1 lets a remote briefly extrapolate along its
   // last known heading when the next snapshot is late, softening the
   // hitch into a short over-shoot that snaps back on arrival.
