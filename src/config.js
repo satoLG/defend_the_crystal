@@ -72,7 +72,10 @@ export function jumpDurFor(span) {
 // tiny bit with every level, up to level 50.
 export const PET = {
   LEVEL_CAP: 50,
-  XP_BASE: 25,   // xpNext = XP_BASE * lvl^XP_POW (persists across matches)
+  // xpNext = XP_BASE * lvl^XP_POW (persists across matches). Levels are
+  // permanent, so they're meant to be a slow burn — each level needs
+  // roughly twice the XP a player level does.
+  XP_BASE: 50,
   XP_POW: 1.3,
   NAME_MAX: 10,  // pet names render on overhead labels, keep them short
   CRIT_MULT: 2,  // tiger crits deal double damage

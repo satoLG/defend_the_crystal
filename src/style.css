@@ -793,8 +793,13 @@ input:focus { border-color: var(--gold); }
   color: #2a1f08; border: 2px solid #f7dc9a; border-radius: 20px;
   padding: 9px 20px; font-family: inherit; font-weight: 800; font-size: 0.95rem;
   cursor: pointer; display: flex; align-items: center; gap: 8px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.55), 0 0 18px rgba(232, 184, 75, 0.45);
-  animation: pulse 1.6s infinite; touch-action: none;
+  /* glow pulse only — NEVER a transform, or it would fight the
+     translateX(-50%) centering and make the button jump sideways */
+  animation: petshop-glow 1.6s infinite; touch-action: none;
+}
+@keyframes petshop-glow {
+  0%, 100% { box-shadow: 0 4px 16px rgba(0, 0, 0, 0.55), 0 0 14px rgba(232, 184, 75, 0.4); }
+  50% { box-shadow: 0 4px 16px rgba(0, 0, 0, 0.55), 0 0 26px rgba(232, 184, 75, 0.85); }
 }
 
 /* pet panel (manage + shop) */

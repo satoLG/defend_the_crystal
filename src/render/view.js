@@ -242,21 +242,18 @@ export class GameView {
       this.goldOrbs.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
       this.scene.add(this.goldOrbs);
       this.goldMat = gmat;
-      // a soft additive halo billboard rides each live gold coin so it
-      // pops on screen even at a glance
-      this.goldGlow = new THREE.InstancedMesh(
-        new THREE.PlaneGeometry(1, 1),
-        new THREE.MeshBasicMaterial({
-          color: 0xffcb45, transparent: true, opacity: 0.5,
-          blending: THREE.AdditiveBlending, depthWrite: false,
-        }),
-        this.dropCap
+      // a handful of little golden dots orbit each live coin — a light,
+      // round sparkle (no flat billboard) so these special pickups pop
+      this.goldDots = 4;
+      this.goldSparkle = new THREE.InstancedMesh(
+        new THREE.SphereGeometry(0.05, 8, 8),
+        new THREE.MeshBasicMaterial({ color: 0xffe89a, toneMapped: false }),
+        this.dropCap * this.goldDots
       );
-      this.goldGlow.count = 0;
-      this.goldGlow.frustumCulled = false;
-      this.goldGlow.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-      this.goldGlow.renderOrder = 3;
-      this.scene.add(this.goldGlow);
+      this.goldSparkle.count = 0;
+      this.goldSparkle.frustumCulled = false;
+      this.goldSparkle.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      this.scene.add(this.goldSparkle);
     }
     this.npcs = [];
     this.showPets = []; // the vendor's display critters goofing around
@@ -268,8 +265,10 @@ export class GameView {
     this._orbEuler = new THREE.Euler();
     this._orbScale = new THREE.Vector3(1, 1, 1);
     this._orbScaleGold = new THREE.Vector3(1.7, 1.7, 1.7);
-    this._glowMat = new THREE.Matrix4();
-    this._glowScale = new THREE.Vector3(1.4, 1.4, 1.4);
+    this._dotMat = new THREE.Matrix4();
+    this._dotPos = new THREE.Vector3();
+    this._dotScale = new THREE.Vector3(1, 1, 1);
+    this._identQuat = new THREE.Quaternion();
   }
 
   // ---------------- actors ----------------
@@ -996,8 +995,8 @@ export class GameView {
     if (prevRows) for (const r of prevRows) prevMap.set(r[0], r);
     const counts = [0, 0, 0];
     const meshes = [this.xpOrbs, this.ptsOrbs, this.goldOrbs];
-    let glowN = 0;
-    const camQuat = this._camQuat;
+    let sparkN = 0;
+    const sparkCap = this.dropCap * this.goldDots;
     if (rows) {
       for (const row of rows) {
         if (row[1] !== selfId) continue;
@@ -1021,12 +1020,18 @@ export class GameView {
         );
         mesh.setMatrixAt(i, this._orbMat);
         counts[kind]++;
-        // camera-facing halo behind each gold coin
-        if (gold && camQuat && glowN < this.dropCap) {
-          const pulse = 1 + Math.sin(this.time * 5 + row[0]) * 0.12;
-          this._glowScale.set(1.5 * pulse, 1.5 * pulse, 1.5 * pulse);
-          this._glowMat.compose(this._orbPos, camQuat, this._glowScale);
-          this.goldGlow.setMatrixAt(glowN++, this._glowMat);
+        // little golden dots orbiting each coin
+        if (gold) {
+          for (let d = 0; d < this.goldDots && sparkN < sparkCap; d++) {
+            const ang = this.time * 2 + row[0] + d * (Math.PI * 2 / this.goldDots);
+            this._dotPos.set(
+              x + Math.cos(ang) * 0.34,
+              y + 0.05 + Math.sin(this.time * 4 + d + row[0]) * 0.13,
+              z + Math.sin(ang) * 0.34
+            );
+            this._dotMat.compose(this._dotPos, this._identQuat, this._dotScale);
+            this.goldSparkle.setMatrixAt(sparkN++, this._dotMat);
+          }
         }
       }
     }
@@ -1034,8 +1039,8 @@ export class GameView {
       mesh.count = counts[k];
       mesh.instanceMatrix.needsUpdate = true;
     });
-    this.goldGlow.count = glowN;
-    this.goldGlow.instanceMatrix.needsUpdate = true;
+    this.goldSparkle.count = sparkN;
+    this.goldSparkle.instanceMatrix.needsUpdate = true;
   }
 
   // ---------------- events ----------------
@@ -1401,11 +1406,8 @@ export class GameView {
 
   update(dt, camera, selfPos = null) {
     this.time += dt;
-    // remember the camera facing so the gold-coin halos billboard, and
-    // pulse the coins' glow so they shimmer for attention
-    this._camQuat = camera.quaternion;
+    // pulse the coins' own glow so they shimmer for attention
     if (this.goldMat) this.goldMat.emissiveIntensity = 0.6 + Math.sin(this.time * 4) * 0.35;
-    if (this.goldGlow) this.goldGlow.material.opacity = 0.42 + Math.sin(this.time * 4) * 0.16;
     this.updateNpcs(dt, selfPos);
     this.updateShowPets(dt);
     this.updatePets(dt);
@@ -1570,7 +1572,7 @@ export class GameView {
     this.obstacles.clear(); this.graves.clear();
     this.projectiles = []; this.effects = []; this.corpses = [];
     this.xpOrbs.count = 0; this.ptsOrbs.count = 0; this.goldOrbs.count = 0;
-    this.goldGlow.count = 0;
+    this.goldSparkle.count = 0;
     this.clearGhost();
   }
 }

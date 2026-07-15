@@ -656,25 +656,33 @@ export class Sim {
       // the pig pet fattens its owner's share of the points
       this.addDrop(p.id, 'pts', Math.max(1, Math.round(ptsBase * (p.ptsMult || 1))), pos.x, pos.z);
       if (gold > 0) {
-        const amt = p.luck > 0 && Math.random() < p.luck ? gold * 2 : gold;
-        this.addDrop(p.id, 'gold', amt, pos.x, pos.z);
+        // the bunny pet's luck can double the haul
+        const coins = p.luck > 0 && Math.random() < p.luck ? gold * 2 : gold;
+        // one physical coin per unit — gold never merges, so 2/3/4 coins
+        // really are 2/3/4 pickups scattered on the ground
+        for (let i = 0; i < coins; i++) this.addDrop(p.id, 'gold', 1, pos.x, pos.z);
       }
     }
   }
 
   addDrop(owner, kind, amount, x, z) {
     const ttl = kind === 'gold' ? GOLD.TTL : DROPS.TTL;
-    // deaths cluster around chokepoints — merge nearby same-kind orbs
-    // so the ground (and the snapshot) never floods
-    for (const d of this.drops) {
-      if (d.owner === owner && d.kind === kind &&
-          dist2d(d.x, d.z, x, z) < DROPS.MERGE_RADIUS) {
-        d.amount += amount;
-        d.until = this.time + ttl;
-        return;
+    // deaths cluster around chokepoints — merge nearby same-kind orbs so
+    // the ground (and the snapshot) never floods. Gold is the exception:
+    // every coin is its own physical pickup, so it never merges.
+    if (kind !== 'gold') {
+      for (const d of this.drops) {
+        if (d.owner === owner && d.kind === kind &&
+            dist2d(d.x, d.z, x, z) < DROPS.MERGE_RADIUS) {
+          d.amount += amount;
+          d.until = this.time + ttl;
+          return;
+        }
       }
     }
-    const jit = () => (Math.random() - 0.5) * 0.9;
+    // gold coins spread out a bit wider so a boss's stack reads as several
+    const spread = kind === 'gold' ? 1.5 : 0.9;
+    const jit = () => (Math.random() - 0.5) * spread;
     const fixed = this.grid.resolveCircle(x + jit(), z + jit(), 0.3);
     this.drops.push({
       id: nextId(), owner, kind, amount,

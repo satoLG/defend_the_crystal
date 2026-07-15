@@ -796,8 +796,13 @@ export class UI {
     this.persistCharacter();
     this._goldShown = null;
     sfx.success();
-    this.toast(`${def.name} joined your team!`, 'gold');
+    this.toast(`${def.name} joined your team — name it!`, 'gold');
+    // jump to My pets and open the name field right away so the new
+    // companion never sits with a generic name
+    this.petTab = 'mine';
     this.renderPetPanel();
+    const card = $('pet-list').querySelector(`.pet-card[data-pet="${id}"]`);
+    if (card) this.startPetRename(card, id);
     if (firstPet) this.cb.onPetChange?.(this.activePetInfo());
   }
 
