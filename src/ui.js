@@ -297,7 +297,7 @@ export class UI {
 
   showMenu() {
     this.hide('loading'); this.hide('character'); this.hide('lobby'); this.hide('hud');
-    this.hide('checkpoint'); this.hide('gameover'); this.hide('host-lost');
+    this.hide('checkpoint'); this.hide('gameover'); this.hide('host-lost'); this.hide('pet-picker');
     this.preview?.stop();
     this.renderRoster();
     this.show('menu');
@@ -387,14 +387,19 @@ export class UI {
       sfx.click();
       const ctx = this.petPickerCtx;
       this.petPickerCtx = null;
+      // always tear the picker down first so it can never linger over
+      // whatever comes next (menu / lobby); the × is an escape hatch too
+      this.hide('pet-picker');
       ctx?.onBack?.();
     });
     $('pp-confirm').addEventListener('click', () => {
+      const ctx = this.petPickerCtx;
+      if (!ctx) return; // already handled — a stray second click
       const id = PETS[this.ppPick] ? this.ppPick : 'dog';
       const name = (this.ppName.trim() || PETS[id].name).slice(0, PET.NAME_MAX);
-      const ctx = this.petPickerCtx;
       this.petPickerCtx = null;
-      ctx?.onConfirm?.(id, name);
+      this.hide('pet-picker');
+      ctx.onConfirm?.(id, name);
     });
   }
 
@@ -559,7 +564,7 @@ export class UI {
     this.roomCode = code;
     this.isHost = isHost;
     this.preview?.stop();
-    this.hide('menu'); this.hide('character');
+    this.hide('menu'); this.hide('character'); this.hide('pet-picker');
     this.show('lobby');
     $('room-code').textContent = code;
     $('start-btn').classList.toggle('hidden', !isHost);
@@ -636,7 +641,7 @@ export class UI {
   }
 
   showHud() {
-    this.hide('menu'); this.hide('lobby');
+    this.hide('menu'); this.hide('lobby'); this.hide('pet-picker');
     this.show('hud');
     $('room-label').textContent = this.roomCode || '';
   }
