@@ -82,7 +82,8 @@ export class CharacterPreview {
     const mixer = new THREE.AnimationMixer(inst.group);
     const idle = inst.animations.find((c) => c.name === 'idle') || inst.animations[0];
     if (idle) mixer.clipAction(idle).play();
-    attachProps(inst.group, CLASS_PROPS[cls]);
+    const specs = CLASS_PROPS[cls] || [];
+    attachProps(inst.group, specs);
     this.actor = { group: inst.group, mixer, modelKey };
     this.charPivot.add(inst.group);
     this.charPivot.rotation.y = 0.3;

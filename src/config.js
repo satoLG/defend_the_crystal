@@ -29,7 +29,7 @@ export const CLASSES = {
     name: 'Berserker', icon: 'axe',
     hp: 230, def: 0.25, atk: 36, range: 1.8, rate: 1.15, speed: 4.3,
     knockback: 1.8, model: 'char-berserker',
-    weapon: 'Heavy sword',
+    weapon: 'Battle axe',
     blurb: 'A frontline bruiser who trades safety for devastating melee hits.',
   },
   tanker: {
