@@ -68,15 +68,27 @@
           <div class="ci-stats" id="ci-stats"></div>
         </div>
 
-        <div id="char-pet-block" class="char-pet-block hidden">
-          <div class="field-label"><i data-icon="paw"></i> Your first pet — every hero gets one for free</div>
-          <div id="char-pet-grid" class="char-pet-grid"></div>
-          <div id="char-pet-blurb" class="muted char-pet-blurb"></div>
-        </div>
-
         <div class="char-foot">
           <input id="char-name" maxlength="10" autocomplete="off" placeholder="Hero name" />
           <button id="char-save" class="btn primary big">Save &amp; continue</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ PET PICKER (creation step 2 / legacy normalize) ============ -->
+    <div id="pet-picker" class="screen hidden">
+      <div class="panel char-panel pp-panel">
+        <button id="pp-back" class="btn small corner-btn corner-left hidden" title="Back"><i data-icon="x"></i></button>
+        <h2><i data-icon="paw"></i> Your first pet</h2>
+        <p id="pp-intro" class="muted pp-intro">Every hero brings one companion along.<br/>Pick a starter and give it a name — it levels up permanently and follows you into battle.</p>
+        <div id="pp-grid" class="pp-grid"></div>
+        <div class="pp-detail">
+          <div id="pp-detail-name" class="pp-detail-name"></div>
+          <div id="pp-blurb" class="muted pp-blurb"></div>
+        </div>
+        <div class="char-foot">
+          <input id="pp-name" maxlength="10" autocomplete="off" placeholder="Pet name" />
+          <button id="pp-confirm" class="btn primary big">Save &amp; continue</button>
         </div>
       </div>
     </div>
@@ -154,6 +166,7 @@
           </div>
           <span id="pb-level" class="pb-lvl">1</span>
         </div>
+        <button id="pet-btn" class="pb-pet-btn" title="Your pets"><i data-icon="paw"></i> Pets</button>
       </div>
 
       <button id="build-hint" class="hidden"></button>
@@ -165,10 +178,6 @@
       <button id="skill-btn" disabled title="Class special attack (K)">
         <span id="skill-icon"><i data-icon="sparkle"></i></span>
         <span id="skill-cd" class="hidden"></span>
-      </button>
-
-      <button id="pet-btn" title="Your pets">
-        <i data-icon="paw"></i>
       </button>
 
       <div id="hud-bottom">

@@ -93,11 +93,15 @@ export class UI {
     this.shopNear = false;     // standing at Tonho's stall (main.js feeds this)
     this.petTab = 'mine';      // pet panel tab: 'mine' | 'shop'
     this.petPanelOpen = false;
+    this.petPickerCtx = null;  // active pet-picker step callback bundle
+    this.ppPick = 'dog';       // selected starter in the picker
+    this.ppName = '';          // typed pet name in the picker
 
     mountIcons();
     this.bindStart();
     this.bindMenu();
     this.bindCharacter();
+    this.bindPetPicker();
     this.bindLobby();
     this.bindHud();
     this.bindPets();
@@ -260,13 +264,13 @@ export class UI {
 
     $('host-btn').addEventListener('click', () => {
       sfx.click();
-      this.cb.onHost({ ...this.character, name: heroName() });
+      this.ensurePetThen(() => this.cb.onHost({ ...this.character, name: heroName() }));
     });
     $('join-btn').addEventListener('click', () => {
       sfx.click();
       const code = normalizeRoomCode($('join-code').value);
       if (code.length < 5) return this.menuError('Enter the 5-letter room code');
-      this.cb.onJoin(code, { ...this.character, name: heroName() });
+      this.ensurePetThen(() => this.cb.onJoin(code, { ...this.character, name: heroName() }));
     });
     $('join-code').addEventListener('input', (e) => {
       e.target.value = normalizeRoomCode(e.target.value);
@@ -330,51 +334,123 @@ export class UI {
       this.preview?.setColors(this.charDraft.colors);
     });
 
-    // starter pet picker (creation, or first edit of a pre-pet hero)
-    $('char-pet-grid').addEventListener('click', (e) => {
-      const card = e.target.closest('.cp-pet');
-      if (!card) return;
-      sfx.click();
-      this.starterPick = card.dataset.pet;
-      this.renderStarterPicker();
-    });
-
     $('char-save').addEventListener('click', () => {
-      sfx.success();
       this.charDraft.name = ($('char-name').value.trim() || 'Hero').slice(0, NAME_MAX);
-      // hand the freshly-picked starter pet over (older heroes get
-      // their one free pick the first time they're edited)
+      // a hero with no pet yet (brand new, or one saved before pets
+      // existed) goes to step 2 — the pet picker — to choose & name its
+      // free starter; anyone who already has pets saves straight away
       if (this.needsStarter) {
-        const sid = PETS[this.starterPick] ? this.starterPick : 'dog';
-        this.charDraft.pets = { ...this.charDraft.pets, [sid]: { lvl: 1, xp: 0, name: PETS[sid].name } };
-        this.charDraft.activePet = sid;
+        sfx.click();
+        this.openPetPicker({
+          allowBack: true,
+          onBack: () => this.showCharacter(this.editingId, true),
+          onConfirm: (id, name) => {
+            this.charDraft.pets = { ...this.charDraft.pets, [id]: { lvl: 1, xp: 0, name } };
+            this.charDraft.activePet = id;
+            this.commitCharDraft();
+          },
+        });
+      } else {
+        this.commitCharDraft();
       }
-      const chars = [...this.roster.chars];
-      const i = this.editingId ? chars.findIndex((c) => c.id === this.editingId) : -1;
-      if (i >= 0) chars[i] = { ...this.charDraft, id: this.editingId };
-      else chars.push(this.charDraft);
-      // the saved/created hero becomes the active one
-      this.roster = saveRoster(chars, this.charDraft.id);
-      this.character = this.activeChar();
-      this.myCls = this.character.cls;
-      this.showMenu();
     });
   }
 
-  // the four starter pets, one of which every new hero takes home free
-  renderStarterPicker() {
-    const grid = $('char-pet-grid');
+  // persist the working character draft into the roster and return to
+  // the menu (the saved/created hero becomes the active one)
+  commitCharDraft() {
+    sfx.success();
+    const chars = [...this.roster.chars];
+    const i = this.editingId ? chars.findIndex((c) => c.id === this.editingId) : -1;
+    if (i >= 0) chars[i] = { ...this.charDraft, id: this.editingId };
+    else chars.push(this.charDraft);
+    this.roster = saveRoster(chars, this.charDraft.id);
+    this.character = this.activeChar();
+    this.myCls = this.character.cls;
+    this.showMenu();
+  }
+
+  // ---------------- pet picker (creation step 2 / legacy normalize) ----------------
+
+  bindPetPicker() {
+    $('pp-grid').addEventListener('click', (e) => {
+      const card = e.target.closest('.pp-pet');
+      if (!card) return;
+      sfx.click();
+      this.ppPick = card.dataset.pet;
+      this.renderPetPicker();
+    });
+    $('pp-name').addEventListener('input', (e) => {
+      this.ppName = e.target.value.slice(0, PET.NAME_MAX);
+    });
+    $('pp-back').addEventListener('click', () => {
+      sfx.click();
+      const ctx = this.petPickerCtx;
+      this.petPickerCtx = null;
+      ctx?.onBack?.();
+    });
+    $('pp-confirm').addEventListener('click', () => {
+      const id = PETS[this.ppPick] ? this.ppPick : 'dog';
+      const name = (this.ppName.trim() || PETS[id].name).slice(0, PET.NAME_MAX);
+      const ctx = this.petPickerCtx;
+      this.petPickerCtx = null;
+      ctx?.onConfirm?.(id, name);
+    });
+  }
+
+  // ctx: { onConfirm(petId, petName), onBack?, allowBack?, intro?, confirmLabel? }
+  openPetPicker(ctx) {
+    this.petPickerCtx = ctx;
+    this.ppPick = 'dog';
+    this.ppName = '';
+    this.preview?.stop();
+    this.hide('loading'); this.hide('menu'); this.hide('character'); this.hide('lobby');
+    this.hide('hud'); this.hide('checkpoint'); this.hide('gameover'); this.hide('host-lost');
+    $('pp-back').classList.toggle('hidden', !ctx.allowBack);
+    if (ctx.intro) $('pp-intro').innerHTML = ctx.intro;
+    $('pp-confirm').textContent = ctx.confirmLabel || 'Save & continue';
+    $('pp-name').value = '';
+    this.renderPetPicker();
+    this.show('pet-picker');
+  }
+
+  renderPetPicker() {
+    const grid = $('pp-grid');
     grid.innerHTML = '';
     for (const [id, def] of Object.entries(PETS)) {
       if (!def.starter) continue;
       const card = document.createElement('button');
-      card.className = 'cp-pet' + (this.starterPick === id ? ' selected' : '');
+      card.className = 'pp-pet' + (this.ppPick === id ? ' selected' : '');
       card.dataset.pet = id;
       card.innerHTML = `<img src="${petImgSrc(id)}" alt=""><span>${def.name}</span>`;
       grid.appendChild(card);
     }
-    const def = PETS[this.starterPick] || PETS.dog;
-    $('char-pet-blurb').textContent = `${def.blurb} (${petEffectText(this.starterPick, 1)})`;
+    const def = PETS[this.ppPick] || PETS.dog;
+    $('pp-detail-name').textContent = def.name;
+    $('pp-blurb').textContent = `${def.blurb} (${petEffectText(this.ppPick, 1)})`;
+    $('pp-name').placeholder = `Name your ${def.name.toLowerCase()}`;
+  }
+
+  // legacy heroes saved before pets existed have none; make them pick &
+  // name a starter (normalizing them) before a match can start
+  ensurePetThen(proceed) {
+    const c = this.character;
+    if (c.activePet && c.pets?.[c.activePet]) return proceed();
+    this.openPetPicker({
+      allowBack: false,
+      confirmLabel: 'Confirm pet',
+      intro: `${(c.name || '').trim() || 'Your hero'} needs a companion!<br/>Pick a starter pet and give it a name before you head out — it levels up permanently.`,
+      onConfirm: (id, name) => {
+        const chars = this.roster.chars.map((ch) =>
+          ch.id === c.id
+            ? { ...ch, pets: { ...(ch.pets || {}), [id]: { lvl: 1, xp: 0, name } }, activePet: id }
+            : ch);
+        this.roster = saveRoster(chars, c.id);
+        this.character = this.activeChar();
+        sfx.success();
+        proceed();
+      },
+    });
   }
 
   selectCharClass(cls) {
@@ -415,26 +491,27 @@ export class UI {
     }
   }
 
-  // id = edit that hero; null/undefined = create a fresh one
-  showCharacter(id = null) {
+  // id = edit that hero; null/undefined = create a fresh one.
+  // keepDraft = returning from the step-2 pet picker: keep the working
+  // draft (class/colours/name) exactly as the player left it.
+  showCharacter(id = null, keepDraft = false) {
     this.editingId = id;
-    const src = id ? this.roster.chars.find((c) => c.id === id) : null;
-    // work on a copy so "Save" is an explicit commit — pets/coins ride
-    // along untouched so editing can never wipe them
-    this.charDraft = src
-      ? {
-          id: src.id, name: src.name, cls: src.cls, colors: { ...src.colors },
-          pets: JSON.parse(JSON.stringify(src.pets || {})),
-          activePet: src.activePet, coins: src.coins,
-        }
-      : defaultCharacter();
-    // heroes without any pet (new, or saved before pets existed) pick
-    // their free starter right here
-    this.needsStarter = !Object.keys(this.charDraft.pets || {}).length;
-    this.starterPick = 'dog';
-    $('char-pet-block').classList.toggle('hidden', !this.needsStarter);
-    if (this.needsStarter) this.renderStarterPicker();
-    this.hide('loading'); this.hide('menu'); this.hide('lobby'); this.hide('hud');
+    if (!keepDraft) {
+      const src = id ? this.roster.chars.find((c) => c.id === id) : null;
+      // work on a copy so "Save" is an explicit commit — pets/coins ride
+      // along untouched so editing can never wipe them
+      this.charDraft = src
+        ? {
+            id: src.id, name: src.name, cls: src.cls, colors: { ...src.colors },
+            pets: JSON.parse(JSON.stringify(src.pets || {})),
+            activePet: src.activePet, coins: src.coins,
+          }
+        : defaultCharacter();
+      // a hero with no pet (brand new, or one saved before pets existed)
+      // is routed through the step-2 pet picker when it saves
+      this.needsStarter = !Object.keys(this.charDraft.pets || {}).length;
+    }
+    this.hide('loading'); this.hide('menu'); this.hide('lobby'); this.hide('hud'); this.hide('pet-picker');
     this.hide('checkpoint'); this.hide('gameover'); this.hide('host-lost');
     // returning to the menu is only allowed once at least one hero exists
     $('char-back').classList.toggle('hidden', this.roster.chars.length === 0);

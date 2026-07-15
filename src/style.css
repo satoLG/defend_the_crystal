@@ -733,20 +733,19 @@ input:focus { border-color: var(--gold); }
 }
 .pb-gold .ico { width: 0.9rem; height: 0.9rem; }
 
-/* round paw button above jump: opens the pet panel */
-#pet-btn {
-  position: absolute; right: 14px;
-  bottom: calc(max(10px, env(safe-area-inset-bottom)) + 172px);
-  width: 48px; height: 48px; border-radius: 50%;
-  background: linear-gradient(180deg, #372a55, #241b3a);
-  border: 2px solid var(--panel-border);
-  color: #ffb340; cursor: pointer; font-family: inherit;
-  display: flex; align-items: center; justify-content: center;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
-  touch-action: none;
+/* pets button tucked under the health/xp bars, top-left — deliberately
+   away from the jump/skill action cluster so it never reads as one */
+.pb-pet-btn {
+  margin: 6px 0 0 47px;
+  display: inline-flex; align-items: center; gap: 5px;
+  background: var(--panel); border: 1px solid var(--panel-border);
+  border-radius: 13px; padding: 4px 11px 4px 9px;
+  color: #ffb340; font-family: inherit; font-weight: 800; font-size: 0.72rem;
+  text-transform: uppercase; letter-spacing: 0.5px; cursor: pointer;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.5); touch-action: none;
 }
-#pet-btn .ico { width: 1.5rem; height: 1.5rem; }
-#pet-btn:active { transform: scale(0.92); }
+.pb-pet-btn .ico { width: 0.95rem; height: 0.95rem; }
+.pb-pet-btn:active { transform: scale(0.94); }
 
 /* floating call-to-action when standing at Tonho's stall */
 #petshop-prompt {
@@ -821,19 +820,32 @@ input:focus { border-color: var(--gold); }
   text-transform: uppercase; letter-spacing: 0.5px;
 }
 
-/* starter pet picker on the character screen */
-.char-pet-block { margin: 8px 0 4px; }
-.char-pet-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 6px 0 4px; }
-.cp-pet {
-  display: flex; flex-direction: column; align-items: center; gap: 2px;
-  padding: 8px 4px; border-radius: 12px; cursor: pointer;
+/* pet picker (character-creation step 2 / legacy hero normalization) —
+   reuses .char-panel so it sits at the same size as the hero step */
+.pp-panel { text-align: center; }
+.pp-intro { font-size: 0.82rem; line-height: 1.4; margin: 0 0 4px; }
+.pp-grid {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px;
+  margin: 6px 0 0; flex: 0 0 auto;
+}
+.pp-pet {
+  display: flex; flex-direction: column; align-items: center; gap: 5px;
+  padding: 12px 4px; border-radius: 14px; cursor: pointer;
   border: 2px solid rgba(240, 233, 216, 0.15); background: rgba(0, 0, 0, 0.3);
-  color: var(--text); font-family: inherit; font-size: 0.75rem; font-weight: 700;
-  touch-action: none;
+  color: var(--text); font-family: inherit; font-size: 0.82rem; font-weight: 700;
+  touch-action: none; transition: transform 0.06s;
 }
-.cp-pet img { width: 44px; height: 44px; filter: drop-shadow(0 3px 5px rgba(0, 0, 0, 0.5)); }
-.cp-pet.selected {
-  border-color: var(--gold); background: rgba(232, 184, 75, 0.12);
-  box-shadow: 0 0 12px rgba(232, 184, 75, 0.35);
+.pp-pet img { width: 62px; height: 62px; filter: drop-shadow(0 4px 6px rgba(0, 0, 0, 0.5)); }
+.pp-pet:active { transform: scale(0.95); }
+.pp-pet.selected {
+  border-color: var(--gold); background: rgba(232, 184, 75, 0.14);
+  box-shadow: 0 0 14px rgba(232, 184, 75, 0.35);
 }
-.char-pet-blurb { font-size: 0.78rem; min-height: 2.2em; line-height: 1.3; }
+.pp-detail {
+  flex: 1 1 auto; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 3px;
+  background: rgba(0, 0, 0, 0.25); border-radius: 12px;
+  border: 1px solid rgba(240, 233, 216, 0.1); padding: 10px 12px; margin-top: 4px;
+}
+.pp-detail-name { font-weight: 800; color: var(--gold); font-size: 1.05rem; }
+.pp-blurb { font-size: 0.82rem; line-height: 1.4; }
