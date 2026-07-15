@@ -111,20 +111,17 @@ export function makeQuiver() {
 }
 
 // Parent hand props onto a character's bones. Shared by the in-game
-// actors and the character-creation preview. Returns the created holder
-// groups aligned to `specs` (null where the target bone was missing) so
-// callers like the weapon tuner can nudge them live.
+// actors and the character-creation preview.
 export function attachProps(group, specs) {
-  const holders = [];
   for (const spec of specs || []) {
     const bone = group.getObjectByName(spec.bone);
-    if (!bone) { holders.push(null); continue; }
+    if (!bone) continue;
     const holder = new THREE.Group();
-    const propObj = spec.gen ? spec.gen() : instantiate(spec.key, { shadows: false }).group;
-    holder.add(propObj);
+    holder.add(spec.gen ? spec.gen() : instantiate(spec.key, { shadows: false }).group);
     if (spec.crystalTip) {
       // glowing crystal nestled in the staff's hook (values dialed in
-      // with the weapon tuner, relative to the staff holder)
+      // with a dev overlay while tuning weapon placement, relative to
+      // the staff holder)
       const tip = instantiate('prop-crystal', { shadows: false, cloneMaterials: true }).group;
       tip.scale.setScalar(0.45);
       tip.position.set(0, 0.055, -0.005);
@@ -136,7 +133,6 @@ export function attachProps(group, specs) {
         }
       });
       holder.add(tip);
-      holder.userData.crystalTip = tip; // let the tuner nudge it vs the staff
     }
     // raw props: bone space == raw model units, and the bone already
     // carries the character's scale, so placement is direct
@@ -144,9 +140,7 @@ export function attachProps(group, specs) {
     holder.position.set(spec.pos[0], spec.pos[1], spec.pos[2]);
     holder.rotation.set(spec.rot[0], spec.rot[1], spec.rot[2]);
     bone.add(holder);
-    holders.push(holder);
   }
-  return holders;
 }
 
 // world-space head height of a built actor group, so HP bars / name

@@ -49,7 +49,6 @@ export class CharacterPreview {
     this.running = false;
     this.cls = null;
     this.colors = {};
-    this.onPropsChanged = null; // (cls) => void — fired when weapons rebuild
 
     this._bindDrag();
     window.addEventListener('resize', () => this.resize());
@@ -84,61 +83,11 @@ export class CharacterPreview {
     const idle = inst.animations.find((c) => c.name === 'idle') || inst.animations[0];
     if (idle) mixer.clipAction(idle).play();
     const specs = CLASS_PROPS[cls] || [];
-    const holders = attachProps(inst.group, specs);
-    // flat list of everything the tuner can nudge: each weapon holder,
-    // plus the mage's crystal (a child of the staff holder, so its
-    // transform is measured relative to the staff)
-    const tunables = [];
-    specs.forEach((s, i) => {
-      const h = holders[i];
-      tunables.push({ kind: 'prop', obj: h, spec: s });
-      const tip = h && h.userData.crystalTip;
-      if (tip) tunables.push({ kind: 'crystal', obj: tip, spec: s });
-    });
-    this.actor = { group: inst.group, mixer, modelKey, specs, holders, tunables };
+    attachProps(inst.group, specs);
+    this.actor = { group: inst.group, mixer, modelKey };
     this.charPivot.add(inst.group);
     this.charPivot.rotation.y = 0.3;
     this.setColors(this.colors);
-    this.onPropsChanged?.(cls);
-  }
-
-  // ---- weapon tuning (used by the dev overlay) ----------------
-
-  // Snapshot of the current class's tunables (weapons + the mage crystal):
-  // current transforms plus enough metadata to label controls and emit code.
-  getProps() {
-    const items = this.actor?.tunables || [];
-    return items.map((t, i) => {
-      const s = t.spec;
-      const o = t.obj;
-      const label = s.label || (s.key ? s.key.replace('prop-', '') : 'prop');
-      if (t.kind === 'crystal') {
-        return {
-          i, kind: 'crystal', label: `${label} · Crystal`, bone: s.bone, source: 'crystal',
-          crystalTip: false,
-          pos: o ? [o.position.x, o.position.y, o.position.z] : [0, 0, 0],
-          rot: o ? [o.rotation.x, o.rotation.y, o.rotation.z] : [0, 0, 0],
-          scale: o ? o.scale.x : 1,
-          available: !!o,
-        };
-      }
-      return {
-        i, kind: 'prop', label, bone: s.bone,
-        source: s.gen ? `gen:${s.gen.name}` : `key:${s.key}`,
-        crystalTip: !!s.crystalTip,
-        pos: [...s.pos], rot: [...s.rot], scale: s.scale ?? 1,
-        available: !!o,
-      };
-    });
-  }
-
-  // Live-nudge one tunable (weapon holder or crystal) by list index.
-  setPropTransform(i, { pos, rot, scale } = {}) {
-    const o = this.actor?.tunables?.[i]?.obj;
-    if (!o) return;
-    if (pos) o.position.set(pos[0], pos[1], pos[2]);
-    if (rot) o.rotation.set(rot[0], rot[1], rot[2]);
-    if (scale != null) o.scale.setScalar(scale);
   }
 
   setColors(colors) {
