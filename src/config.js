@@ -407,7 +407,14 @@ export const NET = {
   APP_ID: 'dtc-defend-the-crystal-v1',
   SNAP_HZ: 12,
   INPUT_HZ: 15,
-  INTERP_DELAY: 0.13, // seconds clients render behind the newest snapshot
+  // seconds rendered behind the newest snapshot. ~2 snapshot intervals
+  // (1/SNAP_HZ) so a late/jittered packet still has a buffered point to
+  // interpolate toward instead of freezing.
+  INTERP_DELAY: 0.16,
+  // alpha clamp ceiling: >1 lets a remote briefly extrapolate along its
+  // last known heading when the next snapshot is late, softening the
+  // hitch into a short over-shoot that snaps back on arrival.
+  INTERP_MAX: 1.25,
 };
 
 export const SIM_DT = 1 / 30;

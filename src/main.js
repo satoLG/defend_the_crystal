@@ -5,6 +5,7 @@ import { CharacterPreview } from './render/preview.js';
 import { Sim } from './sim/sim.js';
 import { Grid, worldToCell, cellToWorld, canJumpFrom, computeDashEnd } from './sim/grid.js';
 import { Net, selfId } from './net.js';
+import { SnapBuffer } from './net_interp.js';
 import { Input } from './input.js';
 import { UI } from './ui.js';
 import { armAudioOnFirstGesture, bindAudioLifecycle, sfx, setSfxVolume } from './audio.js';
@@ -13,7 +14,7 @@ import {
   petEffects, jumpDurFor,
 } from './config.js';
 import { petRefOf } from './character.js';
-import { makeRoomCode, clamp, lerp, dist2d } from './utils.js';
+import { makeRoomCode, lerp, dist2d } from './utils.js';
 import { settings } from './settings.js';
 import { music } from './music.js';
 
@@ -32,8 +33,11 @@ const state = {
   hostId: null,
   started: false,
   over: false,
-  // client-side snapshot interpolation
-  snapPrev: null, snapNext: null, snapPrevT: 0, snapNextT: 0,
+  // snapshot interpolation buffer. Clients push on receive; the host
+  // pushes the snapshots it broadcasts (stamped with the render clock),
+  // so both blend remotes identically. Self bypasses this via selfPose(),
+  // staying responsive at render rate.
+  snaps: new SnapBuffer(),
   // local self-prediction (jump = in-flight hop over a grid cell,
   // dash = the berserker's special sprint)
   self: { x: 0, z: 4, yaw: Math.PI, moving: false, kbx: 0, kbz: 0, dead: false, speed: 4, jump: null, dash: null },
@@ -175,10 +179,7 @@ function joinGame(code, character) {
     if (data.started && !state.started) enterGame();
   });
   state.net.on('snap', (snap) => {
-    state.snapPrev = state.snapNext;
-    state.snapPrevT = state.snapNextT;
-    state.snapNext = snap;
-    state.snapNextT = performance.now() / 1000;
+    state.snaps.push(snap, performance.now() / 1000);
     if (!state.started) enterGame();
     syncClientGrid(snap);
     reconcileSelf(snap);
@@ -231,7 +232,7 @@ function sendAction(act) {
 function snapForUi() {
   return state.role === 'host'
     ? (state.sim && state.started ? state.sim.buildSnapshot() : null)
-    : state.snapNext;
+    : state.snaps.latest();
 }
 
 function cellFromPointer(x, y) {
@@ -637,11 +638,17 @@ function frame(t) {
     }
     if (now - state.lastSnapSend > 1 / NET.SNAP_HZ) {
       state.lastSnapSend = now;
-      state.net.send('snap', state.sim.buildSnapshot());
+      const snap = state.sim.buildSnapshot();
+      state.net.send('snap', snap);
+      // buffer the broadcast (stamped with the render clock) so the host
+      // interpolates remotes the same way clients do
+      state.snaps.push(snap, now);
     }
-    const snap = state.sim.buildSnapshot();
-    view.applySnapshot(null, snap, 1, selfId, selfPose());
-    ui.updateHud(snap, selfId);
+    const s = state.snaps.sample(now - NET.INTERP_DELAY, NET.INTERP_MAX);
+    if (s) {
+      view.applySnapshot(s.prev, s.next, s.alpha, selfId, selfPose());
+      ui.updateHud(state.snaps.latest(), selfId);
+    }
   } else if (state.role === 'client' && state.started) {
     if (now - state.lastInputSend > 1 / NET.INPUT_HZ && state.selfInit) {
       state.lastInputSend = now;
@@ -652,14 +659,10 @@ function frame(t) {
         m: state.self.moving,
       }, state.hostId);
     }
-    if (state.snapNext) {
-      let alpha = 1;
-      if (state.snapPrev && state.snapNextT > state.snapPrevT) {
-        const renderT = performance.now() / 1000 - NET.INTERP_DELAY;
-        alpha = clamp((renderT - state.snapPrevT) / (state.snapNextT - state.snapPrevT), 0, 1.15);
-      }
-      view.applySnapshot(state.snapPrev, state.snapNext, alpha, selfId, selfPose());
-      ui.updateHud(state.snapNext, selfId);
+    const s = state.snaps.sample(now - NET.INTERP_DELAY, NET.INTERP_MAX);
+    if (s) {
+      view.applySnapshot(s.prev, s.next, s.alpha, selfId, selfPose());
+      ui.updateHud(state.snaps.latest(), selfId);
     }
   }
 
@@ -667,8 +670,9 @@ function frame(t) {
   // follows the hero while they stroll (and rest) around the sanctuary.
   // The match start counts as the first checkpoint — the pre-wave-1
   // build phase gets the same free-roam camera.
-  const phase = state.role === 'host' ? state.sim?.phase : state.snapNext?.ph;
-  const waveN = state.role === 'host' ? state.sim?.wave : state.snapNext?.w;
+  const uiSnap = state.role === 'host' ? null : state.snaps.latest();
+  const phase = state.role === 'host' ? state.sim?.phase : uiSnap?.ph;
+  const waveN = state.role === 'host' ? state.sim?.wave : uiSnap?.w;
   const freeRoam = phase === 'checkpoint' || (phase === 'build' && waveN === 0);
   if (state.started && !state.over && freeRoam &&
       (state.role === 'host' || state.selfInit) && !state.self.dead) {
