@@ -663,7 +663,7 @@ export class UI {
       this.myCls = cls;
       if (this._skCls !== cls) {
         this._skCls = cls;
-        $('skill-icon').innerHTML = icon(CLASSES[cls]?.icon || 'sparkle');
+        $('skill-icon').innerHTML = icon('sk-' + cls);
         $('skill-btn').title = `${SKILLS[cls]?.name || 'Special attack'} (K)`;
       }
       const skillCd = me[16] || 0;
