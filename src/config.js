@@ -37,7 +37,7 @@ export const CLASSES = {
     hp: 340, def: 0.45, atk: 18, range: 1.8, rate: 1.0, speed: 3.4,
     knockback: 1.3, model: 'char-tanker',
     weapon: 'Sword & shield',
-    blurb: 'An immovable wall that soaks damage and holds the line.',
+    blurb: 'An immovable wall that soaks damage and always holds the line.',
   },
   archer: {
     name: 'Archer', icon: 'bow',
