@@ -200,14 +200,55 @@ input:focus { border-color: var(--gold); }
 }
 
 .menu-actions { margin-top: 14px; }
-.join-row { display: flex; gap: 8px; margin-top: 10px; }
-.join-row input {
-  flex: 1; margin: 0; text-transform: uppercase;
-  letter-spacing: 6px; font-weight: 800; font-size: 1.35rem;
-  min-height: 54px; padding: 10px 8px;
-}
-.join-row .btn { min-width: 96px; min-height: 54px; font-size: 1.05rem; }
 .menu-panel { position: relative; }
+
+/* ---------- start screen ---------- */
+.start-panel { display: flex; flex-direction: column; align-items: center; }
+.title-crest {
+  display: flex; align-items: center; justify-content: center;
+  margin: 4px auto -4px;
+}
+.title-crest .ico {
+  width: clamp(74px, 22vw, 104px); height: clamp(74px, 22vw, 104px);
+  color: #7fe9ff;
+  filter: drop-shadow(0 0 18px rgba(102, 224, 255, 0.65))
+          drop-shadow(0 4px 6px rgba(0, 0, 0, 0.5));
+  animation: crest-bob 3.4s ease-in-out infinite;
+}
+@keyframes crest-bob {
+  50% { transform: translateY(-7px) rotate(-2deg); }
+}
+#start-area { width: 100%; display: flex; flex-direction: column; gap: 10px; margin-top: 6px; }
+#start-area .btn.big { margin-top: 2px; }
+
+/* ---------- "you're joining a specific match" banner ---------- */
+.room-invite {
+  display: flex; align-items: center; gap: 12px; text-align: left;
+  background: rgba(102, 224, 255, 0.1);
+  border: 1px solid rgba(102, 224, 255, 0.4);
+  border-radius: 14px; padding: 10px 14px; margin: 8px 0;
+}
+.room-invite .ico { width: 1.9rem; height: 1.9rem; color: #7fe9ff; flex: 0 0 auto; }
+.room-invite .ri-text { font-size: 0.82rem; line-height: 1.35; color: rgba(240, 233, 216, 0.8); }
+.room-invite .ri-text span { color: rgba(240, 233, 216, 0.6); }
+.room-invite .ri-text b {
+  color: #7fe9ff; letter-spacing: 3px; font-size: 1rem; font-weight: 900;
+}
+
+/* ---------- join block (roomy, not a cramped dash) ---------- */
+#join-block { margin-top: 12px; }
+.join-label {
+  text-align: left; margin: 0 2px 5px; font-size: 0.8rem;
+  color: rgba(240, 233, 216, 0.6); letter-spacing: 0.5px;
+}
+#join-code {
+  width: 100%; margin: 0 0 8px; text-transform: uppercase;
+  letter-spacing: 8px; font-weight: 800; font-size: 1.4rem;
+  min-height: 56px; padding: 12px 14px;
+}
+#join-code[readonly] { color: #7fe9ff; border-color: rgba(102, 224, 255, 0.5); }
+#join-btn { width: 100%; min-height: 50px; font-size: 1.05rem; }
+#join-btn .ico { width: 1.1em; height: 1.1em; }
 
 /* ---------- lobby ---------- */
 .code-row { display: flex; gap: 8px; align-items: center; justify-content: center; margin: 10px 0; }
@@ -254,7 +295,13 @@ input:focus { border-color: var(--gold); }
   border-radius: 50%; width: 40px; height: 40px;
   display: flex; align-items: center; justify-content: center;
 }
-.pb-bars { flex: 1; display: flex; flex-direction: column; gap: 3px; }
+.pb-bars { flex: 1; display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.pb-name {
+  font-weight: 800; font-size: 0.82rem; line-height: 1.1; color: var(--text);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.85);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  max-width: 100%;
+}
 .bar {
   position: relative; height: 13px; border-radius: 7px; overflow: hidden;
   background: rgba(0, 0, 0, 0.55); border: 1px solid rgba(255, 255, 255, 0.18);
@@ -490,13 +537,16 @@ input:focus { border-color: var(--gold); }
 }
 
 /* ---------- character creation ---------- */
+/* fixed height so switching class (and its differing colour-dot count /
+   model size) never makes the modal — or the boxes inside it — grow */
 .char-panel {
   position: relative;
   max-width: 440px;
   display: flex; flex-direction: column; gap: 8px;
+  height: min(600px, calc(100dvh - 20px));
   max-height: calc(100dvh - 20px);
   padding: 14px 16px 16px;
-  overflow-y: auto;
+  overflow: hidden;
 }
 .char-panel h2 { margin: 0; }
 
@@ -504,6 +554,8 @@ input:focus { border-color: var(--gold); }
 .char-class-grid {
   display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; flex: 0 0 auto;
 }
+/* editing an existing hero: only its (permanent) class shows, centered */
+.char-class-grid.locked { grid-template-columns: 1fr; max-width: 150px; margin: 0 auto; }
 .cc-card {
   display: flex; flex-direction: column; align-items: center; gap: 3px;
   padding: 7px 3px; border-radius: 11px; cursor: pointer;
@@ -520,8 +572,10 @@ input:focus { border-color: var(--gold); }
 }
 .cc-card.selected .ico { color: var(--gold); }
 
-/* 3D viewer with the colour dots stacked down its right edge */
-.char-stage-row { display: flex; gap: 8px; flex: 1 1 auto; min-height: 150px; }
+/* 3D viewer with the colour dots stacked down its right edge. The row
+   flexes to fill the fixed panel height and absorbs any per-class
+   difference, so nothing below it ever gets pushed or resized. */
+.char-stage-row { display: flex; gap: 8px; flex: 1 1 auto; min-height: 0; }
 .char-stage {
   position: relative; flex: 1 1 auto; border-radius: 14px;
   border: 1px solid rgba(232, 184, 75, 0.2);
@@ -539,7 +593,7 @@ input:focus { border-color: var(--gold); }
 
 .char-side {
   display: flex; flex-direction: column; align-items: center; gap: 8px;
-  flex: 0 0 auto; padding: 2px 0; overflow-y: auto;
+  flex: 0 0 auto; padding: 2px 0; overflow-y: auto; max-height: 100%;
 }
 .char-colors { display: flex; flex-direction: column; align-items: center; gap: 8px; }
 .color-dot {

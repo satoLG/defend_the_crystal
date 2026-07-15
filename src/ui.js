@@ -86,6 +86,7 @@ export class UI {
     this.myCls = this.character.cls;
 
     mountIcons();
+    this.bindStart();
     this.bindMenu();
     this.bindCharacter();
     this.bindLobby();
@@ -192,6 +193,42 @@ export class UI {
     if (frac >= 1) $('load-label').textContent = 'Ready!';
   }
 
+  // ---------------- start screen ----------------
+
+  // the room code baked into a shared link, if any (?room=CODE)
+  linkedRoom() {
+    const url = new URL(location.href);
+    const room = normalizeRoomCode(url.searchParams.get('room') || '');
+    return room.length === 5 ? room : '';
+  }
+
+  bindStart() {
+    $('start-btn-main').addEventListener('click', () => {
+      sfx.click();
+      // reveal the roster (returning players) or creation (first run)
+      if (this.roster.chars.length) this.showMenu();
+      else this.showCharacter(null);
+    });
+  }
+
+  // shown once assets finish loading — a landing screen with a Play
+  // button, so the player never falls straight into character creation
+  showStart() {
+    this.hide('menu'); this.hide('character'); this.hide('lobby'); this.hide('hud');
+    this.hide('checkpoint'); this.hide('gameover'); this.hide('host-lost');
+    this.hide('load-area');
+    this.show('loading');
+    this.show('start-area');
+    const room = this.linkedRoom();
+    const invite = $('room-invite');
+    if (room) {
+      $('ri-code').textContent = room;
+      invite.classList.remove('hidden');
+    } else {
+      invite.classList.add('hidden');
+    }
+  }
+
   // ---------------- menu ----------------
 
   bindMenu() {
@@ -228,13 +265,17 @@ export class UI {
     const best = localStorage.getItem('dtc-best-wave');
     if (best) $('best-wave').textContent = `Best run: wave ${best}`;
 
-    // joining via shared link (?room=CODE): show join-only, no host/code entry
-    const url = new URL(location.href);
-    const room = normalizeRoomCode(url.searchParams.get('room') || '');
-    if (room.length === 5) {
+    // joining via shared link (?room=CODE): make it crystal clear the
+    // player is entering one specific match — hide hosting, lock the code
+    const room = this.linkedRoom();
+    if (room) {
       $('join-code').value = room;
+      $('join-code').readOnly = true;
       $('host-btn').classList.add('hidden');
-      $('join-code').classList.add('hidden');
+      $('menu-linked').classList.remove('hidden');
+      $('menu-linked-code').textContent = room;
+      $('join-label').classList.add('hidden');
+      $('join-btn').innerHTML = `${icon('link')} Join this match`;
     }
   }
 
@@ -345,6 +386,13 @@ export class UI {
     // returning to the menu is only allowed once at least one hero exists
     $('char-back').classList.toggle('hidden', this.roster.chars.length === 0);
     $('char-name').value = this.charDraft.name;
+    // a hero's class is permanent: when editing, only that class shows —
+    // the other three are hidden so it can never be swapped
+    const editing = !!id;
+    $('char-class-grid').classList.toggle('locked', editing);
+    for (const card of document.querySelectorAll('.cc-card')) {
+      card.classList.toggle('hidden', editing && card.dataset.cls !== this.charDraft.cls);
+    }
     this.selectCharClass(this.charDraft.cls);
     this.renderCharInfo();
     this.renderColorSlots();
@@ -649,6 +697,9 @@ export class UI {
         const key = `${lvl}|${hp}|${mhp}|${xp}|${me[14]}|${me[18]}`;
         if (key !== this._statsKey) { this._statsKey = key; this.renderStats(me); }
       }
+      // hero name (so the player always sees who they are, top-left)
+      const myName = me[15] || 'Hero';
+      if (this._pbName !== myName) { this._pbName = myName; $('pb-name').textContent = myName; }
       $('pb-hp').style.width = `${(hp / mhp) * 100}%`;
       $('pb-hp-text').textContent = `${hp}/${mhp}`;
       $('pb-xp').style.width = `${(xp / xpn) * 100}%`;

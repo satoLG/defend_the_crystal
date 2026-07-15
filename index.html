@@ -13,12 +13,25 @@
     <canvas id="game-canvas"></canvas>
     <div id="vignette"></div>
 
-    <!-- ============ LOADING ============ -->
+    <!-- ============ LOADING / START ============ -->
     <div id="loading" class="screen">
-      <div class="panel center-panel">
+      <div class="panel center-panel start-panel">
+        <div class="title-crest"><i data-icon="crystal"></i></div>
         <h1 class="title">Defend<br/>the Crystal</h1>
-        <div class="load-bar"><div id="load-fill"></div></div>
-        <div id="load-label" class="muted">Summoning models…</div>
+        <div id="load-area">
+          <div class="load-bar"><div id="load-fill"></div></div>
+          <div id="load-label" class="muted">Summoning models…</div>
+        </div>
+        <div id="start-area" class="hidden">
+          <div id="room-invite" class="room-invite hidden">
+            <i data-icon="link"></i>
+            <div class="ri-text">
+              You're joining a specific match<br/>
+              <span>Room <b id="ri-code">·····</b></span>
+            </div>
+          </div>
+          <button id="start-btn-main" class="btn primary big"><i data-icon="play"></i> Play</button>
+        </div>
       </div>
     </div>
 
@@ -69,14 +82,23 @@
         <h1 class="title">Defend<br/>the Crystal</h1>
         <div id="best-wave" class="muted"></div>
 
+        <div id="menu-linked" class="room-invite hidden">
+          <i data-icon="link"></i>
+          <div class="ri-text">
+            You opened a link to a specific match<br/>
+            <span>Room <b id="menu-linked-code">·····</b> — pick a hero and join</span>
+          </div>
+        </div>
+
         <div class="field-label">Your heroes</div>
         <div id="hero-roster" class="hero-roster"></div>
 
         <div class="menu-actions">
           <button id="host-btn" class="btn primary big"><i data-icon="swords"></i> Host a match</button>
-          <div class="join-row">
-            <input id="join-code" maxlength="5" placeholder="CODE" autocomplete="off" />
-            <button id="join-btn" class="btn big">Join</button>
+          <div id="join-block">
+            <div class="join-label">Have a friend's room code?</div>
+            <input id="join-code" maxlength="5" placeholder="ENTER CODE" autocomplete="off" />
+            <button id="join-btn" class="btn big"><i data-icon="link"></i> Join match</button>
           </div>
         </div>
         <div id="menu-error" class="error-label"></div>
@@ -117,6 +139,7 @@
         <div class="pb-row">
           <span id="pb-class" title="View character stats"><i data-icon="cls-berserker"></i></span>
           <div class="pb-bars">
+            <div id="pb-name" class="pb-name"></div>
             <div class="bar hp"><div id="pb-hp"></div><span id="pb-hp-text"></span></div>
             <div class="bar xp"><div id="pb-xp"></div></div>
           </div>
