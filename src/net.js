@@ -63,24 +63,65 @@ const NOSTR_RELAYS = [
 // respective strategies' own defaults, which are already broad and
 // independent of Nostr; we just enable those transports below.
 
+// WebRTC ICE configuration. The transports above only *discover*
+// peers — the actual game data always flows over a direct WebRTC
+// connection. Without this, two players behind different home routers
+// can only gather their private LAN addresses, so a match only works
+// when everyone is on the same Wi-Fi.
+//
+//   * STUN lets each peer learn its public IP/port so most NATs can be
+//     traversed directly.
+//   * TURN relays the traffic when a direct path is impossible
+//     (symmetric NATs, strict corporate/mobile firewalls). The free
+//     OpenRelay project servers are used as a fallback; a match falls
+//     back to relaying only when a direct connection can't be formed.
+//
+// This mirrors the STUN defaults Trystero used to apply automatically
+// and adds TURN on top, restoring (and improving) cross-network play.
+const RTC_CONFIG = {
+  iceServers: [
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'stun:stun1.l.google.com:19302' },
+    { urls: 'stun:stun2.l.google.com:19302' },
+    { urls: 'stun:stun.relay.metered.ca:80' },
+    {
+      urls: 'turn:openrelay.metered.ca:80',
+      username: 'openrelayproject',
+      credential: 'openrelayproject',
+    },
+    {
+      urls: 'turn:openrelay.metered.ca:443',
+      username: 'openrelayproject',
+      credential: 'openrelayproject',
+    },
+    {
+      urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+      username: 'openrelayproject',
+      credential: 'openrelayproject',
+    },
+  ],
+};
+
 // Each transport is a named joiner. They are attempted in order and
 // any that fails to initialize is skipped, so a single broken
-// strategy can never take the others down with it.
+// strategy can never take the others down with it. Every transport
+// shares the same RTC config so the direct connection is NAT-friendly
+// no matter which one brokered the introduction.
 const TRANSPORTS = [
   {
     name: 'nostr',
     join: (code) => joinNostr(
-      { appId: NET.APP_ID, relayConfig: { urls: NOSTR_RELAYS } },
+      { appId: NET.APP_ID, relayConfig: { urls: NOSTR_RELAYS }, rtcConfig: RTC_CONFIG },
       code,
     ),
   },
   {
     name: 'torrent',
-    join: (code) => joinTorrent({ appId: NET.APP_ID }, code),
+    join: (code) => joinTorrent({ appId: NET.APP_ID, rtcConfig: RTC_CONFIG }, code),
   },
   {
     name: 'mqtt',
-    join: (code) => joinMqtt({ appId: NET.APP_ID }, code),
+    join: (code) => joinMqtt({ appId: NET.APP_ID, rtcConfig: RTC_CONFIG }, code),
   },
 ];
 
