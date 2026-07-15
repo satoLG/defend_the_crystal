@@ -1,10 +1,13 @@
-import { CLASSES, TOWERS, TOWER_LEVEL_MAX, TOWER_UPGRADE, CRYSTAL_BREACH_LIMIT, SKILLS, NAME_MAX } from './config.js';
+import {
+  CLASSES, TOWERS, TOWER_LEVEL_MAX, TOWER_UPGRADE, CRYSTAL_BREACH_LIMIT, SKILLS, NAME_MAX,
+  PETS, PET, petEffectText, petXpNext,
+} from './config.js';
 import { sfx, setSfxVolume } from './audio.js';
 import { normalizeRoomCode } from './utils.js';
 import { icon, mountIcons } from './icons.js';
 import { settings } from './settings.js';
 import { music } from './music.js';
-import { loadRoster, saveRoster, defaultCharacter } from './character.js';
+import { loadRoster, saveRoster, defaultCharacter, petRefOf, grantPetXp } from './character.js';
 import { getSlots } from './render/customize.js';
 
 // class accent colours (mirror the 3D CLASS_TINT) used to tint the
@@ -64,6 +67,9 @@ const bindTap = (el, fn) => {
 const entityImg = (name) =>
   `<img class="entity-img" src="${import.meta.env.BASE_URL || './'}img/${name}.png" alt="">`;
 
+const petImgSrc = (petId) =>
+  `${import.meta.env.BASE_URL || './'}img/pets/animal-${petId}.png`;
+
 // ============================================================
 // All DOM: screens, HUD, build cards, panels, toasts.
 // Game logic never touches the DOM directly — it goes via UI.
@@ -84,13 +90,21 @@ export class UI {
     this.isHost = false;
     this.skillReady = false;   // gated by this character's own 30s cooldown
     this.myCls = this.character.cls;
+    this.shopNear = false;     // standing at Tonho's stall (main.js feeds this)
+    this.petTab = 'mine';      // pet panel tab: 'mine' | 'shop'
+    this.petPanelOpen = false;
+    this.petPickerCtx = null;  // active pet-picker step callback bundle
+    this.ppPick = 'dog';       // selected starter in the picker
+    this.ppName = '';          // typed pet name in the picker
 
     mountIcons();
     this.bindStart();
     this.bindMenu();
     this.bindCharacter();
+    this.bindPetPicker();
     this.bindLobby();
     this.bindHud();
+    this.bindPets();
     this.bindOverlays();
     this.bindSettings();
   }
@@ -250,13 +264,13 @@ export class UI {
 
     $('host-btn').addEventListener('click', () => {
       sfx.click();
-      this.cb.onHost({ ...this.character, name: heroName() });
+      this.ensurePetThen(() => this.cb.onHost({ ...this.character, name: heroName() }));
     });
     $('join-btn').addEventListener('click', () => {
       sfx.click();
       const code = normalizeRoomCode($('join-code').value);
       if (code.length < 5) return this.menuError('Enter the 5-letter room code');
-      this.cb.onJoin(code, { ...this.character, name: heroName() });
+      this.ensurePetThen(() => this.cb.onJoin(code, { ...this.character, name: heroName() }));
     });
     $('join-code').addEventListener('input', (e) => {
       e.target.value = normalizeRoomCode(e.target.value);
@@ -283,7 +297,7 @@ export class UI {
 
   showMenu() {
     this.hide('loading'); this.hide('character'); this.hide('lobby'); this.hide('hud');
-    this.hide('checkpoint'); this.hide('gameover'); this.hide('host-lost');
+    this.hide('checkpoint'); this.hide('gameover'); this.hide('host-lost'); this.hide('pet-picker');
     this.preview?.stop();
     this.renderRoster();
     this.show('menu');
@@ -321,17 +335,126 @@ export class UI {
     });
 
     $('char-save').addEventListener('click', () => {
-      sfx.success();
       this.charDraft.name = ($('char-name').value.trim() || 'Hero').slice(0, NAME_MAX);
-      const chars = [...this.roster.chars];
-      const i = this.editingId ? chars.findIndex((c) => c.id === this.editingId) : -1;
-      if (i >= 0) chars[i] = { ...this.charDraft, id: this.editingId };
-      else chars.push(this.charDraft);
-      // the saved/created hero becomes the active one
-      this.roster = saveRoster(chars, this.charDraft.id);
-      this.character = this.activeChar();
-      this.myCls = this.character.cls;
-      this.showMenu();
+      // a hero with no pet yet (brand new, or one saved before pets
+      // existed) goes to step 2 — the pet picker — to choose & name its
+      // free starter; anyone who already has pets saves straight away
+      if (this.needsStarter) {
+        sfx.click();
+        this.openPetPicker({
+          allowBack: true,
+          onBack: () => this.showCharacter(this.editingId, true),
+          onConfirm: (id, name) => {
+            this.charDraft.pets = { ...this.charDraft.pets, [id]: { lvl: 1, xp: 0, name } };
+            this.charDraft.activePet = id;
+            this.commitCharDraft();
+          },
+        });
+      } else {
+        this.commitCharDraft();
+      }
+    });
+  }
+
+  // persist the working character draft into the roster and return to
+  // the menu (the saved/created hero becomes the active one)
+  commitCharDraft() {
+    sfx.success();
+    const chars = [...this.roster.chars];
+    const i = this.editingId ? chars.findIndex((c) => c.id === this.editingId) : -1;
+    if (i >= 0) chars[i] = { ...this.charDraft, id: this.editingId };
+    else chars.push(this.charDraft);
+    this.roster = saveRoster(chars, this.charDraft.id);
+    this.character = this.activeChar();
+    this.myCls = this.character.cls;
+    this.showMenu();
+  }
+
+  // ---------------- pet picker (creation step 2 / legacy normalize) ----------------
+
+  bindPetPicker() {
+    $('pp-grid').addEventListener('click', (e) => {
+      const card = e.target.closest('.pp-pet');
+      if (!card) return;
+      sfx.click();
+      this.ppPick = card.dataset.pet;
+      this.renderPetPicker();
+    });
+    $('pp-name').addEventListener('input', (e) => {
+      this.ppName = e.target.value.slice(0, PET.NAME_MAX);
+    });
+    $('pp-back').addEventListener('click', () => {
+      sfx.click();
+      const ctx = this.petPickerCtx;
+      this.petPickerCtx = null;
+      // always tear the picker down first so it can never linger over
+      // whatever comes next (menu / lobby); the × is an escape hatch too
+      this.hide('pet-picker');
+      ctx?.onBack?.();
+    });
+    $('pp-confirm').addEventListener('click', () => {
+      const ctx = this.petPickerCtx;
+      if (!ctx) return; // already handled — a stray second click
+      const id = PETS[this.ppPick] ? this.ppPick : 'dog';
+      const name = (this.ppName.trim() || PETS[id].name).slice(0, PET.NAME_MAX);
+      this.petPickerCtx = null;
+      this.hide('pet-picker');
+      ctx.onConfirm?.(id, name);
+    });
+  }
+
+  // ctx: { onConfirm(petId, petName), onBack?, allowBack?, intro?, confirmLabel? }
+  openPetPicker(ctx) {
+    this.petPickerCtx = ctx;
+    this.ppPick = 'dog';
+    this.ppName = '';
+    this.preview?.stop();
+    this.hide('loading'); this.hide('menu'); this.hide('character'); this.hide('lobby');
+    this.hide('hud'); this.hide('checkpoint'); this.hide('gameover'); this.hide('host-lost');
+    $('pp-back').classList.toggle('hidden', !ctx.allowBack);
+    if (ctx.intro) $('pp-intro').innerHTML = ctx.intro;
+    $('pp-confirm').textContent = ctx.confirmLabel || 'Save & continue';
+    $('pp-name').value = '';
+    this.renderPetPicker();
+    this.show('pet-picker');
+  }
+
+  renderPetPicker() {
+    const grid = $('pp-grid');
+    grid.innerHTML = '';
+    for (const [id, def] of Object.entries(PETS)) {
+      if (!def.starter) continue;
+      const card = document.createElement('button');
+      card.className = 'pp-pet' + (this.ppPick === id ? ' selected' : '');
+      card.dataset.pet = id;
+      card.innerHTML = `<img src="${petImgSrc(id)}" alt=""><span>${def.name}</span>`;
+      grid.appendChild(card);
+    }
+    const def = PETS[this.ppPick] || PETS.dog;
+    $('pp-detail-name').textContent = def.name;
+    $('pp-blurb').textContent = `${def.blurb} (${petEffectText(this.ppPick, 1)})`;
+    $('pp-name').placeholder = `Name your ${def.name.toLowerCase()}`;
+  }
+
+  // legacy heroes saved before pets existed have none; make them pick &
+  // name a starter (normalizing them) before a match can start
+  ensurePetThen(proceed) {
+    const c = this.character;
+    if (c.activePet && c.pets?.[c.activePet]) return proceed();
+    this.openPetPicker({
+      allowBack: false,
+      confirmLabel: 'Confirm pet',
+      intro: `${(c.name || '').trim() || 'Your hero'} needs a companion!<br/>Pick a starter pet and give it a name before you head out — it levels up permanently.`,
+      onConfirm: (id, name) => {
+        const chars = this.roster.chars.map((ch) =>
+          ch.id === c.id
+            ? { ...ch, pets: { ...(ch.pets || {}), [id]: { lvl: 1, xp: 0, name } }, activePet: id }
+            : ch);
+        this.roster = saveRoster(chars, c.id);
+        this.character = this.activeChar();
+        sfx.success();
+        proceed();
+      },
     });
   }
 
@@ -373,15 +496,27 @@ export class UI {
     }
   }
 
-  // id = edit that hero; null/undefined = create a fresh one
-  showCharacter(id = null) {
+  // id = edit that hero; null/undefined = create a fresh one.
+  // keepDraft = returning from the step-2 pet picker: keep the working
+  // draft (class/colours/name) exactly as the player left it.
+  showCharacter(id = null, keepDraft = false) {
     this.editingId = id;
-    const src = id ? this.roster.chars.find((c) => c.id === id) : null;
-    // work on a copy so "Save" is an explicit commit
-    this.charDraft = src
-      ? { id: src.id, name: src.name, cls: src.cls, colors: { ...src.colors } }
-      : defaultCharacter();
-    this.hide('loading'); this.hide('menu'); this.hide('lobby'); this.hide('hud');
+    if (!keepDraft) {
+      const src = id ? this.roster.chars.find((c) => c.id === id) : null;
+      // work on a copy so "Save" is an explicit commit — pets/coins ride
+      // along untouched so editing can never wipe them
+      this.charDraft = src
+        ? {
+            id: src.id, name: src.name, cls: src.cls, colors: { ...src.colors },
+            pets: JSON.parse(JSON.stringify(src.pets || {})),
+            activePet: src.activePet, coins: src.coins,
+          }
+        : defaultCharacter();
+      // a hero with no pet (brand new, or one saved before pets existed)
+      // is routed through the step-2 pet picker when it saves
+      this.needsStarter = !Object.keys(this.charDraft.pets || {}).length;
+    }
+    this.hide('loading'); this.hide('menu'); this.hide('lobby'); this.hide('hud'); this.hide('pet-picker');
     this.hide('checkpoint'); this.hide('gameover'); this.hide('host-lost');
     // returning to the menu is only allowed once at least one hero exists
     $('char-back').classList.toggle('hidden', this.roster.chars.length === 0);
@@ -429,7 +564,7 @@ export class UI {
     this.roomCode = code;
     this.isHost = isHost;
     this.preview?.stop();
-    this.hide('menu'); this.hide('character');
+    this.hide('menu'); this.hide('character'); this.hide('pet-picker');
     this.show('lobby');
     $('room-code').textContent = code;
     $('start-btn').classList.toggle('hidden', !isHost);
@@ -506,7 +641,7 @@ export class UI {
   }
 
   showHud() {
-    this.hide('menu'); this.hide('lobby');
+    this.hide('menu'); this.hide('lobby'); this.hide('pet-picker');
     this.show('hud');
     $('room-label').textContent = this.roomCode || '';
   }
@@ -530,7 +665,7 @@ export class UI {
       hint.classList.remove('hidden');
       hint.innerHTML = `<span class="hint-x">${icon('x')}</span>` + (item === 'obstacle'
         ? 'Place a block — tap here to cancel'
-        : `Place ${TOWERS[item].name} (${icon('coin')}${TOWERS[item].cost}) — tap here to cancel`);
+        : `Place ${TOWERS[item].name} (${icon('gem')}${TOWERS[item].cost}) — tap here to cancel`);
     } else {
       hint.classList.add('hidden');
     }
@@ -579,7 +714,7 @@ export class UI {
         (def.aoe ? `\nArea ${def.aoe}` : '');
     }
     const cost = maxed ? 0 : Math.round(def.cost * TOWER_UPGRADE.costMult[lvl]);
-    $('upg-btn').innerHTML = maxed ? 'Max level' : `Upgrade ${icon('coin')}${cost}`;
+    $('upg-btn').innerHTML = maxed ? 'Max level' : `Upgrade ${icon('gem')}${cost}`;
     $('upg-btn').disabled = maxed || (this.lastSnap && this.lastSnap.pts < cost);
     $('sell-btn').classList.remove('hidden');
     $('sell-btn').textContent = 'Sell';
@@ -590,6 +725,276 @@ export class UI {
     this.panelType = null;
     this.hide('upgrade-panel');
     this.cb.onPanelClose?.();
+  }
+
+  // ---------------- pets ----------------
+
+  // write the (mutated) active character back into the persisted roster
+  persistCharacter() {
+    this.roster = saveRoster(this.roster.chars, this.roster.activeId);
+    this.character = this.activeChar();
+  }
+
+  // the equipped pet as {id, lvl, name} — what the sim/net layer wants
+  activePetInfo() { return petRefOf(this.character); }
+
+  // gold coins picked up in a match are banked permanently, per character
+  addCoins(amt) {
+    this.character.coins += amt;
+    this.persistCharacter();
+    this._goldShown = null;
+    this.toast(`+${amt} gold coin${amt > 1 ? 's' : ''}!`, 'gold');
+    if (this.petPanelOpen) this.renderPetPanel();
+  }
+
+  // XP the hero collects also feeds its companion — permanently
+  grantPetXpFromPickup(amt) {
+    if (!this.character.activePet) return;
+    const gained = grantPetXp(this.character, amt);
+    this.persistCharacter();
+    if (gained > 0) {
+      const pet = this.character.pets[this.character.activePet];
+      if (pet) {
+        this.toast(`${pet.name} reached level ${pet.lvl}!`, 'gold');
+        sfx.levelUp();
+        this.cb.onPetChange?.(this.activePetInfo());
+      }
+    }
+    if (this.petPanelOpen && this.petTab === 'mine') this.renderPetPanel();
+    if (this.petDetailOpen) this.renderPetDetail();
+  }
+
+  equipPet(id) {
+    if (!this.character.pets[id] || this.character.activePet === id) return;
+    // swapping companions is only allowed while chatting with the vendor
+    if (!this.shopNear) return this.toast("Only at Tonho's stall can you switch pets", 'error');
+    this.character.activePet = id;
+    this.persistCharacter();
+    sfx.success();
+    this.renderPetPanel();
+    this.cb.onPetChange?.(this.activePetInfo());
+  }
+
+  renamePet(id, name) {
+    const pet = this.character.pets[id];
+    if (!pet) return;
+    pet.name = (String(name).trim() || PETS[id].name).slice(0, PET.NAME_MAX);
+    this.persistCharacter();
+    this.renderPetPanel();
+    if (this.character.activePet === id) this.cb.onPetChange?.(this.activePetInfo());
+  }
+
+  buyPet(id) {
+    const def = PETS[id];
+    if (!def || this.character.pets[id]) return;
+    if (!this.shopNear) return this.toast("Visit Tonho's stall in the sanctuary to buy", 'error');
+    if (this.character.coins < def.price) return this.toast('Not enough gold coins', 'error');
+    this.character.coins -= def.price;
+    this.character.pets[id] = { lvl: 1, xp: 0, name: def.name };
+    const firstPet = !this.character.activePet;
+    if (firstPet) this.character.activePet = id;
+    this.persistCharacter();
+    this._goldShown = null;
+    sfx.success();
+    this.toast(`${def.name} joined your team — name it!`, 'gold');
+    // jump to My pets and open the name field right away so the new
+    // companion never sits with a generic name
+    this.petTab = 'mine';
+    this.renderPetPanel();
+    const card = $('pet-list').querySelector(`.pet-card[data-pet="${id}"]`);
+    if (card) this.startPetRename(card, id);
+    if (firstPet) this.cb.onPetChange?.(this.activePetInfo());
+  }
+
+  // main.js flips this as the hero walks up to / away from the stall.
+  // The full manage/shop panel is ONLY reachable here (i.e. during
+  // checkpoints, when you can roam to the vendor); walking away closes it.
+  setShopNear(near) {
+    if (near === this.shopNear) return;
+    this.shopNear = near;
+    $('petshop-prompt').classList.toggle('hidden', !near);
+    if (near) sfx.notify();
+    else if (this.petPanelOpen) this.closePetPanel();
+    if (this.petPanelOpen) this.renderPetPanel();
+  }
+
+  bindPets() {
+    // the HUD pet row only opens a read-only detail card
+    bindTap($('pet-icon'), () => { sfx.click(); this.openPetDetail(); });
+    $('pd-close').addEventListener('click', () => { sfx.click(); this.closePetDetail(); });
+    $('pet-detail').addEventListener('click', (e) => {
+      if (e.target === $('pet-detail')) this.closePetDetail();
+    });
+    // switching & buying live only at Tonho's stall (the shop prompt)
+    bindTap($('petshop-prompt'), () => { sfx.click(); this.openPetPanel('mine'); });
+    $('pet-close').addEventListener('click', () => { sfx.click(); this.closePetPanel(); });
+    $('pet-panel').addEventListener('click', (e) => {
+      if (e.target === $('pet-panel')) this.closePetPanel();
+    });
+    $('pet-tab-mine').addEventListener('click', () => { sfx.click(); this.petTab = 'mine'; this.renderPetPanel(); });
+    $('pet-tab-shop').addEventListener('click', () => { sfx.click(); this.petTab = 'shop'; this.renderPetPanel(); });
+
+    // one delegated handler covers equip / rename / buy on every card
+    $('pet-list').addEventListener('click', (e) => {
+      const card = e.target.closest('.pet-card');
+      if (!card) return;
+      const id = card.dataset.pet;
+      const act = e.target.closest('[data-act]')?.dataset.act;
+      if (act === 'equip') this.equipPet(id);
+      else if (act === 'buy') this.buyPet(id);
+      else if (act === 'rename') this.startPetRename(card, id);
+    });
+  }
+
+  openPetPanel(tab = 'mine') {
+    if (!this.shopNear) return; // manage/shop is vendor-only
+    this.petTab = tab;
+    this.petPanelOpen = true;
+    this.renderPetPanel();
+    this.show('pet-panel');
+  }
+
+  closePetPanel() {
+    this.petPanelOpen = false;
+    this.hide('pet-panel');
+  }
+
+  // read-only card for the currently-equipped pet, opened from the HUD
+  openPetDetail() {
+    if (!this.character.activePet) return;
+    this.petDetailOpen = true;
+    this.renderPetDetail();
+    this.show('pet-detail');
+  }
+
+  closePetDetail() {
+    this.petDetailOpen = false;
+    this.hide('pet-detail');
+  }
+
+  // the HUD pet row: a smaller round pet icon under the class badge, the
+  // pet name, its XP bar and level — the pet's mirror of the player row
+  refreshPetHud() {
+    const row = $('pet-row');
+    const id = this.character.activePet;
+    const pet = id && this.character.pets[id];
+    if (!pet) { row.classList.add('hidden'); return; }
+    row.classList.remove('hidden');
+    if (this._petHudKey !== id) {
+      this._petHudKey = id;
+      $('pet-icon').innerHTML = `<img src="${petImgSrc(id)}" alt="">`;
+    }
+    const maxed = pet.lvl >= PET.LEVEL_CAP;
+    const next = petXpNext(pet.lvl);
+    $('pb-pet-name').textContent = pet.name;
+    $('pb-pet-level').textContent = pet.lvl;
+    $('pb-pet-xp').style.width = `${maxed ? 100 : Math.min((pet.xp / next) * 100, 100)}%`;
+  }
+
+  renderPetDetail() {
+    const id = this.character.activePet;
+    const pet = id && this.character.pets[id];
+    if (!pet) return this.closePetDetail();
+    const maxed = pet.lvl >= PET.LEVEL_CAP;
+    const next = petXpNext(pet.lvl);
+    $('pd-img').src = petImgSrc(id);
+    $('pd-name').textContent = pet.name;
+    $('pd-sub').textContent = `${PETS[id].name} · Level ${pet.lvl}${maxed ? ' · MAX' : ''}`;
+    $('pd-effect').textContent = petEffectText(id, pet.lvl);
+    $('pd-xpfill').style.width = `${maxed ? 100 : Math.min((pet.xp / next) * 100, 100)}%`;
+    $('pd-xptext').textContent = maxed ? 'Maxed out' : `${pet.xp} / ${next} XP to level ${pet.lvl + 1}`;
+  }
+
+  // swap the pet's name for an inline input; Enter/blur commits
+  startPetRename(card, id) {
+    const span = card.querySelector('.pet-pname');
+    if (!span || card.querySelector('input')) return;
+    const input = document.createElement('input');
+    input.maxLength = PET.NAME_MAX;
+    input.value = this.character.pets[id]?.name || '';
+    input.className = 'pet-rename';
+    span.replaceWith(input);
+    input.focus();
+    input.select();
+    const commit = () => this.renamePet(id, input.value);
+    input.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter') commit();
+      else if (ev.key === 'Escape') this.renderPetPanel();
+    });
+    input.addEventListener('blur', commit);
+  }
+
+  renderPetPanel() {
+    $('pet-gold-label').textContent = this.character.coins;
+    $('pet-tab-mine').classList.toggle('active', this.petTab === 'mine');
+    $('pet-tab-shop').classList.toggle('active', this.petTab === 'shop');
+    $('pet-shop-hint').classList.toggle('hidden', this.petTab !== 'shop' || this.shopNear);
+    const host = $('pet-list');
+    host.innerHTML = '';
+    if (this.petTab === 'mine') this.renderOwnedPets(host);
+    else this.renderPetShop(host);
+  }
+
+  renderOwnedPets(host) {
+    const owned = Object.keys(PETS).filter((id) => this.character.pets[id]);
+    if (!owned.length) {
+      host.innerHTML = '<div class="muted pet-empty">No pets yet — buy one at Tonho\'s stall in the sanctuary.</div>';
+      return;
+    }
+    for (const id of owned) {
+      const pet = this.character.pets[id];
+      const active = this.character.activePet === id;
+      const maxed = pet.lvl >= PET.LEVEL_CAP;
+      const next = petXpNext(pet.lvl);
+      const card = document.createElement('div');
+      card.className = 'pet-card' + (active ? ' active' : '');
+      card.dataset.pet = id;
+      card.innerHTML =
+        `<img class="pet-img" src="${petImgSrc(id)}" alt="">
+         <div class="pet-meta">
+           <div class="pet-name-row">
+             <span class="pet-pname"></span>
+             <button class="pet-edit" data-act="rename" title="Rename">✎</button>
+           </div>
+           <div class="pet-kind">${PETS[id].name} · Lv ${pet.lvl}${maxed ? ' <b class="pet-max">MAX</b>' : ''}</div>
+           <div class="pet-effect">${petEffectText(id, pet.lvl)}</div>
+           <div class="pet-xpbar"><div class="pet-xpfill" style="width:${maxed ? 100 : Math.min((pet.xp / next) * 100, 100)}%"></div></div>
+         </div>
+         <div class="pet-actions">
+           ${active
+             ? `<span class="pet-equipped">${icon('paw')} With you</span>`
+             : '<button class="btn small primary" data-act="equip">Equip</button>'}
+         </div>`;
+      // pet names are user input — set as text, never as HTML
+      card.querySelector('.pet-pname').textContent = pet.name;
+      host.appendChild(card);
+    }
+  }
+
+  renderPetShop(host) {
+    const forSale = Object.entries(PETS).sort((a, b) => a[1].price - b[1].price);
+    for (const [id, def] of forSale) {
+      const owned = !!this.character.pets[id];
+      const afford = this.character.coins >= def.price;
+      const card = document.createElement('div');
+      card.className = 'pet-card shop' + (owned ? ' owned' : '');
+      card.dataset.pet = id;
+      card.innerHTML =
+        `<img class="pet-img" src="${petImgSrc(id)}" alt="">
+         <div class="pet-meta">
+           <div class="pet-kind">${def.name}${def.starter ? ' <b class="pet-starter">STARTER</b>' : ''}</div>
+           <div class="pet-effect">${def.blurb}</div>
+           <div class="pet-effect muted">Lv 1: ${petEffectText(id, 1)} → Lv ${PET.LEVEL_CAP}: ${petEffectText(id, PET.LEVEL_CAP)}</div>
+         </div>
+         <div class="pet-actions">
+           ${owned
+             ? '<span class="pet-equipped">Owned</span>'
+             : `<button class="btn small primary" data-act="buy" ${!this.shopNear || !afford ? 'disabled' : ''}>
+                  ${icon('goldcoin')}${def.price}
+                </button>`}
+         </div>`;
+      host.appendChild(card);
+    }
   }
 
   // ---------------- character stats sheet ----------------
@@ -624,19 +1029,40 @@ export class UI {
       ['Defense', `${Math.round((def.def || 0) * 100)}%`],
       ['Range', `${(def.range || 0).toFixed(1)}`],
       ['Attack speed', `${(def.rate || 0).toFixed(2)}/s`],
-      ['Move speed', `${(def.speed || 0).toFixed(1)}`],
+      // snapshot row 19 carries the live (pet-buffed) move speed
+      ['Move speed', `${(typeof me[19] === 'number' && me[19] > 0 ? me[19] : def.speed || 0).toFixed(1)}`],
       ['Knockback', `${(def.knockback || 0).toFixed(1)}`],
     ];
     if (def.aoe) rows.push(['Blast area', `${def.aoe.toFixed(1)}`]);
     rows.push(['Experience', `${xp} / ${xpn}`]);
     rows.push(['Kills', `${kills}`]);
 
+    // pet bonus block: read the companion off the snapshot row so it's
+    // clear where the extra stats are coming from (pet id/name/level at
+    // snapshot indices 20/21/22)
+    const petId = me[20], petName = me[21], petLvl = me[22];
+    const petBlock = (petId && PETS[petId])
+      ? `<div class="stat-pet">
+           <img class="stat-pet-img" src="${petImgSrc(petId)}" alt="">
+           <div class="stat-pet-meta">
+             <span class="sp-name">${this.escapeHtml(petName || PETS[petId].name)} · ${PETS[petId].name} Lv ${petLvl}</span>
+             <span class="sp-desc">${petEffectText(petId, petLvl)}</span>
+           </div>
+         </div>`
+      : '';
+
     $('stats-body').innerHTML =
       rows.map(([k, v]) => `<div class="stat-line"><span class="sk">${k}</span><span class="sv">${v}</span></div>`).join('') +
+      petBlock +
       `<div class="stat-power">
          <span class="sp-name">${SKILLS[cls]?.name || 'Special'}</span>
          <span class="sp-desc">${POWER_DESC[cls] || ''}</span>
        </div>`;
+  }
+
+  escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, (c) =>
+      ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   }
 
   // called every frame with the freshest snapshot
@@ -650,6 +1076,13 @@ export class UI {
       : snap.ph === 'build' ? `${snap.w + 1} next` : `${snap.w}`;
 
     $('points-label').textContent = snap.pts;
+    // permanent gold (per character, banked locally)
+    if (this._goldShown !== this.character.coins) {
+      this._goldShown = this.character.coins;
+      $('gold-label').textContent = this.character.coins;
+    }
+    // companion pet row (mirrors the player row just above it)
+    this.refreshPetHud();
     const remaining = Math.max(CRYSTAL_BREACH_LIMIT - snap.br, 0);
     $('crystal-hp').textContent = remaining;
     $('crystal-chip').classList.toggle('warn', remaining <= 3);

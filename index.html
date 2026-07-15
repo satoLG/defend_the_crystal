@@ -75,6 +75,24 @@
       </div>
     </div>
 
+    <!-- ============ PET PICKER (creation step 2 / legacy normalize) ============ -->
+    <div id="pet-picker" class="screen hidden">
+      <div class="panel char-panel pp-panel">
+        <button id="pp-back" class="btn small corner-btn corner-left hidden" title="Back"><i data-icon="x"></i></button>
+        <h2><i data-icon="paw"></i> Your first pet</h2>
+        <p id="pp-intro" class="muted pp-intro">Every hero brings one companion along.<br/>Pick a starter and give it a name — it levels up permanently and follows you into battle.</p>
+        <div id="pp-grid" class="pp-grid"></div>
+        <div class="pp-detail">
+          <div id="pp-detail-name" class="pp-detail-name"></div>
+          <div id="pp-blurb" class="muted pp-blurb"></div>
+        </div>
+        <div class="char-foot">
+          <input id="pp-name" maxlength="10" autocomplete="off" placeholder="Pet name" />
+          <button id="pp-confirm" class="btn primary big">Save &amp; continue</button>
+        </div>
+      </div>
+    </div>
+
     <!-- ============ MAIN MENU ============ -->
     <div id="menu" class="screen hidden">
       <div class="panel menu-panel">
@@ -129,8 +147,8 @@
     <div id="hud" class="hidden">
       <div id="hud-top">
         <div class="hud-chip" id="wave-chip"><i data-icon="wave"></i> <span id="wave-label">–</span></div>
-        <div class="hud-chip gold" id="points-chip"><i data-icon="coin"></i> <span id="points-label">0</span></div>
-        <div class="hud-chip" id="crystal-chip"><i data-icon="gem"></i> <span id="crystal-hp">10</span></div>
+        <div class="hud-chip crystal" id="points-chip" title="Crystal points — fragments from slain foes, spent on towers"><i data-icon="gem"></i> <span id="points-label">0</span></div>
+        <div class="hud-chip life" id="crystal-chip" title="Crystal health"><i data-icon="heart"></i> <span id="crystal-hp">10</span></div>
         <div class="hud-chip subtle" id="room-chip" title="Room code — allies can join mid-match"><i data-icon="link"></i> <span id="room-label"></span></div>
         <button class="hud-chip subtle" id="hud-settings" title="Settings"><i data-icon="gear"></i></button>
       </div>
@@ -139,11 +157,22 @@
         <div class="pb-row">
           <span id="pb-class" title="View character stats"><i data-icon="cls-berserker"></i></span>
           <div class="pb-bars">
-            <div id="pb-name" class="pb-name"></div>
+            <div class="pb-name-row">
+              <div id="pb-name" class="pb-name"></div>
+              <div class="pb-gold" title="Gold coins — spend them at the sanctuary pet vendor"><i data-icon="goldcoin"></i><span id="gold-label">0</span></div>
+            </div>
             <div class="bar hp"><div id="pb-hp"></div><span id="pb-hp-text"></span></div>
             <div class="bar xp"><div id="pb-xp"></div></div>
           </div>
           <span id="pb-level" class="pb-lvl">1</span>
+        </div>
+        <div class="pb-row pb-pet-row hidden" id="pet-row">
+          <button id="pet-icon" class="pb-pet-icon" title="Pet details"></button>
+          <div class="pb-bars">
+            <div id="pb-pet-name" class="pb-name pb-pet-name"></div>
+            <div class="bar xp pet"><div id="pb-pet-xp"></div></div>
+          </div>
+          <span id="pb-pet-level" class="pb-lvl pet">1</span>
         </div>
       </div>
 
@@ -165,15 +194,15 @@
         </button>
         <button class="build-card" data-item="ballista">
           <span class="bc-icon"><img class="entity-img" src="./img/tower-ballista.png" alt=""></span><span class="bc-name">Ballista</span>
-          <span class="bc-cost"><i data-icon="coin"></i><span data-cost="ballista"></span></span>
+          <span class="bc-cost"><i data-icon="gem"></i><span data-cost="ballista"></span></span>
         </button>
         <button class="build-card" data-item="catapult">
           <span class="bc-icon"><img class="entity-img" src="./img/tower-catapult.png" alt=""></span><span class="bc-name">Catapult</span>
-          <span class="bc-cost"><i data-icon="coin"></i><span data-cost="catapult"></span></span>
+          <span class="bc-cost"><i data-icon="gem"></i><span data-cost="catapult"></span></span>
         </button>
         <button class="build-card" data-item="cannon">
           <span class="bc-icon"><img class="entity-img" src="./img/tower-cannon.png" alt=""></span><span class="bc-name">Cannon</span>
-          <span class="bc-cost"><i data-icon="coin"></i><span data-cost="cannon"></span></span>
+          <span class="bc-cost"><i data-icon="gem"></i><span data-cost="cannon"></span></span>
         </button>
         <button id="startwave-btn" class="btn primary">
           <span id="startwave-label">Start<br/>wave</span>
@@ -204,6 +233,8 @@
         <div id="bb-name"></div>
         <div id="bb-flavor"></div>
       </div>
+
+      <button id="petshop-prompt" class="hidden"><i data-icon="paw"></i> Pet Shop</button>
 
       <div id="toasts"></div>
     </div>
@@ -246,6 +277,41 @@
           </div>
         </div>
         <div id="stats-body" class="stats-grid"></div>
+      </div>
+    </div>
+
+    <!-- ============ PET DETAIL (read-only, from the HUD pet row) ============ -->
+    <div id="pet-detail" class="screen overlay hidden">
+      <div class="panel center-panel pet-detail-modal">
+        <button id="pd-close" class="btn small corner-btn" title="Close"><i data-icon="x"></i></button>
+        <div class="pd-head">
+          <img id="pd-img" class="pd-img" alt="">
+          <div class="pd-headmeta">
+            <span id="pd-name" class="pd-name"></span>
+            <span id="pd-sub" class="muted"></span>
+          </div>
+        </div>
+        <div id="pd-effect" class="pd-effect"></div>
+        <div class="pd-xp"><div id="pd-xpfill" class="pd-xpfill"></div></div>
+        <div id="pd-xptext" class="muted pd-xptext"></div>
+        <div class="pd-hint muted">Visit Tonho's stall in the sanctuary to switch or buy pets.</div>
+      </div>
+    </div>
+
+    <!-- ============ PET PANEL (manage companions + Tonho's shop) ============ -->
+    <div id="pet-panel" class="screen overlay hidden">
+      <div class="panel center-panel pet-modal">
+        <button id="pet-close" class="btn small corner-btn" title="Close"><i data-icon="x"></i></button>
+        <h2><i data-icon="paw"></i> Pets</h2>
+        <div class="pet-gold"><i data-icon="goldcoin"></i> <span id="pet-gold-label">0</span> gold coins</div>
+        <div class="pet-tabs">
+          <button id="pet-tab-mine" class="pet-tab active">My pets</button>
+          <button id="pet-tab-shop" class="pet-tab">Shop</button>
+        </div>
+        <div id="pet-shop-hint" class="muted pet-shop-hint hidden">
+          Gold coins drop from mini-bosses and bosses.<br/>Visit Tonho's stall in the sanctuary plaza to buy.
+        </div>
+        <div id="pet-list" class="pet-list"></div>
       </div>
     </div>
 

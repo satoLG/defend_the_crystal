@@ -1,6 +1,6 @@
 import { loadAssets } from './render/assets.js';
 import { GameScene } from './render/scene.js';
-import { GameView } from './render/view.js';
+import { GameView, PET_SHOP_POS, PET_SHOP_RADIUS } from './render/view.js';
 import { CharacterPreview } from './render/preview.js';
 import { Sim } from './sim/sim.js';
 import { Grid, worldToCell, cellToWorld, canJumpFrom, computeDashEnd } from './sim/grid.js';
@@ -8,7 +8,11 @@ import { Net, selfId } from './net.js';
 import { Input } from './input.js';
 import { UI } from './ui.js';
 import { armAudioOnFirstGesture, bindAudioLifecycle, sfx, setSfxVolume } from './audio.js';
-import { CLASSES, PLAYER, NET, SIM_DT, TOWERS, TOWER_UPGRADE, GRID, JUMP, SKILLS } from './config.js';
+import {
+  CLASSES, PLAYER, NET, SIM_DT, TOWERS, TOWER_UPGRADE, GRID, JUMP, SKILLS,
+  petEffects, jumpDurFor,
+} from './config.js';
+import { petRefOf } from './character.js';
 import { makeRoomCode, clamp, lerp, dist2d } from './utils.js';
 import { settings } from './settings.js';
 import { music } from './music.js';
@@ -74,6 +78,9 @@ async function boot() {
     onSkill: () => doSkill(),
     onBuildMode: (on) => { gs.setBuildMode(on); if (!on) view.clearGhost(); },
     onPanelClose: () => gs.hideRange(),
+    // the equipped pet changed (swap / rename / level-up) — tell the
+    // host so the buffs & the follower everyone sees update live
+    onPetChange: (pet) => { if (state.started) sendAction({ t: 'pet', pet }); },
     onExit: () => location.reload(),
   });
 
@@ -114,12 +121,12 @@ function hostGame(character) {
   const code = makeRoomCode();
   state.net = new Net(code);
   state.sim = new Sim();
-  state.sim.addPlayer(selfId, character.name, character.cls, character.colors);
+  state.sim.addPlayer(selfId, character.name, character.cls, character.colors, petRefOf(character));
   syncSelfFromSim();
 
   state.net.on('hello', (data, peerId) => {
     if (!state.sim.getPlayer(peerId)) {
-      state.sim.addPlayer(peerId, data?.name, data?.cls, data?.colors);
+      state.sim.addPlayer(peerId, data?.name, data?.cls, data?.colors, data?.pet);
     }
     broadcastLobby();
   });
@@ -155,6 +162,7 @@ function joinGame(code, character) {
 
   const hello = () => state.net.send('hello', {
     name: character.name, cls: character.cls, colors: character.colors,
+    pet: petRefOf(character),
   });
   state.net.onPeerJoin = () => hello();
 
@@ -333,14 +341,21 @@ function onKeyAction(action) {
 // jumping over grid towers / obstacles
 // ---------------------------------------------------------
 
+// how many blocked cells in a row the local hero can clear (monkey pet)
+function localJumpCells() {
+  const pet = ui.activePetInfo();
+  return pet ? petEffects(pet.id, pet.lvl).jump : 1;
+}
+
 function doJump() {
   const s = state.self;
   if (!state.started || state.over || s.dead || s.jump || s.dash) return false;
   if (state.role === 'client' && !state.selfInit) return false;
-  const info = canJumpFrom(clientGridRef(), s.x, s.z, s.yaw);
+  const info = canJumpFrom(clientGridRef(), s.x, s.z, s.yaw, localJumpCells());
   if (!info) return false;
-  s.jump = { fx: s.x, fz: s.z, tx: info.to.x, tz: info.to.z, t: 0, dur: JUMP.DUR };
-  view.startJump(selfId, JUMP.DUR);
+  const dur = jumpDurFor(info.span);
+  s.jump = { fx: s.x, fz: s.z, tx: info.to.x, tz: info.to.z, t: 0, dur };
+  view.startJump(selfId, dur);
   sfx.jump();
   sendAction({ t: 'jump', yaw: Math.round(s.yaw * 100) / 100 });
   return true;
@@ -351,7 +366,7 @@ function updateJumpButton() {
   const s = state.self;
   const ok = state.started && !state.over && !s.dead && !s.jump && !s.dash &&
     (state.role === 'host' || state.selfInit) &&
-    !!canJumpFrom(clientGridRef(), s.x, s.z, s.yaw);
+    !!canJumpFrom(clientGridRef(), s.x, s.z, s.yaw, localJumpCells());
   if (ok !== jumpWasEnabled) {
     jumpWasEnabled = ok;
     ui.setJumpEnabled(ok);
@@ -418,7 +433,7 @@ function handleEvent(ev) {
       if (ev.ph === 'build' && ev.n > 1) sfx.waveClear();
       break;
     case 'heal':
-      ui.toast(`Checkpoint! +${ev.bonus} points, everyone healed`, 'gold');
+      ui.toast(`Checkpoint! +${ev.bonus} crystals, everyone healed`, 'gold');
       sfx.levelUp();
       break;
     case 'shoot': sfx.shoot(); break;
@@ -447,7 +462,20 @@ function handleEvent(ev) {
       if (ev.id === selfId) { ui.toast(`Level ${ev.lvl}!`, 'gold'); sfx.levelUp(); }
       break;
     case 'pickup':
-      if (ev.id === selfId) (ev.k === 'pts' ? sfx.coin : sfx.xp)();
+      if (ev.id === selfId) {
+        if (ev.k === 'gold') {
+          // permanent currency — banked straight into the character
+          sfx.coin();
+          ui.addCoins(ev.amt);
+        } else {
+          (ev.k === 'pts' ? sfx.coin : sfx.xp)();
+          // the companion pet grows with every XP orb its owner takes
+          if (ev.k === 'xp') ui.grantPetXpFromPickup(ev.amt);
+        }
+      }
+      break;
+    case 'petswap':
+      if (ev.id === selfId) sfx.notify();
       break;
     case 'jump':
       // own jump is predicted locally in doJump()
@@ -498,7 +526,10 @@ function syncSelfFromSim() {
 function reconcileSelf(snap) {
   const me = snap.pl.find((r) => r[0] === selfId);
   if (!me) return;
-  state.self.speed = CLASSES[me[1]]?.speed || 4;
+  // row 19 carries the pet-adjusted speed (cat/dog buffs)
+  state.self.speed = (typeof me[19] === 'number' && me[19] > 0)
+    ? me[19]
+    : (CLASSES[me[1]]?.speed || 4);
   state.self.dead = me[11] === 1;
   // mid-dash the host briefly lags far behind the predicted position —
   // don't let that trip the teleport-back threshold
@@ -596,6 +627,9 @@ function frame(t) {
       state.sim.step(SIM_DT);
       simAccum -= SIM_DT;
     }
+    // keep local prediction speed in sync with pet buffs (cat/dog)
+    const meSim = state.sim.getPlayer(selfId);
+    if (meSim) state.self.speed = meSim.speed;
     const events = state.sim.drainEvents();
     if (events.length) {
       for (const ev of events) handleEvent(ev);
@@ -643,6 +677,12 @@ function frame(t) {
     gs.clearFollow();
   }
 
+  // standing at Tonho's stall in the plaza unlocks buying at the shop
+  const atShop = state.started && !state.over && !state.self.dead &&
+    (state.role === 'host' || state.selfInit) &&
+    dist2d(state.self.x, state.self.z, PET_SHOP_POS.x, PET_SHOP_POS.z) < PET_SHOP_RADIUS;
+  ui.setShopNear(atShop);
+
   gs.update(dt);
   if (view) view.update(dt, gs.camera, selfPose());
   gs.render();
@@ -656,5 +696,6 @@ function selfPose() {
 
 boot();
 
-// dev/debug handle (also handy for automated testing)
+// dev/debug handles (also handy for automated testing)
 window.__dtc = state;
+window.__dtcRefs = { get view() { return view; }, get ui() { return ui; }, get gs() { return gs; } };

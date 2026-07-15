@@ -4,6 +4,7 @@ import {
   CLASSES, PLAYER, TOWERS, TOWER_LEVEL_MAX, TOWER_UPGRADE, OBSTACLES,
   OBSTACLE_STOCK_CAP, ENEMIES, ENEMY, WAVES, SCALING, scaleFor,
   CRYSTAL_BREACH_LIMIT, GRID, JUMP, DROPS, SUMMON, BOSSES, SKILLS, NAME_MAX,
+  PET, GOLD, petEffects, sanitizePetRef, jumpDurFor,
 } from '../config.js';
 import {
   Grid, cellToWorld, worldToCell, canJumpFrom, enemyJumpShortcut, idx,
@@ -54,7 +55,7 @@ export class Sim {
 
   // ---------------- players ----------------
 
-  addPlayer(id, name, cls, colors) {
+  addPlayer(id, name, cls, colors, pet = null) {
     if (this.getPlayer(id)) return;
     if (!CLASSES[cls]) cls = 'berserker';
     const base = CLASSES[cls];
@@ -66,11 +67,17 @@ export class Sim {
       hp: base.hp, maxHp: base.hp, atk: base.atk, def: base.def,
       range: base.range, rate: base.rate, speed: base.speed,
       aoe: base.aoe || 0, kbPower: base.knockback,
+      // raw = class base grown by hero level-ups only; the pet bonus is
+      // layered on top by applyPetStats so it can be swapped mid-match
+      rawMaxHp: base.hp, rawAtk: base.atk,
+      pet: sanitizePetRef(pet),
       lvl: 1, xp: 0, xpNext: this.xpNext(1),
       dead: false, respawnT: 0, atkCd: 0, lastDmg: -99, jumpT: 0,
       skillCd: 0, wallT: 0, dashT: 0,
       kills: 0, obst: 0, lastInputT: this.time,
     });
+    this.applyPetStats(p);
+    p.hp = p.maxHp;
     if (this.phase !== 'lobby') {
       // late joiner: give them the starting obstacle stock
       p.obst = scaleFor(SCALING.startObstacles, this.playerCount());
@@ -102,6 +109,40 @@ export class Sim {
   }
 
   xpNext(lvl) { return Math.round(PLAYER.XP_BASE * Math.pow(lvl, PLAYER.XP_POW)); }
+
+  // (Re)derive every pet-affected stat from the raw (hero-level-scaled)
+  // values + the equipped pet's effects. Safe to call at any time: on
+  // join, on every hero level-up and whenever the pet is swapped.
+  applyPetStats(p) {
+    const base = CLASSES[p.cls];
+    const fx = petEffects(p.pet?.id, p.pet?.lvl);
+    p.maxHp = Math.round(p.rawMaxHp * fx.hp);
+    p.atk = p.rawAtk * fx.atk;
+    p.def = Math.min(base.def + fx.def, PET.DEF_CAP);
+    p.speed = base.speed * fx.spd;
+    p.rate = base.rate * fx.rate;
+    p.kbPower = base.knockback * fx.kbMult;
+    p.critCh = fx.crit;
+    p.luck = fx.luck;
+    p.ptsMult = fx.pts;
+    p.collectCells = DROPS.COLLECT_CELLS + fx.collect;
+    p.kbResist = fx.kbResist;
+    p.kbDealt = fx.kbDealt;
+    p.jumpCells = fx.jump;
+    p.regenMult = fx.regen;
+    p.hp = Math.min(p.hp, p.maxHp);
+  }
+
+  // swap (or unequip) the companion pet — allowed at any moment; the
+  // owning client already validated ownership, the host only sanity-
+  // checks the reference and re-derives the stats
+  trySetPet(p, act) {
+    const pet = sanitizePetRef(act?.pet);
+    const changed = p.pet?.id !== pet?.id;
+    p.pet = pet;
+    this.applyPetStats(p);
+    if (changed && this.phase !== 'lobby') this.emit({ t: 'petswap', id: p.id });
+  }
 
   // client-authoritative position, sanity-clamped by the host
   setInput(id, { x, z, yaw, m }) {
@@ -146,7 +187,7 @@ export class Sim {
 
   restart() {
     // wipe entities, keep the roster
-    const roster = this.players.entities.map((p) => ({ id: p.id, name: p.name, cls: p.cls, colors: p.colors }));
+    const roster = this.players.entities.map((p) => ({ id: p.id, name: p.name, cls: p.cls, colors: p.colors, pet: p.pet }));
     for (const e of [...this.enemies.entities]) this.removeEnemy(e);
     for (const t of [...this.towers.entities]) this.world.remove(t);
     for (const o of [...this.obstacles.entities]) this.world.remove(o);
@@ -158,7 +199,7 @@ export class Sim {
     this.pending = [];
     this.drops = [];
     this.contReady.clear();
-    for (const r of roster) this.addPlayer(r.id, r.name, r.cls, r.colors);
+    for (const r of roster) this.addPlayer(r.id, r.name, r.cls, r.colors, r.pet);
     this.start();
     this.emit({ t: 'restart' });
   }
@@ -235,6 +276,7 @@ export class Sim {
       case 'sell': return this.trySell(p, act);
       case 'jump': return this.tryJump(p, act);
       case 'skill': return this.trySkill(p, act);
+      case 'pet': return this.trySetPet(p, act);
       case 'start': if (this.phase === 'build') this.startWave(); return;
       case 'cont': return this.setContinue(id);
       case 'restart': if (this.phase === 'over') this.restart(); return;
@@ -261,7 +303,7 @@ export class Sim {
     if (!isObstacle && !TOWERS[item]) return;
     if (isObstacle && p.obst < 1) return this.deny(p, 'No blocks left — earn more each wave');
     const towerDef = TOWERS[item];
-    if (towerDef && this.points < towerDef.cost) return this.deny(p, 'Not enough points');
+    if (towerDef && this.points < towerDef.cost) return this.deny(p, 'Not enough crystals');
     if (this.cellContents(c, r)) return this.deny(p, 'That spot is taken');
     if (!this.grid.isBuildable(c, r)) return this.deny(p, "Can't build there");
     if (!this.grid.canPlaceAt(c, r, this.enemyCells())) {
@@ -307,7 +349,7 @@ export class Sim {
     const t = found.tower;
     if (t.lvl >= TOWER_LEVEL_MAX) return this.deny(p, 'Already at max level');
     const cost = Math.round(TOWERS[t.kind].cost * TOWER_UPGRADE.costMult[t.lvl]);
-    if (this.points < cost) return this.deny(p, 'Not enough points');
+    if (this.points < cost) return this.deny(p, 'Not enough crystals');
     this.points -= cost;
     t.lvl += 1;
     t.invested += cost;
@@ -330,10 +372,11 @@ export class Sim {
   tryJump(p, act) {
     if (p.dead || p.jumpT > 0 || p.dashT > 0 || this.phase === 'over') return;
     if (typeof act?.yaw === 'number') p.yaw = act.yaw;
-    const info = canJumpFrom(this.grid, p.x, p.z, p.yaw);
+    const info = canJumpFrom(this.grid, p.x, p.z, p.yaw, p.jumpCells || 1);
     if (!info) return;
-    p.jumpT = JUMP.DUR;
-    this.emit({ t: 'jump', id: p.id, dur: JUMP.DUR });
+    const dur = jumpDurFor(info.span);
+    p.jumpT = dur;
+    this.emit({ t: 'jump', id: p.id, dur });
   }
 
   // ---------------- class special attacks ----------------
@@ -433,9 +476,10 @@ export class Sim {
         f: [rnd2(p.x), 1.0, rnd2(p.z)], to: [rnd2(tp.x), 0.7, rnd2(tp.z)], ft: rnd2(ft),
       });
       const id = f.e.id, dmg = p.atk * S.dmgMult, pid = p.id;
+      const kb = 0.4 + (p.kbDealt || 0);
       this.pending.push({ at: this.time + ft, fn: () => {
         const e = this.enemies.entities.find((n) => n.id === id);
-        if (e) this.damageEnemy(e, dmg, 0.4, 0, pid);
+        if (e) this.damageEnemy(e, dmg, kb, 0, pid);
       }});
     }
     return true;
@@ -564,6 +608,13 @@ export class Sim {
 
   damageEnemy(e, dmg, kbx, kbz, killerId) {
     if (e.hp <= 0) return;
+    const killer = killerId ? this.getPlayer(killerId) : null;
+    // critical hits (tiger pet): player-dealt damage only, never towers
+    if (killer && killer.critCh > 0 && Math.random() < killer.critCh) {
+      dmg *= PET.CRIT_MULT;
+      const pos = e.vehicle.position;
+      this.emit({ t: 'crit', x: rnd2(pos.x), z: rnd2(pos.z) });
+    }
     e.hp -= dmg;
     // knockback always throws enemies BACKWARD (away from the crystal),
     // never toward it — only the magnitude of the hit matters
@@ -579,7 +630,6 @@ export class Sim {
     if (e.hp <= 0) {
       const pos = e.vehicle.position;
       this.emit({ t: 'die', id: e.id, kind: e.kind, x: rnd2(pos.x), z: rnd2(pos.z), boss: e.boss });
-      const killer = killerId && this.getPlayer(killerId);
       if (killer) killer.kills += 1;
       // nothing is granted on the kill itself — the enemy drops XP and
       // point orbs that each player has to walk over to collect
@@ -596,29 +646,47 @@ export class Sim {
     const n = Math.max(this.playerCount(), 1);
     // the shared point pool only grows when orbs are picked up, so each
     // player's orb carries their slice of the kill's value
-    const ptsAmt = Math.max(1, Math.round((e.pts * scaleFor(SCALING.points, n)) / n));
+    const ptsBase = (e.pts * scaleFor(SCALING.points, n)) / n;
+    // (mini-)bosses also drop permanent gold coins — one orb for EVERY
+    // player, so the whole party earns the same; the bunny pet's luck
+    // can double an individual player's coins
+    const gold = e.boss === 2 ? GOLD.BOSS : e.boss === 1 ? GOLD.SUBBOSS : 0;
     for (const p of this.players) {
       this.addDrop(p.id, 'xp', e.xp, pos.x, pos.z);
-      this.addDrop(p.id, 'pts', ptsAmt, pos.x, pos.z);
+      // the pig pet fattens its owner's share of the points
+      this.addDrop(p.id, 'pts', Math.max(1, Math.round(ptsBase * (p.ptsMult || 1))), pos.x, pos.z);
+      if (gold > 0) {
+        // the bunny pet's luck can double the haul
+        const coins = p.luck > 0 && Math.random() < p.luck ? gold * 2 : gold;
+        // one physical coin per unit — gold never merges, so 2/3/4 coins
+        // really are 2/3/4 pickups scattered on the ground
+        for (let i = 0; i < coins; i++) this.addDrop(p.id, 'gold', 1, pos.x, pos.z);
+      }
     }
   }
 
   addDrop(owner, kind, amount, x, z) {
-    // deaths cluster around chokepoints — merge nearby same-kind orbs
-    // so the ground (and the snapshot) never floods
-    for (const d of this.drops) {
-      if (d.owner === owner && d.kind === kind &&
-          dist2d(d.x, d.z, x, z) < DROPS.MERGE_RADIUS) {
-        d.amount += amount;
-        d.until = this.time + DROPS.TTL;
-        return;
+    const ttl = kind === 'gold' ? GOLD.TTL : DROPS.TTL;
+    // deaths cluster around chokepoints — merge nearby same-kind orbs so
+    // the ground (and the snapshot) never floods. Gold is the exception:
+    // every coin is its own physical pickup, so it never merges.
+    if (kind !== 'gold') {
+      for (const d of this.drops) {
+        if (d.owner === owner && d.kind === kind &&
+            dist2d(d.x, d.z, x, z) < DROPS.MERGE_RADIUS) {
+          d.amount += amount;
+          d.until = this.time + ttl;
+          return;
+        }
       }
     }
-    const jit = () => (Math.random() - 0.5) * 0.9;
+    // gold coins spread out a bit wider so a boss's stack reads as several
+    const spread = kind === 'gold' ? 1.5 : 0.9;
+    const jit = () => (Math.random() - 0.5) * spread;
     const fixed = this.grid.resolveCircle(x + jit(), z + jit(), 0.3);
     this.drops.push({
       id: nextId(), owner, kind, amount,
-      x: fixed.x, z: fixed.z, until: this.time + DROPS.TTL,
+      x: fixed.x, z: fixed.z, until: this.time + ttl,
     });
     if (this.drops.length > DROPS.MAX) this.drops.shift();
   }
@@ -636,7 +704,9 @@ export class Sim {
         const dist = dist2d(d.x, d.z, p.x, p.z);
         if (dist <= DROPS.ABSORB_RADIUS) {
           if (d.kind === 'xp') this.grantXp(p, d.amount);
-          else this.points += d.amount;
+          else if (d.kind === 'pts') this.points += d.amount;
+          // gold is permanent per-character currency: the sim only
+          // announces the pickup — the owning client banks it locally
           this.emit({ t: 'pickup', id: p.id, k: d.kind, amt: d.amount });
           continue;
         }
@@ -660,7 +730,8 @@ export class Sim {
     const oc = worldToCell(d.x, d.z);
     const dc = oc.c - pc.c, dr = oc.r - pc.r;
     const ac = Math.abs(dc), ar = Math.abs(dr);
-    if (Math.max(ac, ar) <= DROPS.COLLECT_CELLS) return true;
+    // the giraffe pet stretches the base 3×3 sweep a cell at a time
+    if (Math.max(ac, ar) <= (p.collectCells || DROPS.COLLECT_CELLS)) return true;
     // two cells out (orthogonal or diagonal) over exactly one blocked cell
     if (DROPS.REACH_OVER_BLOCKER &&
         (ac === 0 || ac === 2) && (ar === 0 || ar === 2) &&
@@ -677,8 +748,10 @@ export class Sim {
       p.xp -= p.xpNext;
       p.lvl += 1;
       p.xpNext = this.xpNext(p.lvl);
-      p.maxHp = Math.round(p.maxHp * PLAYER.LEVEL_HP_MULT);
-      p.atk *= PLAYER.LEVEL_ATK_MULT;
+      // grow the raw stats, then re-layer the pet bonus on top
+      p.rawMaxHp = Math.round(p.rawMaxHp * PLAYER.LEVEL_HP_MULT);
+      p.rawAtk *= PLAYER.LEVEL_ATK_MULT;
+      this.applyPetStats(p);
       p.hp = Math.min(p.maxHp, p.hp + (p.maxHp - p.hp) * PLAYER.LEVEL_HEAL);
       this.emit({ t: 'lvl', id: p.id, lvl: p.lvl });
     }
@@ -690,6 +763,8 @@ export class Sim {
     const wall = p.wallT > 0;
     const def = wall ? Math.min(p.def * SKILLS.tanker.defMult, SKILLS.tanker.defCap) : p.def;
     if (wall) { kbx = 0; kbz = 0; }
+    // the elephant pet plants its owner's feet: knockback taken shrinks
+    if (p.kbResist > 0) { kbx *= 1 - p.kbResist; kbz *= 1 - p.kbResist; }
     const dmg = rawDmg * (1 - def);
     p.hp -= dmg;
     p.lastDmg = this.time;
@@ -863,9 +938,9 @@ export class Sim {
         if (p.respawnT <= 0 && this.phase !== 'over') this.respawnPlayer(p);
         continue;
       }
-      // regen
+      // regen (the panda pet speeds it up)
       if (this.time - p.lastDmg > PLAYER.REGEN_DELAY && p.hp < p.maxHp) {
-        p.hp = Math.min(p.maxHp, p.hp + p.maxHp * PLAYER.REGEN_RATE * dt);
+        p.hp = Math.min(p.maxHp, p.hp + p.maxHp * PLAYER.REGEN_RATE * (p.regenMult || 1) * dt);
       }
       // no attacking mid-air or mid-dash
       if (p.jumpT > 0) { p.jumpT = Math.max(p.jumpT - dt, 0); continue; }
@@ -890,7 +965,9 @@ export class Sim {
           t: 'shoot', k: 'arrow',
           f: [rnd2(p.x), 1.0, rnd2(p.z)], to: [rnd2(tp.x), 0.7, rnd2(tp.z)], ft: rnd2(ft),
         });
-        const id = best.id, dmg = p.atk, kx = 0, kz = 0, pid = p.id;
+        // with the hog pet even arrows carry a punch
+        const kb = p.kbDealt || 0;
+        const id = best.id, dmg = p.atk, kx = kb, kz = 0, pid = p.id;
         this.pending.push({ at: this.time + ft, fn: () => {
           const e = this.enemies.entities.find((n) => n.id === id);
           if (e) this.damageEnemy(e, dmg, kx, kz, pid);
@@ -1186,6 +1263,9 @@ export class Sim {
         p.moving ? 1 : 0, p.dead ? 1 : 0, rnd2(Math.max(p.respawnT, 0)),
         p.obst, p.kills, p.name, rnd2(Math.max(p.skillCd, 0)), p.wallT > 0 ? 1 : 0,
         Math.round(p.atk),
+        // pet-affected move speed (clients predict with it) + the
+        // companion itself, so every peer can render & label it
+        rnd2(p.speed), p.pet?.id || '', p.pet?.name || '', p.pet?.lvl || 0,
       ]),
       en: this.enemies.entities.map((e) => [
         e.id, e.kind, rnd2(e.vehicle.position.x), rnd2(e.vehicle.position.z),
@@ -1195,7 +1275,9 @@ export class Sim {
       tw: this.towers.entities.map((t) => [t.id, t.kind, t.c, t.r, t.lvl, rnd2(t.rot)]),
       ob: this.obstacles.entities.map((o) => [o.id, o.kind, o.c, o.r]),
       gr: this.graves.map((g) => [g.id, rnd2(g.x), rnd2(g.z)]),
-      dr: this.drops.map((d) => [d.id, d.owner, d.kind === 'xp' ? 0 : 1, rnd2(d.x), rnd2(d.z)]),
+      dr: this.drops.map((d) => [
+        d.id, d.owner, d.kind === 'xp' ? 0 : d.kind === 'pts' ? 1 : 2, rnd2(d.x), rnd2(d.z),
+      ]),
     };
   }
 }

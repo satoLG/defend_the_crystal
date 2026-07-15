@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { instantiate } from './assets.js';
 import { buildTexture, applyTexture } from './customize.js';
 import { iconPaths } from '../icons.js';
-import { CLASSES, TOWERS, JUMP, ENEMIES, BOSSES } from '../config.js';
+import { CLASSES, TOWERS, JUMP, ENEMIES, BOSSES, PETS } from '../config.js';
 import { cellToWorld, CRYSTAL_POS, HALF_H, PLAZA } from '../sim/grid.js';
 import { lerp, angleLerp } from '../utils.js';
 import { sfx } from '../audio.js';
@@ -13,7 +13,7 @@ import { sfx } from '../audio.js';
 // rules live here.
 // ============================================================
 
-const PL = { ID: 0, CLS: 1, X: 2, Z: 3, YAW: 4, HP: 5, MHP: 6, LVL: 7, XP: 8, XPN: 9, MOV: 10, DEAD: 11, RESP: 12, OBST: 13, KILLS: 14, NAME: 15, SKCD: 16, WALL: 17, ATK: 18 };
+const PL = { ID: 0, CLS: 1, X: 2, Z: 3, YAW: 4, HP: 5, MHP: 6, LVL: 7, XP: 8, XPN: 9, MOV: 10, DEAD: 11, RESP: 12, OBST: 13, KILLS: 14, NAME: 15, SKCD: 16, WALL: 17, ATK: 18, SPD: 19, PET: 20, PETNAME: 21, PETLVL: 22 };
 const EN = { ID: 0, KIND: 1, X: 2, Z: 3, YAW: 4, HP: 5, MHP: 6, SCALE: 7, BOSS: 8, MOV: 9 };
 
 // Hand props live in BONE space: raw Kenney units, grip at the origin.
@@ -176,11 +176,17 @@ const ENEMY_PROPS = {
 const TOWER_LEVEL_COLORS = [0x9aa1ab, 0x4a86e8, 0x3fbf5f, 0xe0503a, 0x9a4ae0, 0xe8b84b];
 const TOWERS_MAX_VISUAL = 6;
 
+// the pet vendor's stall in the sanctuary plaza; main.js checks the
+// local hero's distance to it to unlock buying at the shop
+export const PET_SHOP_POS = { x: 4.3, z: HALF_H + PLAZA.DEPTH * 0.76 };
+export const PET_SHOP_RADIUS = 3.2;
+
 export class GameView {
   constructor(gameScene) {
     this.gs = gameScene;
     this.scene = gameScene.scene;
     this.players = new Map();   // id -> actor
+    this.pets = new Map();      // ownerId -> companion pet trotting at their heels
     this.enemies = new Map();
     this.towers = new Map();
     this.obstacles = new Map();
@@ -210,14 +216,59 @@ export class GameView {
       return mesh;
     };
     this.xpOrbs = mkOrbs(new THREE.OctahedronGeometry(0.17), 0x5dff7a);
-    this.ptsOrbs = mkOrbs(new THREE.IcosahedronGeometry(0.16), 0x5ab8ff);
+    // point orbs read as crystal shards now (fragments off slain foes)
+    this.ptsOrbs = mkOrbs(new THREE.OctahedronGeometry(0.17), 0x66e0ff);
+    // gold coins use the real mini-dungeon coin mesh, instanced like the
+    // orbs (only ever a handful on the ground). They're special pickups,
+    // so they render bigger and glow — the material is cloned off the
+    // shared coin so boosting its emissive doesn't light the shop props.
+    {
+      const t = instantiate('dungeon-coin', { shadows: false });
+      t.group.updateMatrixWorld(true);
+      let geo = null, mat = null;
+      t.group.traverse((o) => {
+        if (o.isMesh && !geo) {
+          geo = o.geometry.clone();
+          geo.applyMatrix4(o.matrixWorld);
+          mat = o.material;
+        }
+      });
+      const gmat = mat.clone();
+      if (gmat.emissive) { gmat.emissive.set(0xffb020); gmat.emissiveIntensity = 0.75; }
+      gmat.toneMapped = false;
+      this.goldOrbs = new THREE.InstancedMesh(geo, gmat, this.dropCap);
+      this.goldOrbs.count = 0;
+      this.goldOrbs.frustumCulled = false;
+      this.goldOrbs.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      this.scene.add(this.goldOrbs);
+      this.goldMat = gmat;
+      // a handful of little golden dots orbit each live coin — a light,
+      // round sparkle (no flat billboard) so these special pickups pop
+      this.goldDots = 4;
+      this.goldSparkle = new THREE.InstancedMesh(
+        new THREE.SphereGeometry(0.05, 8, 8),
+        new THREE.MeshBasicMaterial({ color: 0xffe89a, toneMapped: false }),
+        this.dropCap * this.goldDots
+      );
+      this.goldSparkle.count = 0;
+      this.goldSparkle.frustumCulled = false;
+      this.goldSparkle.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      this.scene.add(this.goldSparkle);
+    }
     this.npcs = [];
+    this.showPets = []; // the vendor's display critters goofing around
     this.spawnNpcs();
+    this.spawnPetShop();
     this._orbMat = new THREE.Matrix4();
     this._orbPos = new THREE.Vector3();
     this._orbQuat = new THREE.Quaternion();
     this._orbEuler = new THREE.Euler();
     this._orbScale = new THREE.Vector3(1, 1, 1);
+    this._orbScaleGold = new THREE.Vector3(1.7, 1.7, 1.7);
+    this._dotMat = new THREE.Matrix4();
+    this._dotPos = new THREE.Vector3();
+    this._dotScale = new THREE.Vector3(1, 1, 1);
+    this._identQuat = new THREE.Quaternion();
   }
 
   // ---------------- actors ----------------
@@ -429,6 +480,92 @@ export class GameView {
   // thin wrapper so existing callers using an actor still work
   attachProps(actor, specs) { attachProps(actor.group, specs); }
 
+  // ---------------- companion pets ----------------
+
+  // keep each player's companion actor in sync with the snapshot: the
+  // right animal, wearing the right name/level label. Movement is pure
+  // presentation and happens per-frame in updatePets.
+  syncPet(ownerId, petId, petName, petLvl) {
+    let pet = this.pets.get(ownerId);
+    if (!petId || !PETS[petId]) {
+      if (pet) this.removePet(ownerId);
+      return;
+    }
+    if (pet && pet.petId !== petId) { this.removePet(ownerId); pet = null; }
+    if (!pet) {
+      const actor = this.makeAnimated(PETS[petId].model);
+      const owner = this.players.get(ownerId);
+      if (owner) {
+        actor.group.position.copy(owner.group.position);
+        actor.group.rotation.y = owner.group.rotation.y;
+      }
+      actor.labelTop = modelTop(actor.group);
+      this.scene.add(actor.group);
+      this.setLoco(actor, 'idle');
+      pet = { actor, petId, name: null, lvl: null, smSpeed: 0 };
+      this.pets.set(ownerId, pet);
+    }
+    if (pet.name !== petName || pet.lvl !== petLvl) {
+      if (pet.label) {
+        pet.actor.group.remove(pet.label);
+        pet.label.material.map.dispose();
+      }
+      pet.label = this.makeTextSprite(`${petName || PETS[petId].name} · ${petLvl}`, 0xffd8a0, 1.9);
+      pet.label.position.y = pet.actor.labelTop + 0.35;
+      pet.actor.group.add(pet.label);
+      pet.name = petName;
+      pet.lvl = petLvl;
+    }
+  }
+
+  removePet(ownerId) {
+    const pet = this.pets.get(ownerId);
+    if (!pet) return;
+    if (pet.label) pet.label.material.map.dispose();
+    this.scene.remove(pet.actor.group);
+    this.pets.delete(ownerId);
+  }
+
+  // trot each companion to a heel spot behind its owner, choosing
+  // idle/walk/run (and their pace) from how hard it has to hustle
+  updatePets(dt) {
+    for (const [ownerId, pet] of this.pets) {
+      const owner = this.players.get(ownerId);
+      if (!owner) { this.removePet(ownerId); continue; }
+      pet.actor.mixer.update(dt);
+      const og = owner.group;
+      pet.actor.group.visible = og.visible;
+      if (!og.visible) continue; // owner down — pet waits out of sight
+      const yaw = og.rotation.y;
+      // heel position: behind and a bit to the owner's left
+      const side = yaw + Math.PI / 2;
+      const tx = og.position.x - Math.sin(yaw) * 0.8 - Math.sin(side) * 0.5;
+      const tz = og.position.z - Math.cos(yaw) * 0.8 - Math.cos(side) * 0.5;
+      const g = pet.actor.group;
+      let dx = tx - g.position.x, dz = tz - g.position.z;
+      let dist = Math.hypot(dx, dz);
+      if (dist > 7) {
+        // fell hopelessly behind (respawn/teleport) — pop over
+        g.position.set(tx, 0, tz);
+        dx = dz = dist = 0;
+      }
+      let spd = 0;
+      if (dist > 0.06) {
+        // spring chase: the farther behind, the harder it runs
+        spd = Math.min(1.5 + dist * 4, 10);
+        const step = Math.min(spd * dt, dist);
+        g.position.x += (dx / dist) * step;
+        g.position.z += (dz / dist) * step;
+      }
+      pet.smSpeed = lerp(pet.smSpeed, spd, Math.min(dt * 7, 1));
+      if (pet.smSpeed > 3.4) this.setLoco(pet.actor, 'run', 0.9 + pet.smSpeed * 0.06);
+      else if (pet.smSpeed > 0.4) this.setLoco(pet.actor, 'walk', 1.1);
+      else this.setLoco(pet.actor, 'idle', 1);
+      const wantYaw = dist > 0.06 && pet.smSpeed > 0.4 ? Math.atan2(dx, dz) : yaw;
+      g.rotation.y = angleLerp(g.rotation.y, wantYaw, Math.min(dt * 8, 1));
+    }
+  }
+
   // Remember each player's custom part colours (from the lobby roster)
   // and (re)paint any actor already on screen.
   setCosmetics(list) {
@@ -512,25 +649,106 @@ export class GameView {
       { model: 'char-mage', name: 'Mira', tint: 0x8fd8c8, x: -3.1, z: HALF_H + PLAZA.DEPTH * 0.56, yaw: 0.8 },
       { model: 'char-tanker', name: 'Bento', tint: 0xd8b06a, x: 2.3, z: HALF_H + PLAZA.DEPTH * 0.24, yaw: -0.7 },
     ];
-    for (const d of defs) {
-      const a = this.makeAnimated(d.model);
-      a.group.position.set(d.x, 0, d.z);
-      a.group.rotation.y = d.yaw;
-      // dye the outfit so they don't read as one of the player classes
-      for (const m of a.mats) m.color.multiply(new THREE.Color(d.tint));
-      const label = this.makeTextSprite(d.name, 0xffe9b8, 2.2);
-      label.position.y = 2.0;
-      a.group.add(label);
-      const bubble = this.makeTextSprite('Oi!', 0xffffff, 1.5);
-      bubble.position.y = 2.5;
-      bubble.visible = false;
-      a.group.add(bubble);
-      a.bubble = bubble;
-      a.homeYaw = d.yaw;
-      this.scene.add(a.group);
-      this.setLoco(a, 'idle');
-      this.npcs.push(a);
+    for (const d of defs) this.mkNpc(d);
+  }
+
+  mkNpc(d) {
+    const a = this.makeAnimated(d.model);
+    a.group.position.set(d.x, 0, d.z);
+    a.group.rotation.y = d.yaw;
+    // dye the outfit so they don't read as one of the player classes
+    for (const m of a.mats) m.color.multiply(new THREE.Color(d.tint));
+    const label = this.makeTextSprite(d.name, 0xffe9b8, 2.2);
+    label.position.y = 2.0;
+    a.group.add(label);
+    const bubble = this.makeTextSprite(d.bubble || 'Oi!', 0xffffff, 1.5);
+    bubble.position.y = 2.5;
+    bubble.visible = false;
+    a.group.add(bubble);
+    a.bubble = bubble;
+    a.homeYaw = d.yaw;
+    this.scene.add(a.group);
+    this.setLoco(a, 'idle');
+    this.npcs.push(a);
+    return a;
+  }
+
+  // ---------------- pet vendor's stall ----------------
+
+  // a little wooden market stand in the plaza's back corner: Tonho the
+  // pet seller under a banner-draped canopy, a chest of coins beside
+  // him and two of his critters loafing around out front — impossible
+  // to mistake for anything but the pet shop
+  spawnPetShop() {
+    const { x, z } = PET_SHOP_POS;
+    const faceCenter = Math.atan2(0 - x, HALF_H + PLAZA.DEPTH * 0.45 - z);
+
+    const stall = new THREE.Group();
+    stall.position.set(x, 0, z);
+    stall.rotation.y = faceCenter;
+    const frame = instantiate('dungeon-stall').group;
+    stall.add(frame);
+    const frameBox = new THREE.Box3().setFromObject(frame);
+    // banners hang off the canopy's front corners
+    for (const sx of [-1, 1]) {
+      const banner = instantiate('dungeon-banner', { shadows: false }).group;
+      banner.position.set(sx * (frameBox.max.x - 0.28), frameBox.max.y - 0.18, frameBox.max.z - 0.12);
+      stall.add(banner);
     }
+    const chest = instantiate('dungeon-chest').group;
+    chest.scale.setScalar(0.75);
+    chest.position.set(-0.95, 0, 0.55);
+    chest.rotation.y = 0.5;
+    stall.add(chest);
+    // a big slowly-spinning coin as the shop sign
+    const sign = instantiate('dungeon-coin', { shadows: false }).group;
+    sign.scale.setScalar(2.2);
+    sign.position.set(0, frameBox.max.y + 0.42, 0);
+    stall.add(sign);
+    this.petShopSign = sign;
+    this.scene.add(stall);
+
+    // Tonho stands under the canopy, facing out
+    this.mkNpc({
+      model: 'char-berserker', name: 'Tonho', tint: 0x9ad86a,
+      x: x - Math.sin(faceCenter) * 0.15, z: z - Math.cos(faceCenter) * 0.15,
+      yaw: faceCenter, bubble: 'Pets!',
+    });
+
+    // his display critters: a dog and a cat pottering about out front —
+    // on the CAMERA side of the stall (south), never hidden by the
+    // canopy — idling / eating / dancing / strolling little circles
+    for (const [key, ox, oz] of [['pet-dog', -2.3, 0.5], ['pet-cat', 1.6, 1.4]]) {
+      const actor = this.makeAnimated(key);
+      actor.group.position.set(x + ox, 0, z + oz);
+      this.scene.add(actor.group);
+      this.setLoco(actor, 'idle');
+      this.showPets.push({
+        actor, ax: x + ox, az: z + oz,
+        mode: 'idle', t: 1 + Math.random() * 2, ang: Math.random() * Math.PI * 2,
+      });
+    }
+  }
+
+  updateShowPets(dt) {
+    const MODES = ['idle', 'eat', 'dance', 'walk', 'gesture-positive'];
+    for (const p of this.showPets) {
+      p.actor.mixer.update(dt);
+      p.t -= dt;
+      if (p.t <= 0) {
+        p.t = 2.2 + Math.random() * 3.2;
+        p.mode = MODES[(Math.random() * MODES.length) | 0];
+        this.setLoco(p.actor, p.mode === 'walk' ? 'walk' : p.mode, 1);
+      }
+      if (p.mode === 'walk') {
+        // amble a lazy circle around the home spot
+        p.ang += dt * 1.1;
+        const r = 0.65;
+        p.actor.group.position.set(p.ax + Math.cos(p.ang) * r, 0, p.az + Math.sin(p.ang) * r);
+        p.actor.group.rotation.y = Math.atan2(-Math.sin(p.ang), Math.cos(p.ang));
+      }
+    }
+    if (this.petShopSign) this.petShopSign.rotation.y += dt * 1.2;
   }
 
   updateNpcs(dt, selfPos) {
@@ -690,9 +908,15 @@ export class GameView {
         a.labelName = row[PL.NAME];
         a.group.add(a.label);
       }
+      // companion pet at the hero's heels
+      this.syncPet(id, row[PL.PET], row[PL.PETNAME], row[PL.PETLVL]);
     }
     for (const [id, a] of this.players) {
-      if (!seenP.has(id)) { this.scene.remove(a.group); this.players.delete(id); }
+      if (!seenP.has(id)) {
+        this.scene.remove(a.group);
+        this.players.delete(id);
+        this.removePet(id);
+      }
     }
 
     // ---- enemies
@@ -764,33 +988,59 @@ export class GameView {
 
   // ---------------- drops ----------------
 
-  // rows: [id, owner, kind(0=xp 1=pts), x, z] — only own orbs are drawn
+  // rows: [id, owner, kind(0=xp 1=pts 2=gold), x, z] — only own orbs are
+  // drawn; gold renders as a bigger, glowing spinning mini-dungeon coin
   updateDrops(prevRows, rows, alpha, selfId) {
     const prevMap = new Map();
     if (prevRows) for (const r of prevRows) prevMap.set(r[0], r);
-    let xi = 0, pi = 0;
+    const counts = [0, 0, 0];
+    const meshes = [this.xpOrbs, this.ptsOrbs, this.goldOrbs];
+    let sparkN = 0;
+    const sparkCap = this.dropCap * this.goldDots;
     if (rows) {
       for (const row of rows) {
         if (row[1] !== selfId) continue;
-        const isXp = row[2] === 0;
-        const i = isXp ? xi : pi;
+        const kind = row[2];
+        const mesh = meshes[kind] || this.xpOrbs;
+        const i = counts[kind];
         if (i >= this.dropCap) continue;
         let x = row[3], z = row[4];
         const p = prevMap.get(row[0]);
         if (p) { x = lerp(p[3], x, alpha); z = lerp(p[4], z, alpha); }
-        this._orbPos.set(x, 0.32 + Math.sin(this.time * 3.5 + row[0] * 1.7) * 0.09, z);
-        this._orbEuler.set(0, this.time * 2.2 + row[0], 0);
+        const gold = kind === 2;
+        // gold floats a little higher and bobs more, to catch the eye
+        const y = gold
+          ? 0.5 + Math.sin(this.time * 3 + row[0] * 1.7) * 0.14
+          : 0.32 + Math.sin(this.time * 3.5 + row[0] * 1.7) * 0.09;
+        this._orbPos.set(x, y, z);
+        this._orbEuler.set(0, this.time * (gold ? 3.2 : 2.2) + row[0], 0);
         this._orbMat.compose(
-          this._orbPos, this._orbQuat.setFromEuler(this._orbEuler), this._orbScale
+          this._orbPos, this._orbQuat.setFromEuler(this._orbEuler),
+          gold ? this._orbScaleGold : this._orbScale
         );
-        (isXp ? this.xpOrbs : this.ptsOrbs).setMatrixAt(i, this._orbMat);
-        if (isXp) xi++; else pi++;
+        mesh.setMatrixAt(i, this._orbMat);
+        counts[kind]++;
+        // little golden dots orbiting each coin
+        if (gold) {
+          for (let d = 0; d < this.goldDots && sparkN < sparkCap; d++) {
+            const ang = this.time * 2 + row[0] + d * (Math.PI * 2 / this.goldDots);
+            this._dotPos.set(
+              x + Math.cos(ang) * 0.34,
+              y + 0.05 + Math.sin(this.time * 4 + d + row[0]) * 0.13,
+              z + Math.sin(ang) * 0.34
+            );
+            this._dotMat.compose(this._dotPos, this._identQuat, this._dotScale);
+            this.goldSparkle.setMatrixAt(sparkN++, this._dotMat);
+          }
+        }
       }
     }
-    this.xpOrbs.count = xi;
-    this.ptsOrbs.count = pi;
-    this.xpOrbs.instanceMatrix.needsUpdate = true;
-    this.ptsOrbs.instanceMatrix.needsUpdate = true;
+    meshes.forEach((mesh, k) => {
+      mesh.count = counts[k];
+      mesh.instanceMatrix.needsUpdate = true;
+    });
+    this.goldSparkle.count = sparkN;
+    this.goldSparkle.instanceMatrix.needsUpdate = true;
   }
 
   // ---------------- events ----------------
@@ -857,6 +1107,17 @@ export class GameView {
       }
       case 'respawn': {
         this.burst(ev.x, ev.z, 1.4, 0x8fe98f);
+        break;
+      }
+      case 'crit': {
+        // tiger-pet critical hit: punchy ring + floating callout
+        this.burst(ev.x, ev.z, 0.9, 0xffb020);
+        this.spawnFloatText('CRIT!', ev.x, ev.z, 0xffb020);
+        break;
+      }
+      case 'petswap': {
+        const a = this.players.get(ev.id);
+        if (a) this.burst(a.group.position.x, a.group.position.z, 1.0, 0xffd24a);
         break;
       }
       case 'spawn': {
@@ -935,14 +1196,24 @@ export class GameView {
     a.wallFx = null;
   }
 
-  // vertical arc while the character vaults a grid cell; x/z motion
-  // comes from the snapshot (or local prediction for the own player)
+  // vertical arc while the character vaults grid cells; x/z motion
+  // comes from the snapshot (or local prediction for the own player).
+  // Longer vaults (monkey pet) take longer AND arc a little higher.
   startJump(id, dur) {
     const a = this.players.get(id);
     if (!a) return;
     a.jumpT = 0;
     a.jumpDur = dur || JUMP.DUR;
+    a.jumpH = JUMP.HEIGHT * Math.min(0.6 + 0.4 * (a.jumpDur / JUMP.DUR), 1.9);
     if (a.actions.jump) this.playOnce(a, 'jump', a.jumpDur);
+  }
+
+  // one-shot rising text callout ("CRIT!") anchored in world space
+  spawnFloatText(text, x, z, color) {
+    const spr = this.makeTextSprite(text, color, 1.7);
+    spr.position.set(x, 1.35, z);
+    this.scene.add(spr);
+    this.effects.push({ type: 'float-text', mesh: spr, t: 0, dur: 0.7 });
   }
 
   // flutter of little black bats swirling around a jumping vampire;
@@ -1135,7 +1406,11 @@ export class GameView {
 
   update(dt, camera, selfPos = null) {
     this.time += dt;
+    // pulse the coins' own glow so they shimmer for attention
+    if (this.goldMat) this.goldMat.emissiveIntensity = 0.6 + Math.sin(this.time * 4) * 0.35;
     this.updateNpcs(dt, selfPos);
+    this.updateShowPets(dt);
+    this.updatePets(dt);
 
     for (const a of this.players.values()) {
       // orbiting stone slabs of the tanker's wall mode
@@ -1146,7 +1421,7 @@ export class GameView {
       if (a.jumpT == null) continue;
       a.jumpT += dt;
       const k = Math.min(a.jumpT / a.jumpDur, 1);
-      a.group.position.y = Math.sin(k * Math.PI) * JUMP.HEIGHT;
+      a.group.position.y = Math.sin(k * Math.PI) * (a.jumpH || JUMP.HEIGHT);
       if (k >= 1) { a.jumpT = null; a.group.position.y = 0; }
     }
     // vaulting vampires get the same arc (runs after applySnapshot, so
@@ -1256,6 +1531,9 @@ export class GameView {
         e.mat.opacity = 0.95 * (1 - k * k);
       } else if (e.type === 'grave-sink') {
         e.mesh.position.y = -1.3 * easeOut(k);
+      } else if (e.type === 'float-text') {
+        e.mesh.position.y = 1.35 + easeOut(k) * 0.85;
+        e.mesh.material.opacity = 1 - k * k;
       } else if (e.type === 'slash') {
         // sweep the arc across the front and fade it out
         e.mesh.rotation.y = e.baseYaw - 0.55 + easeOut(k) * 1.2;
@@ -1282,6 +1560,7 @@ export class GameView {
       if (a.customTex) a.customTex.dispose();
       this.scene.remove(a.group);
     }
+    for (const id of [...this.pets.keys()]) this.removePet(id);
     for (const a of this.enemies.values()) this.scene.remove(a.group);
     for (const a of this.towers.values()) this.scene.remove(a.group);
     for (const g of this.obstacles.values()) this.scene.remove(g);
@@ -1292,7 +1571,8 @@ export class GameView {
     this.players.clear(); this.enemies.clear(); this.towers.clear();
     this.obstacles.clear(); this.graves.clear();
     this.projectiles = []; this.effects = []; this.corpses = [];
-    this.xpOrbs.count = 0; this.ptsOrbs.count = 0;
+    this.xpOrbs.count = 0; this.ptsOrbs.count = 0; this.goldOrbs.count = 0;
+    this.goldSparkle.count = 0;
     this.clearGhost();
   }
 }

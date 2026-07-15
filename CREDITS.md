@@ -12,9 +12,10 @@ Models were taken from the following Kenney asset packs:
 | Tower Defense Kit (2.1) | towers, weapons, ammo, ground tiles, spawn pads, crystals |
 | Mini Characters (1.x) | the four playable classes, mage staff (cane) |
 | Graveyard Kit (5.0) | skeleton / zombie / ghost / vampire / keeper enemies, obstacles, decor, sanctuary stonework (altar, pillars, obelisk, bowl), boss props (gravestone, grave mound, carved pumpkin, shovel, coffin) |
-| Mini Dungeon (1.x) | orc enemy, Berserker character, sword, shield, barrel obstacle |
+| Mini Dungeon (1.x) | orc enemy, Berserker character, sword, shield, barrel obstacle, gold coins, pet-shop stall (wood structure, banners, chest) |
 | Mini Arena (1.x) | Tanker character, sanctuary statue and columns |
 | Survival Kit (2.0) | Berserker battle axe |
+| Cube Pets (1.0) | the 13 companion pets (dog, cat, pig, crab, bunny, fox, lion, tiger, giraffe, elephant, hog, monkey, panda) |
 
 The Archer / skeleton-archer bow (`props/bow.glb`) is a CC0 Kenney-style
 low-poly model in the same art direction as the packs above.

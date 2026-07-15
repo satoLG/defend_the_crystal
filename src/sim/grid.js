@@ -32,23 +32,31 @@ export const HALF_H = (ROWS * CELL) / 2;
 export const PLAZA = { HALF_W: 8, DEPTH: 13 };
 
 // Jump check: standing at (x,z) facing along yaw, can the character
-// vault over exactly ONE blocked cell (tower/obstacle) and land on the
-// free cell right behind it? Facing is quantized to the 4 cardinals.
-// Returns { to: worldPos, over: cell } or null.
-export function canJumpFrom(grid, x, z, yaw) {
+// vault over a run of consecutive blocked cells (towers/obstacles) and
+// land on the free cell right behind them? Facing is quantized to the
+// 4 cardinals. Base characters clear exactly ONE cell; the monkey pet
+// raises maxCells up to 5. The run ends at the FIRST free cell — gaps
+// aren't flown over, you land in them.
+// Returns { to: worldPos, over: firstCell, span } or null.
+export function canJumpFrom(grid, x, z, yaw, maxCells = 1) {
   const { c, r } = worldToCell(x, z);
   if (!inBounds(c, r)) return null;
   const dx = Math.sin(yaw), dz = Math.cos(yaw);
   const dc = Math.abs(dx) >= Math.abs(dz) ? (dx > 0 ? 1 : -1) : 0;
   const dr = dc === 0 ? (dz > 0 ? 1 : -1) : 0;
-  const oc = c + dc, or = r + dr;          // cell being vaulted
-  const lc = c + dc * 2, lr = r + dr * 2;  // landing cell
+  const oc = c + dc, or = r + dr; // first cell being vaulted
   if (!inBounds(oc, or) || !grid.blocked[idx(oc, or)]) return null;
-  if (!grid.isWalkable(lc, lr)) return null;
   // must actually be right in front of the vaulted cell
   const ow = cellToWorld(oc, or);
   if (Math.abs(x - ow.x) > CELL * 1.2 || Math.abs(z - ow.z) > CELL * 1.2) return null;
-  return { to: cellToWorld(lc, lr), over: { c: oc, r: or } };
+  // walk the run of blocked cells; land on the first free cell after it
+  for (let span = 1; span <= maxCells; span++) {
+    const lc = c + dc * (span + 1), lr = r + dr * (span + 1); // landing cell
+    if (!inBounds(lc, lr)) return null;
+    if (grid.blocked[idx(lc, lr)]) continue; // still mid-wall, keep counting
+    return { to: cellToWorld(lc, lr), over: { c: oc, r: or }, span };
+  }
+  return null; // the wall is thicker than this character can clear
 }
 
 // Endpoint of the berserker's dash: march forward along yaw up to
