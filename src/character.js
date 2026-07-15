@@ -1,9 +1,11 @@
-import { CLASSES, NAME_MAX } from './config.js';
+import { CLASSES, NAME_MAX, PETS, PET, petXpNext } from './config.js';
 
 // ============================================================
-// The player's saved characters (name + class + part colours),
-// persisted in the browser so they survive reloads. The roster
-// can hold several heroes; one is "active" and used to host/join.
+// The player's saved characters (name + class + part colours +
+// pets + gold coins), persisted in the browser so they survive
+// reloads. The roster can hold several heroes; one is "active"
+// and used to host/join. Pets and gold are PER CHARACTER and
+// permanent: pet levels/XP carry across matches.
 // ============================================================
 
 const KEY = 'dtc-characters';     // JSON array of characters
@@ -17,7 +19,21 @@ function uid() {
 }
 
 export function defaultCharacter() {
-  return { id: uid(), name: '', cls: DEFAULT_CLASS, colors: {} };
+  return { id: uid(), name: '', cls: DEFAULT_CLASS, colors: {}, pets: {}, activePet: null, coins: 0 };
+}
+
+// owned pets: { [petId]: { lvl, xp, name } } — drop anything unknown
+function sanitizePets(pets) {
+  const out = {};
+  if (!pets || typeof pets !== 'object') return out;
+  for (const [id, p] of Object.entries(pets)) {
+    if (!PETS[id] || !p || typeof p !== 'object') continue;
+    const lvl = Math.min(Math.max(Math.round(Number(p.lvl) || 1), 1), PET.LEVEL_CAP);
+    const xp = Math.max(Math.round(Number(p.xp) || 0), 0);
+    const name = String(p.name || PETS[id].name).slice(0, PET.NAME_MAX);
+    out[id] = { lvl, xp, name };
+  }
+  return out;
 }
 
 function sanitize(c) {
@@ -25,7 +41,32 @@ function sanitize(c) {
   const cls = CLASSES[c.cls] ? c.cls : DEFAULT_CLASS;
   const colors = (c.colors && typeof c.colors === 'object') ? c.colors : {};
   const id = (typeof c.id === 'string' && c.id) ? c.id : uid();
-  return { id, name: (c.name || '').slice(0, NAME_MAX), cls, colors };
+  const pets = sanitizePets(c.pets);
+  const activePet = pets[c.activePet] ? c.activePet : (Object.keys(pets)[0] || null);
+  const coins = Math.max(Math.round(Number(c.coins) || 0), 0);
+  return { id, name: (c.name || '').slice(0, NAME_MAX), cls, colors, pets, activePet, coins };
+}
+
+// the equipped pet as the {id, lvl, name} reference the sim understands
+export function petRefOf(c) {
+  const owned = c?.activePet && c.pets?.[c.activePet];
+  return owned ? { id: c.activePet, lvl: owned.lvl, name: owned.name } : null;
+}
+
+// Feed collected XP to a character's ACTIVE pet (mutates `c`), leveling
+// it permanently. Returns the number of levels gained (0 when none).
+export function grantPetXp(c, amount) {
+  const pet = c?.activePet && c.pets?.[c.activePet];
+  if (!pet || amount <= 0 || pet.lvl >= PET.LEVEL_CAP) return 0;
+  pet.xp += amount;
+  let gained = 0;
+  while (pet.lvl < PET.LEVEL_CAP && pet.xp >= petXpNext(pet.lvl)) {
+    pet.xp -= petXpNext(pet.lvl);
+    pet.lvl += 1;
+    gained += 1;
+  }
+  if (pet.lvl >= PET.LEVEL_CAP) pet.xp = 0;
+  return gained;
 }
 
 // gather any pre-roster storage into a single-character list

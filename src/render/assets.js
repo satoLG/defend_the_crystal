@@ -67,6 +67,27 @@ const MANIFEST = {
   // obstacles — big and chunky so they read as impassable
   'obstacle-barrel': M('obstacles/barrel.glb', { fp: 1.6 }),
   'obstacle-rocks': M('env/rocks-tall.glb', { h: 1.5 }),
+  // companion pets (Kenney Cube Pets — node-animated: idle/walk/run/
+  // eat/dance/gestures). Heights tuned per animal so they read as small
+  // critters trotting at their hero's heels.
+  'pet-dog': M('pets/animal-dog.glb', { h: 0.55 }),
+  'pet-cat': M('pets/animal-cat.glb', { h: 0.5 }),
+  'pet-pig': M('pets/animal-pig.glb', { h: 0.5 }),
+  'pet-crab': M('pets/animal-crab.glb', { h: 0.4 }),
+  'pet-bunny': M('pets/animal-bunny.glb', { h: 0.52 }),
+  'pet-fox': M('pets/animal-fox.glb', { h: 0.52 }),
+  'pet-lion': M('pets/animal-lion.glb', { h: 0.6 }),
+  'pet-tiger': M('pets/animal-tiger.glb', { h: 0.6 }),
+  'pet-giraffe': M('pets/animal-giraffe.glb', { h: 0.95 }),
+  'pet-elephant': M('pets/animal-elephant.glb', { h: 0.68 }),
+  'pet-hog': M('pets/animal-hog.glb', { h: 0.55 }),
+  'pet-monkey': M('pets/animal-monkey.glb', { h: 0.55 }),
+  'pet-panda': M('pets/animal-panda.glb', { h: 0.6 }),
+  // mini-dungeon kit pieces: the pet vendor's stall + gold coins
+  'dungeon-coin': M('dungeon/coin.glb', { h: 0.34 }),
+  'dungeon-stall': M('dungeon/wood-structure.glb', { fp: 2.6 }),
+  'dungeon-banner': M('dungeon/banner.glb', { h: 1.1 }),
+  'dungeon-chest': M('dungeon/chest.glb', { fp: 0.9 }),
   // environment
   'env-tile': M('env/tile.glb', { tile: true }),
   'env-tile-dirt': M('env/tile-dirt.glb', { tile: true }),

@@ -55,8 +55,172 @@ export const CLASSES = {
   },
 };
 
-// hop over exactly one blocked grid cell (tower/obstacle)
+// hop over exactly one blocked grid cell (tower/obstacle) — the monkey
+// pet stretches that to several cells in a row (see PETS.monkey)
 export const JUMP = { DUR: 0.55, HEIGHT: 1.4 };
+
+// longer vaults (monkey pet) take proportionally longer in the air;
+// used by the sim, the owning client's prediction and the animation
+export function jumpDurFor(span) {
+  return JUMP.DUR * (1 + 0.35 * (Math.max(span, 1) - 1));
+}
+
+// ---------- pets ----------
+// Every character owns pets (persisted in the browser, per character)
+// and can keep ONE at its side. Pets level up permanently — their XP
+// mirrors the XP orbs their owner collects — and their effect grows a
+// tiny bit with every level, up to level 50.
+export const PET = {
+  LEVEL_CAP: 50,
+  XP_BASE: 25,   // xpNext = XP_BASE * lvl^XP_POW (persists across matches)
+  XP_POW: 1.3,
+  NAME_MAX: 10,  // pet names render on overhead labels, keep them short
+  CRIT_MULT: 2,  // tiger crits deal double damage
+  DEF_CAP: 0.85, // total defense can never absorb more than this
+};
+
+// price = gold coins at the sanctuary pet vendor. The four starters are
+// also the free pick every new character gets (one of them, for free).
+export const PETS = {
+  dog: {
+    name: 'Dog', starter: true, price: 2, model: 'pet-dog',
+    blurb: 'A loyal friend — slightly boosts all your base stats.',
+  },
+  cat: {
+    name: 'Cat', starter: true, price: 2, model: 'pet-cat',
+    blurb: 'Quick paws — you move faster.',
+  },
+  pig: {
+    name: 'Pig', starter: true, price: 2, model: 'pet-pig',
+    blurb: 'A lucky snout — you earn more points.',
+  },
+  crab: {
+    name: 'Crab', starter: true, price: 2, model: 'pet-crab',
+    blurb: 'Hard shell — you take less damage.',
+  },
+  bunny: {
+    name: 'Bunny', price: 3, model: 'pet-bunny',
+    blurb: 'Drop luck — chance to double the gold coins you find.',
+  },
+  giraffe: {
+    name: 'Giraffe', price: 3, model: 'pet-giraffe',
+    blurb: 'Long neck — collects orbs and items from farther away.',
+  },
+  elephant: {
+    name: 'Elephant', price: 4, model: 'pet-elephant',
+    blurb: 'Heavy stance — you resist knockback.',
+  },
+  fox: {
+    name: 'Fox', price: 4, model: 'pet-fox',
+    blurb: 'Sharp reflexes — you attack faster.',
+  },
+  panda: {
+    name: 'Panda', price: 4, model: 'pet-panda',
+    blurb: 'Calm spirit — your health regenerates faster.',
+  },
+  hog: {
+    name: 'Hog', price: 5, model: 'pet-hog',
+    blurb: 'Wild charge — your attacks knock enemies back.',
+  },
+  monkey: {
+    name: 'Monkey', price: 5, model: 'pet-monkey',
+    blurb: 'Acrobat — jump over more blocks in a row (up to 5).',
+  },
+  tiger: {
+    name: 'Tiger', price: 6, model: 'pet-tiger',
+    blurb: 'Killer instinct — chance to land critical hits.',
+  },
+  lion: {
+    name: 'Lion', price: 6, model: 'pet-lion',
+    blurb: 'King’s roar — you deal more damage.',
+  },
+};
+
+// Concrete effect numbers for a pet at a given level. Defaults are the
+// identity so the sim can apply the whole struct unconditionally.
+export function petEffects(petId, lvl) {
+  const fx = {
+    hp: 1, atk: 1, spd: 1, rate: 1, def: 0,   // base-stat multipliers / def add
+    kbMult: 1, kbDealt: 0, kbResist: 0,       // knockback dealt / taken
+    crit: 0, luck: 0, pts: 1,                 // crit chance, gold luck, points mult
+    collect: 0, jump: 1, regen: 1,            // extra collect cells, jump cells, regen mult
+  };
+  if (!PETS[petId]) return fx;
+  const L = clampLvl(lvl);
+  const g = L - 1; // growth steps past level 1
+  switch (petId) {
+    case 'dog': {
+      const all = 1.04 + 0.0022 * g; // +4% → +15% at 50
+      fx.hp = all; fx.atk = all; fx.spd = all; fx.rate = all;
+      fx.def = 0.02 + 0.0006 * g;
+      break;
+    }
+    case 'cat': fx.spd = 1.08 + 0.0045 * g; break;      // +8% → +30%
+    case 'pig': fx.pts = 1.10 + 0.008 * g; break;       // +10% → +49%
+    case 'crab': fx.def = 0.06 + 0.0029 * g; break;     // +6% → +20% absorb
+    case 'bunny': fx.luck = 0.10 + 0.01 * g; break;     // 10% → 59% double gold
+    case 'fox': fx.rate = 1.08 + 0.0055 * g; break;     // +8% → +35%
+    case 'lion': fx.atk = 1.10 + 0.006 * g; break;      // +10% → +39%
+    case 'tiger': fx.crit = 0.06 + 0.005 * g; break;    // 6% → 30.5% crit
+    case 'giraffe': fx.collect = 1 + Math.floor(L / 25); break; // +1/+2/+3 cells
+    case 'elephant': fx.kbResist = 0.30 + 0.0102 * g; break;    // -30% → -80% kb
+    case 'hog': {
+      fx.kbDealt = 0.35 + 0.0135 * g; // ranged attacks gain this much kb…
+      fx.kbMult = 1 + fx.kbDealt;     // …and melee/blast kb is multiplied
+      break;
+    }
+    case 'monkey': fx.jump = Math.min(2 + Math.floor(L / 10), 5); break; // +1 cell / 10 lvls
+    case 'panda': fx.regen = 1.35 + 0.0235 * g; break;  // +35% → +150% regen
+  }
+  return fx;
+}
+
+const clampLvl = (lvl) =>
+  Math.min(Math.max(Math.round(Number(lvl) || 1), 1), PET.LEVEL_CAP);
+
+export function petXpNext(lvl) {
+  return Math.round(PET.XP_BASE * Math.pow(clampLvl(lvl), PET.XP_POW));
+}
+
+// short human line for the pet's CURRENT effect, shown in the pet panel
+export function petEffectText(petId, lvl) {
+  const fx = petEffects(petId, lvl);
+  const pc = (v) => `${Math.round((v - 1) * 100)}%`;
+  switch (petId) {
+    case 'dog': return `+${pc(fx.hp)} all base stats`;
+    case 'cat': return `+${pc(fx.spd)} move speed`;
+    case 'pig': return `+${pc(fx.pts)} points earned`;
+    case 'crab': return `+${Math.round(fx.def * 100)}% damage absorbed`;
+    case 'bunny': return `${Math.round(fx.luck * 100)}% chance to double gold`;
+    case 'fox': return `+${pc(fx.rate)} attack speed`;
+    case 'lion': return `+${pc(fx.atk)} damage`;
+    case 'tiger': return `${Math.round(fx.crit * 100)}% crit chance (×${PET.CRIT_MULT} damage)`;
+    case 'giraffe': return `+${fx.collect} collect radius (cells)`;
+    case 'elephant': return `-${Math.round(fx.kbResist * 100)}% knockback taken`;
+    case 'hog': return `attacks knock back (+${Math.round(fx.kbDealt * 100)}%)`;
+    case 'monkey': return `jump over ${fx.jump} blocks`;
+    case 'panda': return `+${pc(fx.regen)} health regen`;
+    default: return '';
+  }
+}
+
+// validate a {id, lvl, name} pet reference coming over the wire or from
+// storage; returns null when it isn't a real pet
+export function sanitizePetRef(pet) {
+  if (!pet || typeof pet !== 'object' || !PETS[pet.id]) return null;
+  const lvl = clampLvl(pet.lvl);
+  const name = String(pet.name || PETS[pet.id].name).slice(0, PET.NAME_MAX);
+  return { id: pet.id, lvl, name };
+}
+
+// ---------- gold coins ----------
+// Permanent currency for sanctuary vendors. Only (mini-)bosses drop
+// them, one orb PER PLAYER (like all drops), so everyone earns the same.
+export const GOLD = {
+  SUBBOSS: 1, // coins per player from a mini-boss
+  BOSS: 2,    // coins per player from a checkpoint boss
+  TTL: 25,    // gold is precious — it lingers longer than other orbs
+};
 
 // ---------- class special attacks (button next to jump) ----------
 // Every class shares the same cooldown *length*, but the timer itself

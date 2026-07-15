@@ -68,6 +68,12 @@
           <div class="ci-stats" id="ci-stats"></div>
         </div>
 
+        <div id="char-pet-block" class="char-pet-block hidden">
+          <div class="field-label"><i data-icon="paw"></i> Your first pet — every hero gets one for free</div>
+          <div id="char-pet-grid" class="char-pet-grid"></div>
+          <div id="char-pet-blurb" class="muted char-pet-blurb"></div>
+        </div>
+
         <div class="char-foot">
           <input id="char-name" maxlength="10" autocomplete="off" placeholder="Hero name" />
           <button id="char-save" class="btn primary big">Save &amp; continue</button>
@@ -139,7 +145,10 @@
         <div class="pb-row">
           <span id="pb-class" title="View character stats"><i data-icon="cls-berserker"></i></span>
           <div class="pb-bars">
-            <div id="pb-name" class="pb-name"></div>
+            <div class="pb-name-row">
+              <div id="pb-name" class="pb-name"></div>
+              <div class="pb-gold" title="Gold coins — spend them at the sanctuary pet vendor"><i data-icon="goldcoin"></i><span id="gold-label">0</span></div>
+            </div>
             <div class="bar hp"><div id="pb-hp"></div><span id="pb-hp-text"></span></div>
             <div class="bar xp"><div id="pb-xp"></div></div>
           </div>
@@ -156,6 +165,10 @@
       <button id="skill-btn" disabled title="Class special attack (K)">
         <span id="skill-icon"><i data-icon="sparkle"></i></span>
         <span id="skill-cd" class="hidden"></span>
+      </button>
+
+      <button id="pet-btn" title="Your pets">
+        <i data-icon="paw"></i>
       </button>
 
       <div id="hud-bottom">
@@ -205,6 +218,8 @@
         <div id="bb-flavor"></div>
       </div>
 
+      <button id="petshop-prompt" class="hidden"><i data-icon="paw"></i> Pet Shop</button>
+
       <div id="toasts"></div>
     </div>
 
@@ -246,6 +261,23 @@
           </div>
         </div>
         <div id="stats-body" class="stats-grid"></div>
+      </div>
+    </div>
+
+    <!-- ============ PET PANEL (manage companions + Tonho's shop) ============ -->
+    <div id="pet-panel" class="screen overlay hidden">
+      <div class="panel center-panel pet-modal">
+        <button id="pet-close" class="btn small corner-btn" title="Close"><i data-icon="x"></i></button>
+        <h2><i data-icon="paw"></i> Pets</h2>
+        <div class="pet-gold"><i data-icon="goldcoin"></i> <span id="pet-gold-label">0</span> gold coins</div>
+        <div class="pet-tabs">
+          <button id="pet-tab-mine" class="pet-tab active">My pets</button>
+          <button id="pet-tab-shop" class="pet-tab">Shop</button>
+        </div>
+        <div id="pet-shop-hint" class="muted pet-shop-hint hidden">
+          Gold coins drop from mini-bosses and bosses.<br/>Visit Tonho's stall in the sanctuary plaza to buy.
+        </div>
+        <div id="pet-list" class="pet-list"></div>
       </div>
     </div>
 

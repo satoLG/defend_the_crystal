@@ -1,10 +1,13 @@
-import { CLASSES, TOWERS, TOWER_LEVEL_MAX, TOWER_UPGRADE, CRYSTAL_BREACH_LIMIT, SKILLS, NAME_MAX } from './config.js';
+import {
+  CLASSES, TOWERS, TOWER_LEVEL_MAX, TOWER_UPGRADE, CRYSTAL_BREACH_LIMIT, SKILLS, NAME_MAX,
+  PETS, PET, petEffectText, petXpNext,
+} from './config.js';
 import { sfx, setSfxVolume } from './audio.js';
 import { normalizeRoomCode } from './utils.js';
 import { icon, mountIcons } from './icons.js';
 import { settings } from './settings.js';
 import { music } from './music.js';
-import { loadRoster, saveRoster, defaultCharacter } from './character.js';
+import { loadRoster, saveRoster, defaultCharacter, petRefOf, grantPetXp } from './character.js';
 import { getSlots } from './render/customize.js';
 
 // class accent colours (mirror the 3D CLASS_TINT) used to tint the
@@ -64,6 +67,9 @@ const bindTap = (el, fn) => {
 const entityImg = (name) =>
   `<img class="entity-img" src="${import.meta.env.BASE_URL || './'}img/${name}.png" alt="">`;
 
+const petImgSrc = (petId) =>
+  `${import.meta.env.BASE_URL || './'}img/pets/animal-${petId}.png`;
+
 // ============================================================
 // All DOM: screens, HUD, build cards, panels, toasts.
 // Game logic never touches the DOM directly — it goes via UI.
@@ -84,6 +90,9 @@ export class UI {
     this.isHost = false;
     this.skillReady = false;   // gated by this character's own 30s cooldown
     this.myCls = this.character.cls;
+    this.shopNear = false;     // standing at Tonho's stall (main.js feeds this)
+    this.petTab = 'mine';      // pet panel tab: 'mine' | 'shop'
+    this.petPanelOpen = false;
 
     mountIcons();
     this.bindStart();
@@ -91,6 +100,7 @@ export class UI {
     this.bindCharacter();
     this.bindLobby();
     this.bindHud();
+    this.bindPets();
     this.bindOverlays();
     this.bindSettings();
   }
@@ -320,9 +330,25 @@ export class UI {
       this.preview?.setColors(this.charDraft.colors);
     });
 
+    // starter pet picker (creation, or first edit of a pre-pet hero)
+    $('char-pet-grid').addEventListener('click', (e) => {
+      const card = e.target.closest('.cp-pet');
+      if (!card) return;
+      sfx.click();
+      this.starterPick = card.dataset.pet;
+      this.renderStarterPicker();
+    });
+
     $('char-save').addEventListener('click', () => {
       sfx.success();
       this.charDraft.name = ($('char-name').value.trim() || 'Hero').slice(0, NAME_MAX);
+      // hand the freshly-picked starter pet over (older heroes get
+      // their one free pick the first time they're edited)
+      if (this.needsStarter) {
+        const sid = PETS[this.starterPick] ? this.starterPick : 'dog';
+        this.charDraft.pets = { ...this.charDraft.pets, [sid]: { lvl: 1, xp: 0, name: PETS[sid].name } };
+        this.charDraft.activePet = sid;
+      }
       const chars = [...this.roster.chars];
       const i = this.editingId ? chars.findIndex((c) => c.id === this.editingId) : -1;
       if (i >= 0) chars[i] = { ...this.charDraft, id: this.editingId };
@@ -333,6 +359,22 @@ export class UI {
       this.myCls = this.character.cls;
       this.showMenu();
     });
+  }
+
+  // the four starter pets, one of which every new hero takes home free
+  renderStarterPicker() {
+    const grid = $('char-pet-grid');
+    grid.innerHTML = '';
+    for (const [id, def] of Object.entries(PETS)) {
+      if (!def.starter) continue;
+      const card = document.createElement('button');
+      card.className = 'cp-pet' + (this.starterPick === id ? ' selected' : '');
+      card.dataset.pet = id;
+      card.innerHTML = `<img src="${petImgSrc(id)}" alt=""><span>${def.name}</span>`;
+      grid.appendChild(card);
+    }
+    const def = PETS[this.starterPick] || PETS.dog;
+    $('char-pet-blurb').textContent = `${def.blurb} (${petEffectText(this.starterPick, 1)})`;
   }
 
   selectCharClass(cls) {
@@ -377,10 +419,21 @@ export class UI {
   showCharacter(id = null) {
     this.editingId = id;
     const src = id ? this.roster.chars.find((c) => c.id === id) : null;
-    // work on a copy so "Save" is an explicit commit
+    // work on a copy so "Save" is an explicit commit — pets/coins ride
+    // along untouched so editing can never wipe them
     this.charDraft = src
-      ? { id: src.id, name: src.name, cls: src.cls, colors: { ...src.colors } }
+      ? {
+          id: src.id, name: src.name, cls: src.cls, colors: { ...src.colors },
+          pets: JSON.parse(JSON.stringify(src.pets || {})),
+          activePet: src.activePet, coins: src.coins,
+        }
       : defaultCharacter();
+    // heroes without any pet (new, or saved before pets existed) pick
+    // their free starter right here
+    this.needsStarter = !Object.keys(this.charDraft.pets || {}).length;
+    this.starterPick = 'dog';
+    $('char-pet-block').classList.toggle('hidden', !this.needsStarter);
+    if (this.needsStarter) this.renderStarterPicker();
     this.hide('loading'); this.hide('menu'); this.hide('lobby'); this.hide('hud');
     this.hide('checkpoint'); this.hide('gameover'); this.hide('host-lost');
     // returning to the menu is only allowed once at least one hero exists
@@ -592,6 +645,212 @@ export class UI {
     this.cb.onPanelClose?.();
   }
 
+  // ---------------- pets ----------------
+
+  // write the (mutated) active character back into the persisted roster
+  persistCharacter() {
+    this.roster = saveRoster(this.roster.chars, this.roster.activeId);
+    this.character = this.activeChar();
+  }
+
+  // the equipped pet as {id, lvl, name} — what the sim/net layer wants
+  activePetInfo() { return petRefOf(this.character); }
+
+  // gold coins picked up in a match are banked permanently, per character
+  addCoins(amt) {
+    this.character.coins += amt;
+    this.persistCharacter();
+    this._goldShown = null;
+    this.toast(`+${amt} gold coin${amt > 1 ? 's' : ''}!`, 'gold');
+    if (this.petPanelOpen) this.renderPetPanel();
+  }
+
+  // XP the hero collects also feeds its companion — permanently
+  grantPetXpFromPickup(amt) {
+    if (!this.character.activePet) return;
+    const gained = grantPetXp(this.character, amt);
+    this.persistCharacter();
+    if (gained > 0) {
+      const pet = this.character.pets[this.character.activePet];
+      if (pet) {
+        this.toast(`${pet.name} reached level ${pet.lvl}!`, 'gold');
+        sfx.levelUp();
+        this.cb.onPetChange?.(this.activePetInfo());
+      }
+    }
+    if (this.petPanelOpen && this.petTab === 'mine') this.renderPetPanel();
+  }
+
+  equipPet(id) {
+    if (!this.character.pets[id] || this.character.activePet === id) return;
+    this.character.activePet = id;
+    this.persistCharacter();
+    sfx.success();
+    this.renderPetPanel();
+    this.cb.onPetChange?.(this.activePetInfo());
+  }
+
+  renamePet(id, name) {
+    const pet = this.character.pets[id];
+    if (!pet) return;
+    pet.name = (String(name).trim() || PETS[id].name).slice(0, PET.NAME_MAX);
+    this.persistCharacter();
+    this.renderPetPanel();
+    if (this.character.activePet === id) this.cb.onPetChange?.(this.activePetInfo());
+  }
+
+  buyPet(id) {
+    const def = PETS[id];
+    if (!def || this.character.pets[id]) return;
+    if (!this.shopNear) return this.toast("Visit Tonho's stall in the sanctuary to buy", 'error');
+    if (this.character.coins < def.price) return this.toast('Not enough gold coins', 'error');
+    this.character.coins -= def.price;
+    this.character.pets[id] = { lvl: 1, xp: 0, name: def.name };
+    const firstPet = !this.character.activePet;
+    if (firstPet) this.character.activePet = id;
+    this.persistCharacter();
+    this._goldShown = null;
+    sfx.success();
+    this.toast(`${def.name} joined your team!`, 'gold');
+    this.renderPetPanel();
+    if (firstPet) this.cb.onPetChange?.(this.activePetInfo());
+  }
+
+  // main.js flips this as the hero walks up to / away from the stall
+  setShopNear(near) {
+    if (near === this.shopNear) return;
+    this.shopNear = near;
+    $('petshop-prompt').classList.toggle('hidden', !near);
+    if (near) sfx.notify();
+    if (this.petPanelOpen && this.petTab === 'shop') this.renderPetPanel();
+  }
+
+  bindPets() {
+    bindTap($('pet-btn'), () => { sfx.click(); this.openPetPanel('mine'); });
+    bindTap($('petshop-prompt'), () => { sfx.click(); this.openPetPanel('shop'); });
+    $('pet-close').addEventListener('click', () => { sfx.click(); this.closePetPanel(); });
+    $('pet-panel').addEventListener('click', (e) => {
+      if (e.target === $('pet-panel')) this.closePetPanel();
+    });
+    $('pet-tab-mine').addEventListener('click', () => { sfx.click(); this.petTab = 'mine'; this.renderPetPanel(); });
+    $('pet-tab-shop').addEventListener('click', () => { sfx.click(); this.petTab = 'shop'; this.renderPetPanel(); });
+
+    // one delegated handler covers equip / rename / buy on every card
+    $('pet-list').addEventListener('click', (e) => {
+      const card = e.target.closest('.pet-card');
+      if (!card) return;
+      const id = card.dataset.pet;
+      const act = e.target.closest('[data-act]')?.dataset.act;
+      if (act === 'equip') this.equipPet(id);
+      else if (act === 'buy') this.buyPet(id);
+      else if (act === 'rename') this.startPetRename(card, id);
+    });
+  }
+
+  openPetPanel(tab = 'mine') {
+    this.petTab = tab;
+    this.petPanelOpen = true;
+    this.renderPetPanel();
+    this.show('pet-panel');
+  }
+
+  closePetPanel() {
+    this.petPanelOpen = false;
+    this.hide('pet-panel');
+  }
+
+  // swap the pet's name for an inline input; Enter/blur commits
+  startPetRename(card, id) {
+    const span = card.querySelector('.pet-pname');
+    if (!span || card.querySelector('input')) return;
+    const input = document.createElement('input');
+    input.maxLength = PET.NAME_MAX;
+    input.value = this.character.pets[id]?.name || '';
+    input.className = 'pet-rename';
+    span.replaceWith(input);
+    input.focus();
+    input.select();
+    const commit = () => this.renamePet(id, input.value);
+    input.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter') commit();
+      else if (ev.key === 'Escape') this.renderPetPanel();
+    });
+    input.addEventListener('blur', commit);
+  }
+
+  renderPetPanel() {
+    $('pet-gold-label').textContent = this.character.coins;
+    $('pet-tab-mine').classList.toggle('active', this.petTab === 'mine');
+    $('pet-tab-shop').classList.toggle('active', this.petTab === 'shop');
+    $('pet-shop-hint').classList.toggle('hidden', this.petTab !== 'shop' || this.shopNear);
+    const host = $('pet-list');
+    host.innerHTML = '';
+    if (this.petTab === 'mine') this.renderOwnedPets(host);
+    else this.renderPetShop(host);
+  }
+
+  renderOwnedPets(host) {
+    const owned = Object.keys(PETS).filter((id) => this.character.pets[id]);
+    if (!owned.length) {
+      host.innerHTML = '<div class="muted pet-empty">No pets yet — buy one at Tonho\'s stall in the sanctuary.</div>';
+      return;
+    }
+    for (const id of owned) {
+      const pet = this.character.pets[id];
+      const active = this.character.activePet === id;
+      const maxed = pet.lvl >= PET.LEVEL_CAP;
+      const next = petXpNext(pet.lvl);
+      const card = document.createElement('div');
+      card.className = 'pet-card' + (active ? ' active' : '');
+      card.dataset.pet = id;
+      card.innerHTML =
+        `<img class="pet-img" src="${petImgSrc(id)}" alt="">
+         <div class="pet-meta">
+           <div class="pet-name-row">
+             <span class="pet-pname"></span>
+             <button class="pet-edit" data-act="rename" title="Rename">✎</button>
+           </div>
+           <div class="pet-kind">${PETS[id].name} · Lv ${pet.lvl}${maxed ? ' <b class="pet-max">MAX</b>' : ''}</div>
+           <div class="pet-effect">${petEffectText(id, pet.lvl)}</div>
+           <div class="pet-xpbar"><div class="pet-xpfill" style="width:${maxed ? 100 : Math.min((pet.xp / next) * 100, 100)}%"></div></div>
+         </div>
+         <div class="pet-actions">
+           ${active
+             ? `<span class="pet-equipped">${icon('paw')} With you</span>`
+             : '<button class="btn small primary" data-act="equip">Equip</button>'}
+         </div>`;
+      // pet names are user input — set as text, never as HTML
+      card.querySelector('.pet-pname').textContent = pet.name;
+      host.appendChild(card);
+    }
+  }
+
+  renderPetShop(host) {
+    const forSale = Object.entries(PETS).sort((a, b) => a[1].price - b[1].price);
+    for (const [id, def] of forSale) {
+      const owned = !!this.character.pets[id];
+      const afford = this.character.coins >= def.price;
+      const card = document.createElement('div');
+      card.className = 'pet-card shop' + (owned ? ' owned' : '');
+      card.dataset.pet = id;
+      card.innerHTML =
+        `<img class="pet-img" src="${petImgSrc(id)}" alt="">
+         <div class="pet-meta">
+           <div class="pet-kind">${def.name}${def.starter ? ' <b class="pet-starter">STARTER</b>' : ''}</div>
+           <div class="pet-effect">${def.blurb}</div>
+           <div class="pet-effect muted">Lv 1: ${petEffectText(id, 1)} → Lv ${PET.LEVEL_CAP}: ${petEffectText(id, PET.LEVEL_CAP)}</div>
+         </div>
+         <div class="pet-actions">
+           ${owned
+             ? '<span class="pet-equipped">Owned</span>'
+             : `<button class="btn small primary" data-act="buy" ${!this.shopNear || !afford ? 'disabled' : ''}>
+                  ${icon('goldcoin')}${def.price}
+                </button>`}
+         </div>`;
+      host.appendChild(card);
+    }
+  }
+
   // ---------------- character stats sheet ----------------
 
   openStats() {
@@ -650,6 +909,11 @@ export class UI {
       : snap.ph === 'build' ? `${snap.w + 1} next` : `${snap.w}`;
 
     $('points-label').textContent = snap.pts;
+    // permanent gold (per character, banked locally)
+    if (this._goldShown !== this.character.coins) {
+      this._goldShown = this.character.coins;
+      $('gold-label').textContent = this.character.coins;
+    }
     const remaining = Math.max(CRYSTAL_BREACH_LIMIT - snap.br, 0);
     $('crystal-hp').textContent = remaining;
     $('crystal-chip').classList.toggle('warn', remaining <= 3);
