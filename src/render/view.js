@@ -20,16 +20,16 @@ const EN = { ID: 0, KIND: 1, X: 2, Z: 3, YAW: 4, HP: 5, MHP: 6, SCALE: 7, BOSS: 
 // The hand sits ~0.14 units down the arm bone; rot compensates the
 // arm's resting tilt so weapons read upright and stay visible.
 export const CLASS_PROPS = {
-  berserker: [{ gen: makeAxe, label: 'Axe', bone: 'arm-right', pos: [0, -0.13, 0.04], rot: [0.85, 0, -0.4], scale: 1 }],
+  berserker: [{ gen: makeAxe, label: 'Axe', bone: 'arm-right', pos: [-0.225, 0.01, 0.09], rot: [0.66, 0.6, -0.45], scale: 1 }],
   tanker: [
-    { key: 'prop-sword', label: 'Sword', bone: 'arm-right', pos: [0, -0.13, 0.04], rot: [0.85, 0, -0.4], scale: 1.05 },
-    { key: 'prop-shield', label: 'Shield', bone: 'arm-left', pos: [0.05, -0.1, 0.05], rot: [0.15, 0.35, 0], scale: 1.15 },
+    { key: 'prop-sword', label: 'Sword', bone: 'arm-right', pos: [-0.225, 0.065, 0.115], rot: [0.54, 1.09, 0.11], scale: 0.94 },
+    { key: 'prop-shield', label: 'Shield', bone: 'arm-left', pos: [0.175, 0.055, 0.195], rot: [-0.26, 0.29, -0.2], scale: 1.32 },
   ],
   archer: [
-    { gen: makeBow, label: 'Bow', bone: 'arm-right', pos: [0, -0.16, 0.05], rot: [0.15, -0.5, -0.5], scale: 1.15 },
-    { gen: makeQuiver, label: 'Quiver', bone: 'torso', pos: [-0.05, 0.05, -0.1], rot: [0.25, 0, 0.35] },
+    { gen: makeBow, label: 'Bow', bone: 'arm-right', pos: [0.02, -0.155, 0.255], rot: [-2.78, 0.23, -1], scale: 1.6 },
+    { gen: makeQuiver, label: 'Quiver', bone: 'torso', pos: [-0.145, 0.055, -0.12], rot: [-0.02, -0.81, 0.41], scale: 1.03 },
   ],
-  mage: [{ key: 'prop-staff', label: 'Staff', bone: 'arm-right', pos: [0, -0.08, 0.03], rot: [0, Math.PI, Math.PI], scale: 1.2, crystalTip: true }],
+  mage: [{ key: 'prop-staff', label: 'Staff', bone: 'arm-right', pos: [-0.225, 0.29, 0.175], rot: [0, 0.35, 3.142], scale: 1.32, crystalTip: true }],
 };
 
 // The real bow model (Bow.glb). It's authored on its side with an odd
@@ -120,13 +120,18 @@ export function attachProps(group, specs) {
     const bone = group.getObjectByName(spec.bone);
     if (!bone) { holders.push(null); continue; }
     const holder = new THREE.Group();
-    holder.add(spec.gen ? spec.gen() : instantiate(spec.key, { shadows: false }).group);
+    const propObj = spec.gen ? spec.gen() : instantiate(spec.key, { shadows: false }).group;
+    holder.add(propObj);
     if (spec.crystalTip) {
-      // glowing crystal floating over the staff's hook
+      // Nestle a glowing crystal in the staff's hook. The shaft runs up
+      // +Y and the hook curls toward -Z, so read the prop's own bounds
+      // and seat the crystal at the head instead of guessing an offset —
+      // this stays aligned no matter how the holder is later rotated.
+      propObj.updateMatrixWorld(true);
+      const b = new THREE.Box3().setFromObject(propObj);
       const tip = instantiate('prop-crystal', { shadows: false, cloneMaterials: true }).group;
       tip.scale.setScalar(0.4);
-      tip.position.set(0, 0.02, -0.13); // pre-rotation: ends up above the forward-facing hook
-      tip.rotation.x = Math.PI;         // counter the holder flip so the crystal points up
+      tip.position.set(0, b.max.y * 0.74, b.min.z * 0.5); // in the crook, up the shaft
       tip.traverse((o) => {
         if (o.isMesh && o.material.emissive) {
           o.material.emissive.set(0x8a2be2);
@@ -165,11 +170,12 @@ for (const b of Object.values(BOSSES)) BOSS_BY_KIND[b.kind] = b;
 // graveyard-kit props are authored in the same mini scale as the
 // character hand props, so they attach straight onto the bones
 const ENEMY_PROPS = {
-  keeper: [{ key: 'prop-shovel', bone: 'arm-right', pos: [0, -0.13, 0.04], rot: [0.85, 0, -0.4], scale: 0.9 }],
-  archer: [
-    { gen: makeBow, bone: 'arm-right', pos: [0, -0.16, 0.05], rot: [0.15, -0.5, -0.5], scale: 1.15 },
-    { gen: makeQuiver, bone: 'torso', pos: [-0.05, 0.05, -0.1], rot: [0.25, 0, 0.35] },
-  ],
+  // the gravedigger grips his shovel exactly like the berserker holds his
+  // axe (same bone-relative pos/rot); he's just scaled up as a whole, so
+  // the relative placement carries straight over
+  keeper: [{ key: 'prop-shovel', bone: 'arm-right', pos: [-0.225, 0.01, 0.09], rot: [0.66, 0.6, -0.45], scale: 0.9 }],
+  // skeleton archers hold the bow & quiver identically to the player archer
+  archer: CLASS_PROPS.archer,
   // Zé do Caixão hauls his own coffin on his back
   coffin: [{ key: 'prop-coffin', bone: 'torso', pos: [0, -0.18, -0.16], rot: [-Math.PI / 2, 0, 0.12], scale: 0.7 }],
 };
