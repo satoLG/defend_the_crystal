@@ -139,6 +139,7 @@ export function attachProps(group, specs) {
         }
       });
       holder.add(tip);
+      holder.userData.crystalTip = tip; // let the tuner nudge it vs the staff
     }
     // raw props: bone space == raw model units, and the bone already
     // carries the character's scale, so placement is direct

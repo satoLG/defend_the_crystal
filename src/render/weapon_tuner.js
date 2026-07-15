@@ -41,7 +41,7 @@ export function initWeaponTuner(previewInstance) {
   preview.onPropsChanged = (cls) => {
     curCls = cls;
     const defs = preview.getProps();
-    meta[cls] = defs.map((d) => ({ label: d.label, bone: d.bone, source: d.source, crystalTip: d.crystalTip }));
+    meta[cls] = defs.map((d) => ({ label: d.label, bone: d.bone, source: d.source, crystalTip: d.crystalTip, kind: d.kind }));
     if (!edits[cls]) {
       edits[cls] = defs.map((d) => ({ pos: [...d.pos], rot: [...d.rot], scale: d.scale }));
     } else {
@@ -195,11 +195,16 @@ function codeForAll() {
 }
 
 function specLine(d, e) {
+  const p = e.pos.map(round).join(', ');
+  const r = e.rot.map(round).join(', ');
+  // the crystal isn't a CLASS_PROPS entry — it's placed in attachProps —
+  // so emit it as a readable note rather than a spec object
+  if (d.kind === 'crystal') {
+    return `  // ${d.label} (relative to staff): pos [${p}], rot [${r}], scale ${round(e.scale)}`;
+  }
   const src = d.source.startsWith('gen:')
     ? `gen: ${d.source.slice(4)}`
     : `key: '${d.source.slice(4)}'`;
-  const p = e.pos.map(round).join(', ');
-  const r = e.rot.map(round).join(', ');
   const tip = d.crystalTip ? ', crystalTip: true' : '';
   return `  { ${src}, label: '${d.label}', bone: '${d.bone}', pos: [${p}], rot: [${r}], scale: ${round(e.scale)}${tip} },`;
 }
