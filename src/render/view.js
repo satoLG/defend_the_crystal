@@ -216,9 +216,12 @@ export class GameView {
       return mesh;
     };
     this.xpOrbs = mkOrbs(new THREE.OctahedronGeometry(0.17), 0x5dff7a);
-    this.ptsOrbs = mkOrbs(new THREE.IcosahedronGeometry(0.16), 0x5ab8ff);
-    // gold coins use the real mini-dungeon coin mesh, instanced like
-    // the orbs (only ever a handful on the ground at once)
+    // point orbs read as crystal shards now (fragments off slain foes)
+    this.ptsOrbs = mkOrbs(new THREE.OctahedronGeometry(0.17), 0x66e0ff);
+    // gold coins use the real mini-dungeon coin mesh, instanced like the
+    // orbs (only ever a handful on the ground). They're special pickups,
+    // so they render bigger and glow — the material is cloned off the
+    // shared coin so boosting its emissive doesn't light the shop props.
     {
       const t = instantiate('dungeon-coin', { shadows: false });
       t.group.updateMatrixWorld(true);
@@ -230,11 +233,30 @@ export class GameView {
           mat = o.material;
         }
       });
-      this.goldOrbs = new THREE.InstancedMesh(geo, mat, this.dropCap);
+      const gmat = mat.clone();
+      if (gmat.emissive) { gmat.emissive.set(0xffb020); gmat.emissiveIntensity = 0.75; }
+      gmat.toneMapped = false;
+      this.goldOrbs = new THREE.InstancedMesh(geo, gmat, this.dropCap);
       this.goldOrbs.count = 0;
       this.goldOrbs.frustumCulled = false;
       this.goldOrbs.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
       this.scene.add(this.goldOrbs);
+      this.goldMat = gmat;
+      // a soft additive halo billboard rides each live gold coin so it
+      // pops on screen even at a glance
+      this.goldGlow = new THREE.InstancedMesh(
+        new THREE.PlaneGeometry(1, 1),
+        new THREE.MeshBasicMaterial({
+          color: 0xffcb45, transparent: true, opacity: 0.5,
+          blending: THREE.AdditiveBlending, depthWrite: false,
+        }),
+        this.dropCap
+      );
+      this.goldGlow.count = 0;
+      this.goldGlow.frustumCulled = false;
+      this.goldGlow.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      this.goldGlow.renderOrder = 3;
+      this.scene.add(this.goldGlow);
     }
     this.npcs = [];
     this.showPets = []; // the vendor's display critters goofing around
@@ -245,6 +267,9 @@ export class GameView {
     this._orbQuat = new THREE.Quaternion();
     this._orbEuler = new THREE.Euler();
     this._orbScale = new THREE.Vector3(1, 1, 1);
+    this._orbScaleGold = new THREE.Vector3(1.7, 1.7, 1.7);
+    this._glowMat = new THREE.Matrix4();
+    this._glowScale = new THREE.Vector3(1.4, 1.4, 1.4);
   }
 
   // ---------------- actors ----------------
@@ -964,13 +989,15 @@ export class GameView {
 
   // ---------------- drops ----------------
 
-  // rows: [id, owner, kind(0=xp 1=pts 2=gold), x, z] — only own orbs
-  // are drawn; gold renders as a spinning mini-dungeon coin
+  // rows: [id, owner, kind(0=xp 1=pts 2=gold), x, z] — only own orbs are
+  // drawn; gold renders as a bigger, glowing spinning mini-dungeon coin
   updateDrops(prevRows, rows, alpha, selfId) {
     const prevMap = new Map();
     if (prevRows) for (const r of prevRows) prevMap.set(r[0], r);
     const counts = [0, 0, 0];
     const meshes = [this.xpOrbs, this.ptsOrbs, this.goldOrbs];
+    let glowN = 0;
+    const camQuat = this._camQuat;
     if (rows) {
       for (const row of rows) {
         if (row[1] !== selfId) continue;
@@ -981,19 +1008,34 @@ export class GameView {
         let x = row[3], z = row[4];
         const p = prevMap.get(row[0]);
         if (p) { x = lerp(p[3], x, alpha); z = lerp(p[4], z, alpha); }
-        this._orbPos.set(x, 0.32 + Math.sin(this.time * 3.5 + row[0] * 1.7) * 0.09, z);
-        this._orbEuler.set(0, this.time * (kind === 2 ? 3.2 : 2.2) + row[0], 0);
+        const gold = kind === 2;
+        // gold floats a little higher and bobs more, to catch the eye
+        const y = gold
+          ? 0.5 + Math.sin(this.time * 3 + row[0] * 1.7) * 0.14
+          : 0.32 + Math.sin(this.time * 3.5 + row[0] * 1.7) * 0.09;
+        this._orbPos.set(x, y, z);
+        this._orbEuler.set(0, this.time * (gold ? 3.2 : 2.2) + row[0], 0);
         this._orbMat.compose(
-          this._orbPos, this._orbQuat.setFromEuler(this._orbEuler), this._orbScale
+          this._orbPos, this._orbQuat.setFromEuler(this._orbEuler),
+          gold ? this._orbScaleGold : this._orbScale
         );
         mesh.setMatrixAt(i, this._orbMat);
         counts[kind]++;
+        // camera-facing halo behind each gold coin
+        if (gold && camQuat && glowN < this.dropCap) {
+          const pulse = 1 + Math.sin(this.time * 5 + row[0]) * 0.12;
+          this._glowScale.set(1.5 * pulse, 1.5 * pulse, 1.5 * pulse);
+          this._glowMat.compose(this._orbPos, camQuat, this._glowScale);
+          this.goldGlow.setMatrixAt(glowN++, this._glowMat);
+        }
       }
     }
     meshes.forEach((mesh, k) => {
       mesh.count = counts[k];
       mesh.instanceMatrix.needsUpdate = true;
     });
+    this.goldGlow.count = glowN;
+    this.goldGlow.instanceMatrix.needsUpdate = true;
   }
 
   // ---------------- events ----------------
@@ -1359,6 +1401,11 @@ export class GameView {
 
   update(dt, camera, selfPos = null) {
     this.time += dt;
+    // remember the camera facing so the gold-coin halos billboard, and
+    // pulse the coins' glow so they shimmer for attention
+    this._camQuat = camera.quaternion;
+    if (this.goldMat) this.goldMat.emissiveIntensity = 0.6 + Math.sin(this.time * 4) * 0.35;
+    if (this.goldGlow) this.goldGlow.material.opacity = 0.42 + Math.sin(this.time * 4) * 0.16;
     this.updateNpcs(dt, selfPos);
     this.updateShowPets(dt);
     this.updatePets(dt);
@@ -1523,6 +1570,7 @@ export class GameView {
     this.obstacles.clear(); this.graves.clear();
     this.projectiles = []; this.effects = []; this.corpses = [];
     this.xpOrbs.count = 0; this.ptsOrbs.count = 0; this.goldOrbs.count = 0;
+    this.goldGlow.count = 0;
     this.clearGhost();
   }
 }

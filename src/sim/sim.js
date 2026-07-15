@@ -303,7 +303,7 @@ export class Sim {
     if (!isObstacle && !TOWERS[item]) return;
     if (isObstacle && p.obst < 1) return this.deny(p, 'No blocks left — earn more each wave');
     const towerDef = TOWERS[item];
-    if (towerDef && this.points < towerDef.cost) return this.deny(p, 'Not enough points');
+    if (towerDef && this.points < towerDef.cost) return this.deny(p, 'Not enough crystals');
     if (this.cellContents(c, r)) return this.deny(p, 'That spot is taken');
     if (!this.grid.isBuildable(c, r)) return this.deny(p, "Can't build there");
     if (!this.grid.canPlaceAt(c, r, this.enemyCells())) {
@@ -349,7 +349,7 @@ export class Sim {
     const t = found.tower;
     if (t.lvl >= TOWER_LEVEL_MAX) return this.deny(p, 'Already at max level');
     const cost = Math.round(TOWERS[t.kind].cost * TOWER_UPGRADE.costMult[t.lvl]);
-    if (this.points < cost) return this.deny(p, 'Not enough points');
+    if (this.points < cost) return this.deny(p, 'Not enough crystals');
     this.points -= cost;
     t.lvl += 1;
     t.invested += cost;

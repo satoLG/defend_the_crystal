@@ -281,6 +281,10 @@ input:focus { border-color: var(--gold); }
   box-shadow: 0 3px 10px rgba(0, 0, 0, 0.5);
 }
 .hud-chip.gold { color: var(--gold); }
+.hud-chip.crystal { color: #66e0ff; }
+/* crystal-health heart — defined before .warn so the low-health red
+   (same specificity, later in source) always wins */
+.hud-chip.life { color: #ff8a9c; }
 .hud-chip.subtle { opacity: 0.75; font-weight: 400; font-size: 0.8rem; cursor: pointer; touch-action: none; }
 .hud-chip.warn { color: var(--danger); border-color: var(--danger); animation: pulse 1s infinite; }
 @keyframes pulse { 50% { transform: scale(1.07); } }
@@ -733,19 +737,53 @@ input:focus { border-color: var(--gold); }
 }
 .pb-gold .ico { width: 0.9rem; height: 0.9rem; }
 
-/* pets button tucked under the health/xp bars, top-left — deliberately
-   away from the jump/skill action cluster so it never reads as one */
-.pb-pet-btn {
-  margin: 6px 0 0 47px;
-  display: inline-flex; align-items: center; gap: 5px;
+/* companion pet row — the pet's mirror of the player row right above it:
+   a smaller round pet portrait under the class badge, the pet name, an
+   XP bar and the pet level */
+.pb-pet-row { margin-top: 5px; }
+.pb-pet-icon {
+  width: 30px; height: 30px; margin: 0 5px; padding: 0; flex: 0 0 auto;
+  border-radius: 50%; overflow: hidden; cursor: pointer;
   background: var(--panel); border: 1px solid var(--panel-border);
-  border-radius: 13px; padding: 4px 11px 4px 9px;
-  color: #ffb340; font-family: inherit; font-weight: 800; font-size: 0.72rem;
-  text-transform: uppercase; letter-spacing: 0.5px; cursor: pointer;
-  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.5); touch-action: none;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5); touch-action: none;
 }
-.pb-pet-btn .ico { width: 0.95rem; height: 0.95rem; }
-.pb-pet-btn:active { transform: scale(0.94); }
+.pb-pet-icon img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.pb-pet-icon:active { transform: scale(0.92); }
+.pb-pet-name { font-size: 0.72rem; color: #ffd8a0; }
+.bar.xp.pet > div { background: linear-gradient(180deg, #ffd07a, #d69a35); }
+.pb-lvl.pet {
+  width: 22px; height: 22px; font-size: 0.72rem;
+  background: #ffb340; box-shadow: 0 0 6px rgba(255, 179, 64, 0.5);
+}
+
+/* read-only pet detail card (opened from the HUD pet row) */
+.pet-detail-modal { position: relative; max-width: 340px; text-align: center; }
+.pd-head { display: flex; align-items: center; gap: 12px; text-align: left; margin-bottom: 10px; }
+.pd-img { width: 64px; height: 64px; flex: 0 0 auto; filter: drop-shadow(0 4px 6px rgba(0, 0, 0, 0.5)); }
+.pd-headmeta { display: flex; flex-direction: column; }
+.pd-name { font-weight: 800; color: var(--gold); font-size: 1.2rem; }
+.pd-effect {
+  font-size: 0.9rem; color: #9fe0a8; line-height: 1.35; margin: 4px 0 10px;
+  background: rgba(0, 0, 0, 0.25); border-radius: 10px; padding: 8px 10px;
+}
+.pd-xp {
+  height: 8px; border-radius: 5px; overflow: hidden;
+  background: rgba(0, 0, 0, 0.55); border: 1px solid rgba(255, 255, 255, 0.14);
+}
+.pd-xpfill { height: 100%; background: linear-gradient(90deg, #ffd07a, #d69a35); }
+.pd-xptext { font-size: 0.75rem; margin-top: 5px; }
+.pd-hint { font-size: 0.72rem; margin-top: 10px; line-height: 1.35; }
+
+/* pet-bonus block inside the player stats sheet */
+.stat-pet {
+  display: flex; align-items: center; gap: 10px; margin-top: 10px;
+  padding: 8px 12px; border-radius: 12px;
+  background: rgba(120, 200, 140, 0.08); border: 1px solid rgba(120, 200, 140, 0.28);
+}
+.stat-pet-img { width: 40px; height: 40px; flex: 0 0 auto; filter: drop-shadow(0 3px 5px rgba(0, 0, 0, 0.5)); }
+.stat-pet-meta { display: flex; flex-direction: column; gap: 2px; text-align: left; }
+.stat-pet .sp-name { font-weight: 800; color: #9fe0a8; font-size: 0.88rem; }
+.stat-pet .sp-desc { font-size: 0.8rem; color: rgba(240, 233, 216, 0.8); line-height: 1.3; }
 
 /* floating call-to-action when standing at Tonho's stall */
 #petshop-prompt {

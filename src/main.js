@@ -433,7 +433,7 @@ function handleEvent(ev) {
       if (ev.ph === 'build' && ev.n > 1) sfx.waveClear();
       break;
     case 'heal':
-      ui.toast(`Checkpoint! +${ev.bonus} points, everyone healed`, 'gold');
+      ui.toast(`Checkpoint! +${ev.bonus} crystals, everyone healed`, 'gold');
       sfx.levelUp();
       break;
     case 'shoot': sfx.shoot(); break;
