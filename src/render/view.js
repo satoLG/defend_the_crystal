@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { instantiate } from './assets.js';
 import { buildTexture, applyTexture } from './customize.js';
 import { iconPaths } from '../icons.js';
-import { CLASSES, TOWERS, JUMP, ENEMIES, BOSSES, PETS } from '../config.js';
+import { CLASSES, TOWERS, JUMP, ENEMIES, BOSSES, PETS, WEAPONS, classStarterWeapons } from '../config.js';
 import { cellToWorld, CRYSTAL_POS, HALF_H, PLAZA } from '../sim/grid.js';
 import { lerp, angleLerp } from '../utils.js';
 import { sfx } from '../audio.js';
@@ -13,31 +13,73 @@ import { sfx } from '../audio.js';
 // rules live here.
 // ============================================================
 
-const PL = { ID: 0, CLS: 1, X: 2, Z: 3, YAW: 4, HP: 5, MHP: 6, LVL: 7, XP: 8, XPN: 9, MOV: 10, DEAD: 11, RESP: 12, OBST: 13, KILLS: 14, NAME: 15, SKCD: 16, WALL: 17, ATK: 18, SPD: 19, PET: 20, PETNAME: 21, PETLVL: 22 };
+const PL = { ID: 0, CLS: 1, X: 2, Z: 3, YAW: 4, HP: 5, MHP: 6, LVL: 7, XP: 8, XPN: 9, MOV: 10, DEAD: 11, RESP: 12, OBST: 13, KILLS: 14, NAME: 15, SKCD: 16, WALL: 17, ATK: 18, SPD: 19, PET: 20, PETNAME: 21, PETLVL: 22, WPN: 23, WPNT: 24, SHD: 25, SHDT: 26 };
 const EN = { ID: 0, KIND: 1, X: 2, Z: 3, YAW: 4, HP: 5, MHP: 6, SCALE: 7, BOSS: 8, MOV: 9 };
 
 // Hand props live in BONE space: raw Kenney units, grip at the origin.
 // The hand sits ~0.14 units down the arm bone; rot compensates the
 // arm's resting tilt so weapons read upright and stay visible.
-export const CLASS_PROPS = {
-  berserker: [{ gen: makeAxe, label: 'Axe', bone: 'arm-right', pos: [-0.225, 0.01, 0.09], rot: [0.66, 0.6, -0.45], scale: 1 }],
-  tanker: [
-    { key: 'prop-sword', label: 'Sword', bone: 'arm-right', pos: [-0.225, 0.065, 0.115], rot: [0.54, 1.09, 0.11], scale: 0.94 },
-    { key: 'prop-shield', label: 'Shield', bone: 'arm-left', pos: [0.175, 0.055, 0.195], rot: [-0.26, 0.29, -0.2], scale: 1.32 },
-  ],
-  archer: [
-    { gen: makeBow, label: 'Bow', bone: 'arm-right', pos: [0.02, -0.155, 0.255], rot: [-2.78, 0.23, -1], scale: 1.6 },
-    { gen: makeQuiver, label: 'Quiver', bone: 'torso', pos: [-0.145, 0.055, -0.12], rot: [-0.02, -0.81, 0.41], scale: 1.03 },
-  ],
-  mage: [{ key: 'prop-staff', label: 'Staff', bone: 'arm-right', pos: [-0.225, 0.29, 0.175], rot: [0, 0.35, 3.142], scale: 1.32, crystalTip: true }],
+// Every weapon of a family shares its family's mount, so a swapped
+// weapon lands exactly where the original one sat.
+const MOUNTS = {
+  axe: { bone: 'arm-right', pos: [-0.225, 0.01, 0.09], rot: [0.66, 0.6, -0.45] },
+  sword: { bone: 'arm-right', pos: [-0.225, 0.065, 0.115], rot: [0.54, 1.09, 0.11] },
+  shield: { bone: 'arm-left', pos: [0.175, 0.055, 0.195], rot: [-0.26, 0.29, -0.2] },
+  bow: { bone: 'arm-right', pos: [0.02, -0.155, 0.255], rot: [-2.78, 0.23, -1] },
+  staff: { bone: 'arm-right', pos: [-0.225, 0.29, 0.175], rot: [0, 0.35, 3.142] },
 };
 
-// The real bow model (Bow.glb). It's authored on its side with an odd
-// FBX2glTF node scale, so normalize at runtime: stand the long axis up
-// (+Y), face the limbs forward (+Z), drop the grip on the origin and
-// scale to a hand-prop height — matching the convention the archer's
-// prop transform expects.
-export function makeBow() {
+// one prop spec per purchasable weapon (see WEAPONS in config.js)
+export const WEAPON_PROPS = {
+  axe: { gen: makeAxe, ...MOUNTS.axe, scale: 1 },
+  greataxe: { gen: makeGreatAxe, ...MOUNTS.axe, scale: 1 },
+  hammer: { gen: makeHammer, ...MOUNTS.axe, scale: 1 },
+  sword: { key: 'prop-sword', ...MOUNTS.sword, scale: 0.94 },
+  greatsword: { gen: makeGreatSword, ...MOUNTS.sword, scale: 0.94 },
+  spear: { gen: makeSpear, ...MOUNTS.sword, scale: 1 },
+  shield: { key: 'prop-shield', ...MOUNTS.shield, scale: 1.32 },
+  greatshield: { gen: makeGreatShield, ...MOUNTS.shield, scale: 1.32 },
+  bow: { gen: makeBow, ...MOUNTS.bow, scale: 1.6 },
+  greatbow: { gen: () => makeBow(0.68), ...MOUNTS.bow, scale: 1.6 },
+  crossbow: { gen: makeCrossbow, ...MOUNTS.bow, scale: 1.6 },
+  staff: { key: 'prop-staff', ...MOUNTS.staff, scale: 1.32, crystalTip: 0x8a2be2 },
+  wand: { gen: makeWand, ...MOUNTS.staff, scale: 1.32 },
+  orb: { gen: makeOrbProp, bone: 'arm-right', pos: [-0.225, 0.06, 0.14], rot: [0, 0, 0], scale: 1 },
+};
+
+const QUIVER_SPEC = { gen: makeQuiver, bone: 'torso', pos: [-0.145, 0.055, -0.12], rot: [-0.02, -0.81, 0.41], scale: 1.03 };
+
+// prop specs for a class holding a specific loadout ({id, tier} refs;
+// null falls back to the class's starter weapons). The archer's quiver
+// rides along whatever bow is equipped.
+export function loadoutProps(cls, weapon = null, shield = null) {
+  const specs = [];
+  const starter = (slot) =>
+    classStarterWeapons(cls).find((w) => WEAPONS[w].slot === slot);
+  const wid = WEAPON_PROPS[weapon?.id] ? weapon.id : starter('weapon');
+  if (wid) specs.push({ ...WEAPON_PROPS[wid], tier: weapon?.tier || 0 });
+  const sid = WEAPON_PROPS[shield?.id] ? shield.id : starter('shield');
+  if (sid) specs.push({ ...WEAPON_PROPS[sid], tier: shield?.tier || 0 });
+  if (cls === 'archer') specs.push(QUIVER_SPEC);
+  return specs;
+}
+
+// default (starter) props per class — used by the character-creation
+// preview and by enemies that mirror a class (skeleton archers)
+export const CLASS_PROPS = {
+  berserker: loadoutProps('berserker'),
+  tanker: loadoutProps('tanker'),
+  archer: loadoutProps('archer'),
+  mage: loadoutProps('mage'),
+};
+
+// The real bow model (bow.glb, mini-forest kit). Kit weapons are
+// authored on their side with odd FBX2glTF node scales, so normalize at
+// runtime: stand the long axis up (+Y), face the limbs forward (+Z),
+// drop the grip on the origin and scale to a hand-prop height —
+// matching the convention the archer's prop transform expects.
+// `height` lets the Great Bow reuse this at a bigger size.
+export function makeBow(height = 0.5) {
   const inner = instantiate('prop-bow', { shadows: false }).group;
   const pre = new THREE.Box3().setFromObject(inner);
   const s = pre.getSize(new THREE.Vector3());
@@ -52,17 +94,17 @@ export function makeBow() {
   const size = box.getSize(new THREE.Vector3());
   const center = box.getCenter(new THREE.Vector3());
   inner.position.sub(center);                        // grip (center) to origin
-  holder.scale.setScalar(0.5 / Math.max(size.y, 1e-3)); // ~0.5 units tall
+  holder.scale.setScalar(height / Math.max(size.y, 1e-3));
   return holder;
 }
 
-// The survival-kit axe (axe.glb) comes from a different Kenney kit than
-// the mini characters, so its authored units don't match bone space.
-// Normalize it the same way makeBow does: stand the long axis (handle)
-// upright, drop the grip on the origin (sitting low on the handle so it
-// reads like it's being held) and scale to a hand-prop height.
-export function makeAxe() {
-  const inner = instantiate('prop-axe', { shadows: false }).group;
+// Generic normalizer for long-handled kit weapons (axes, hammers,
+// spears, swords from other Kenney kits whose units don't match bone
+// space): stand the long axis (handle) upright, drop the grip on the
+// origin — `gripBias` slides it down the handle so it reads as held —
+// and scale to a hand-prop height.
+function makeUprightProp(key, height, gripBias = 0.28) {
+  const inner = instantiate(key, { shadows: false }).group;
   const pre = new THREE.Box3().setFromObject(inner);
   const s = pre.getSize(new THREE.Vector3());
   // whichever axis is longest is the handle — rotate it upright (+Y)
@@ -74,10 +116,122 @@ export function makeAxe() {
   const box = new THREE.Box3().setFromObject(holder);
   const size = box.getSize(new THREE.Vector3());
   const center = box.getCenter(new THREE.Vector3());
-  inner.position.sub(center);            // center to origin…
-  inner.position.y += size.y * 0.28;     // …then bias so the grip sits low
-  holder.scale.setScalar(0.6 / Math.max(size.y, 1e-3)); // ~0.6 units tall
+  inner.position.sub(center);                // center to origin…
+  inner.position.y += size.y * gripBias;     // …then bias so the grip sits low
+  holder.scale.setScalar(height / Math.max(size.y, 1e-3));
   return holder;
+}
+
+export function makeAxe() { return makeUprightProp('prop-axe', 0.6); }
+// bigger, meaner versions of the melee family (sizes in bone space,
+// relative to the 0.6-tall axe / the raw sword the classes start with)
+export function makeGreatAxe() { return makeUprightProp('prop-axe-great', 0.85); }
+export function makeHammer() { return makeUprightProp('prop-hammer', 0.8); }
+export function makeSpear() { return makeUprightProp('prop-spear', 1.05, 0.1); }
+export function makeGreatSword() { return makeUprightProp('prop-sword-great', 0.78); }
+
+// the mini-dungeon rectangle shield, blown up relative to the round
+// shield the tanker starts with (both kits share the mini scale)
+export function makeGreatShield() {
+  const holder = new THREE.Group();
+  const inner = instantiate('prop-shield-great', { shadows: false }).group;
+  holder.add(inner);
+  const base = new THREE.Box3().setFromObject(instantiate('prop-shield', { shadows: false }).group);
+  const own = new THREE.Box3().setFromObject(inner);
+  const baseH = base.getSize(new THREE.Vector3()).y;
+  const ownH = own.getSize(new THREE.Vector3()).y;
+  const center = own.getCenter(new THREE.Vector3());
+  inner.position.sub(center); // center on the grip like the round shield
+  holder.scale.setScalar((baseH * 1.5) / Math.max(ownH, 1e-3));
+  return holder;
+}
+
+// the crossbow borrows the ballista tower's raw weapon model for now,
+// shrunk to hand size and aimed the way the bow mount expects
+export function makeCrossbow() {
+  const inner = instantiate('tower-ballista', { shadows: false }).group;
+  const holder = new THREE.Group();
+  holder.add(inner);
+  const box = new THREE.Box3().setFromObject(holder);
+  const size = box.getSize(new THREE.Vector3());
+  const center = box.getCenter(new THREE.Vector3());
+  inner.position.sub(center);
+  // stand it on end like a bow: stock down, prod (bow part) up
+  inner.rotation.set(0, Math.PI, 0);
+  holder.rotation.z = Math.PI / 2;
+  holder.scale.setScalar(0.42 / Math.max(size.x, size.y, size.z, 1e-3));
+  return holder;
+}
+
+// a shrunken staff with its crystal dyed red — the wand
+export function makeWand() {
+  const holder = new THREE.Group();
+  const staff = instantiate('prop-staff', { shadows: false }).group;
+  staff.scale.setScalar(0.62);
+  holder.add(staff);
+  const tip = instantiate('prop-crystal', { shadows: false, cloneMaterials: true }).group;
+  tip.scale.setScalar(0.3);
+  tip.position.set(0, 0.034, -0.003);
+  tip.rotation.set(-3.15, 0.29, 0.05);
+  tip.traverse((o) => {
+    if (o.isMesh && o.material.emissive) {
+      o.material.color.set(0xff5a4a);
+      o.material.emissive.set(0xd42a1a);
+      o.material.emissiveIntensity = 0.85;
+    }
+  });
+  holder.add(tip);
+  return holder;
+}
+
+// a floating arcane sphere wreathed in a glowing halo + orbiting motes
+export function makeOrbProp() {
+  const holder = new THREE.Group();
+  const core = new THREE.Mesh(
+    new THREE.SphereGeometry(0.085, 16, 16),
+    new THREE.MeshStandardMaterial({
+      color: 0xb488ff, emissive: 0x7a2be2, emissiveIntensity: 0.9,
+      roughness: 0.25, metalness: 0.1,
+    })
+  );
+  holder.add(core);
+  const halo = new THREE.Mesh(
+    new THREE.SphereGeometry(0.13, 12, 12),
+    new THREE.MeshBasicMaterial({
+      color: 0xa050ff, transparent: true, opacity: 0.3,
+      blending: THREE.AdditiveBlending, depthWrite: false,
+    })
+  );
+  holder.add(halo);
+  const moteMat = new THREE.MeshBasicMaterial({ color: 0xe6c4ff, toneMapped: false });
+  for (let i = 0; i < 3; i++) {
+    const mote = new THREE.Mesh(new THREE.SphereGeometry(0.016, 6, 6), moteMat);
+    const a = (i / 3) * Math.PI * 2;
+    mote.position.set(Math.cos(a) * 0.15, Math.sin(a * 2) * 0.04, Math.sin(a) * 0.15);
+    holder.add(mote);
+  }
+  return holder;
+}
+
+// gold / crystal upgrade finish painted over a weapon prop's meshes
+export function applyTierFinish(holder, tier) {
+  if (!tier) return;
+  const gold = tier === 1;
+  holder.traverse((o) => {
+    if (!o.isMesh || !o.material) return;
+    o.material = o.material.clone();
+    if (gold) {
+      o.material.color.lerp(new THREE.Color(0xffc84a), 0.72);
+      if ('metalness' in o.material) { o.material.metalness = 0.8; o.material.roughness = 0.35; }
+      if (o.material.emissive) { o.material.emissive.set(0x6a4a08); o.material.emissiveIntensity = 0.3; }
+    } else {
+      o.material.color.lerp(new THREE.Color(0x9fe8ff), 0.78);
+      o.material.transparent = true;
+      o.material.opacity = 0.92;
+      if ('metalness' in o.material) { o.material.metalness = 0.25; o.material.roughness = 0.15; }
+      if (o.material.emissive) { o.material.emissive.set(0x2f9fc0); o.material.emissiveIntensity = 0.5; }
+    }
+  });
 }
 
 // back quiver with a couple of arrows peeking out
@@ -111,8 +265,10 @@ export function makeQuiver() {
 }
 
 // Parent hand props onto a character's bones. Shared by the in-game
-// actors and the character-creation preview.
+// actors and the character-creation preview. Returns the holders so a
+// live actor can strip them again when its loadout changes.
 export function attachProps(group, specs) {
+  const holders = [];
   for (const spec of specs || []) {
     const bone = group.getObjectByName(spec.bone);
     if (!bone) continue;
@@ -128,19 +284,23 @@ export function attachProps(group, specs) {
       tip.rotation.set(-3.15, 0.29, 0.05);
       tip.traverse((o) => {
         if (o.isMesh && o.material.emissive) {
-          o.material.emissive.set(0x8a2be2);
+          o.material.emissive.set(spec.crystalTip);
           o.material.emissiveIntensity = 0.7;
         }
       });
       holder.add(tip);
     }
+    // upgraded weapons wear their gold/crystal finish
+    applyTierFinish(holder, spec.tier);
     // raw props: bone space == raw model units, and the bone already
     // carries the character's scale, so placement is direct
     holder.scale.setScalar(spec.scale || 1);
     holder.position.set(spec.pos[0], spec.pos[1], spec.pos[2]);
     holder.rotation.set(spec.rot[0], spec.rot[1], spec.rot[2]);
     bone.add(holder);
+    holders.push(holder);
   }
+  return holders;
 }
 
 // world-space head height of a built actor group, so HP bars / name
@@ -180,6 +340,9 @@ const TOWERS_MAX_VISUAL = 6;
 // local hero's distance to it to unlock buying at the shop
 export const PET_SHOP_POS = { x: 4.3, z: HALF_H + PLAZA.DEPTH * 0.76 };
 export const PET_SHOP_RADIUS = 3.2;
+// the weapon smith's hut sits on the OPPOSITE side of the sanctuary
+export const WEAPON_SHOP_POS = { x: -4.3, z: HALF_H + PLAZA.DEPTH * 0.76 };
+export const WEAPON_SHOP_RADIUS = 3.2;
 
 export class GameView {
   constructor(gameScene) {
@@ -259,6 +422,7 @@ export class GameView {
     this.showPets = []; // the vendor's display critters goofing around
     this.spawnNpcs();
     this.spawnPetShop();
+    this.spawnWeaponShop();
     this._orbMat = new THREE.Matrix4();
     this._orbPos = new THREE.Vector3();
     this._orbQuat = new THREE.Quaternion();
@@ -439,7 +603,7 @@ export class GameView {
     // anchor the bar/label just above THIS model's head (heights now
     // vary a little between classes, so a fixed offset would float)
     const top = modelTop(a.group);
-    this.attachProps(a, CLASS_PROPS[cls]);
+    this.syncLoadoutProps(a, row);
     const cos = this.cosmetics.get(id);
     if (cos) this.applyCosmetic(a, cls, cos.colors);
 
@@ -479,6 +643,20 @@ export class GameView {
 
   // thin wrapper so existing callers using an actor still work
   attachProps(actor, specs) { attachProps(actor.group, specs); }
+
+  // keep a player's hand props in sync with the equipped weapon/shield
+  // (+ their gold/crystal tiers) carried in the snapshot row
+  syncLoadoutProps(a, row) {
+    const key = `${row[PL.WPN]}|${row[PL.WPNT]}|${row[PL.SHD]}|${row[PL.SHDT]}`;
+    if (a.loadoutKey === key) return;
+    a.loadoutKey = key;
+    for (const h of a.propHolders || []) h.parent?.remove(h);
+    a.propHolders = attachProps(a.group, loadoutProps(
+      a.cls,
+      row[PL.WPN] ? { id: row[PL.WPN], tier: row[PL.WPNT] } : null,
+      row[PL.SHD] ? { id: row[PL.SHD], tier: row[PL.SHDT] } : null
+    ));
+  }
 
   // ---------------- companion pets ----------------
 
@@ -646,7 +824,9 @@ export class GameView {
   // set dressing for now — walk up to them and they greet you ("Oi!")
   spawnNpcs() {
     const defs = [
-      { model: 'char-mage', name: 'Mira', tint: 0x8fd8c8, x: -3.1, z: HALF_H + PLAZA.DEPTH * 0.56, yaw: 0.8 },
+      // Mira used to idle in the south-west corner — the weapon smith's
+      // hut lives there now, so she strolls closer to the fountains
+      { model: 'char-mage', name: 'Mira', tint: 0x8fd8c8, x: -1.4, z: HALF_H + PLAZA.DEPTH * 0.45, yaw: 0.8 },
       { model: 'char-tanker', name: 'Bento', tint: 0xd8b06a, x: 2.3, z: HALF_H + PLAZA.DEPTH * 0.24, yaw: -0.7 },
     ];
     for (const d of defs) this.mkNpc(d);
@@ -730,6 +910,102 @@ export class GameView {
     }
   }
 
+  // ---------------- weapon smith's hut ----------------
+
+  // Baru's forge-front on the opposite side of the plaza from Tonho:
+  // a mini-arena stone hut (walls + columns + banner) with a weapon
+  // rack, blades hung on the wall, one axe dropped casually on the
+  // ground and a spinning trophy for a shop sign. Same rules as the
+  // pet stall: walk up during a checkpoint to trade.
+  spawnWeaponShop() {
+    const { x, z } = WEAPON_SHOP_POS;
+    // face SOUTH-east (toward the camera and the plaza mouth) so the
+    // wall ends up behind the display and the interior stays visible
+    const face = Math.atan2(0 - x, HALF_H + PLAZA.DEPTH + 5 - z);
+
+    const hut = new THREE.Group();
+    hut.position.set(x, 0, z);
+    hut.rotation.y = face;
+
+    // back wall, two segments wide, with columns at the front corners
+    let wallH = 1.7, wallW = 2;
+    {
+      const probe = instantiate('arena-wall', { shadows: false }).group;
+      const b = new THREE.Box3().setFromObject(probe);
+      const s = b.getSize(new THREE.Vector3());
+      wallH = s.y; wallW = Math.max(s.x, s.z);
+    }
+    for (const sx of [-0.5, 0.5]) {
+      const wall = instantiate('arena-wall').group;
+      wall.position.set(sx * wallW, 0, -1.15);
+      hut.add(wall);
+    }
+    for (const sx of [-1, 1]) {
+      const col = instantiate('arena-column').group;
+      col.position.set(sx * (wallW - 0.25), 0, 0.95);
+      hut.add(col);
+    }
+    // banner hanging off the wall between the weapons
+    const banner = instantiate('arena-banner', { shadows: false }).group;
+    banner.position.set(-wallW * 0.72, wallH - 0.12, -1.02);
+    hut.add(banner);
+
+    // weapon rack beside the wall with a spear standing in it
+    const rack = instantiate('arena-rack').group;
+    rack.position.set(wallW * 0.78, 0, -0.78);
+    rack.rotation.y = -0.35;
+    hut.add(rack);
+    const rackSpear = makeSpear();
+    rackSpear.scale.multiplyScalar(0.9);
+    rackSpear.position.set(wallW * 0.78, 0.62, -0.72);
+    rackSpear.rotation.z = 0.16;
+    hut.add(rackSpear);
+
+    // blades hung on the back wall
+    const hangSword = makeGreatSword();
+    hangSword.scale.multiplyScalar(1.1);
+    hangSword.position.set(-wallW * 0.25, wallH * 0.62, -1.02);
+    hangSword.rotation.z = Math.PI * 0.78;
+    hut.add(hangSword);
+    const hangBow = makeBow(0.62);
+    hangBow.position.set(wallW * 0.3, wallH * 0.6, -1.02);
+    hangBow.rotation.z = -0.35;
+    hut.add(hangBow);
+
+    // a great axe dropped on the ground, like Baru just put it down
+    const floorAxe = makeGreatAxe();
+    floorAxe.position.set(-1.05, 0.05, 0.85);
+    floorAxe.rotation.set(Math.PI / 2 - 0.08, 0, 0.9);
+    hut.add(floorAxe);
+
+    // a shield displayed on a stone block pedestal
+    const block = instantiate('arena-block').group;
+    block.position.set(-wallW * 0.8, 0, -0.3);
+    hut.add(block);
+    const blockBox = new THREE.Box3().setFromObject(block);
+    const dispShield = makeGreatShield();
+    dispShield.scale.multiplyScalar(1.4);
+    dispShield.position.set(-wallW * 0.8, blockBox.max.y + 0.28, -0.24);
+    dispShield.rotation.set(-0.18, 0.25, 0);
+    hut.add(dispShield);
+
+    // spinning trophy = the shop sign (mirrors the pet stall's coin)
+    const sign = instantiate('arena-trophy', { shadows: false }).group;
+    sign.scale.setScalar(1.6);
+    sign.position.set(0, wallH + 0.55, -1.05);
+    hut.add(sign);
+    this.weaponShopSign = sign;
+
+    this.scene.add(hut);
+
+    // Baru the smith stands out front, facing the plaza
+    this.mkNpc({
+      model: 'char-tanker', name: 'Baru', tint: 0xd87a5a,
+      x: x + Math.sin(face) * 0.9, z: z + Math.cos(face) * 0.9,
+      yaw: face, bubble: 'Weapons!',
+    });
+  }
+
   updateShowPets(dt) {
     const MODES = ['idle', 'eat', 'dance', 'walk', 'gesture-positive'];
     for (const p of this.showPets) {
@@ -749,6 +1025,7 @@ export class GameView {
       }
     }
     if (this.petShopSign) this.petShopSign.rotation.y += dt * 1.2;
+    if (this.weaponShopSign) this.weaponShopSign.rotation.y += dt * 1.2;
   }
 
   updateNpcs(dt, selfPos) {
@@ -910,6 +1187,8 @@ export class GameView {
       }
       // companion pet at the hero's heels
       this.syncPet(id, row[PL.PET], row[PL.PETNAME], row[PL.PETLVL]);
+      // equipped weapon & shield (swapped at the smith between waves)
+      this.syncLoadoutProps(a, row);
     }
     for (const [id, a] of this.players) {
       if (!seenP.has(id)) {
@@ -1118,6 +1397,23 @@ export class GameView {
       case 'petswap': {
         const a = this.players.get(ev.id);
         if (a) this.burst(a.group.position.x, a.group.position.z, 1.0, 0xffd24a);
+        break;
+      }
+      case 'wswap': {
+        const a = this.players.get(ev.id);
+        if (a) this.burst(a.group.position.x, a.group.position.z, 1.0, 0x9fe8ff);
+        break;
+      }
+      case 'block': {
+        // shield block: a silvery flash + callout where the hit landed
+        this.burst(ev.x, ev.z, 0.8, 0xbfc8d4);
+        this.spawnFloatText('BLOCK!', ev.x, ev.z, 0xbfc8d4);
+        break;
+      }
+      case 'stun': {
+        // war-hammer stun: dizzy-yellow pop over the rooted enemy
+        this.burst(ev.x, ev.z, 0.7, 0xffe066);
+        this.spawnFloatText('STUN!', ev.x, ev.z, 0xffe066);
         break;
       }
       case 'spawn': {

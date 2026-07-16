@@ -1,11 +1,15 @@
-import { CLASSES, NAME_MAX, PETS, PET, petXpNext } from './config.js';
+import {
+  CLASSES, NAME_MAX, PETS, PET, petXpNext,
+  WEAPONS, WEAPON_TIER_MAX, classStarterWeapons,
+} from './config.js';
 
 // ============================================================
 // The player's saved characters (name + class + part colours +
-// pets + gold coins), persisted in the browser so they survive
-// reloads. The roster can hold several heroes; one is "active"
-// and used to host/join. Pets and gold are PER CHARACTER and
-// permanent: pet levels/XP carry across matches.
+// pets + weapons + gold coins), persisted in the browser so they
+// survive reloads. The roster can hold several heroes; one is
+// "active" and used to host/join. Pets, weapons and gold are PER
+// CHARACTER and permanent: pet levels/XP and weapon purchases &
+// tier upgrades carry across matches.
 // ============================================================
 
 const KEY = 'dtc-characters';     // JSON array of characters
@@ -19,7 +23,43 @@ function uid() {
 }
 
 export function defaultCharacter() {
-  return { id: uid(), name: '', cls: DEFAULT_CLASS, colors: {}, pets: {}, activePet: null, coins: 0 };
+  const c = {
+    id: uid(), name: '', cls: DEFAULT_CLASS, colors: {}, pets: {}, activePet: null,
+    weapons: {}, activeWeapon: null, activeShield: null, coins: 0,
+  };
+  grantStarterWeapons(c);
+  return c;
+}
+
+// every class owns its starter weapon(s) for free, always; equips them
+// when nothing (valid) is equipped. Mutates and returns `c`.
+function grantStarterWeapons(c) {
+  for (const id of classStarterWeapons(c.cls)) {
+    if (!c.weapons[id]) c.weapons[id] = { tier: 0 };
+  }
+  const validFor = (slot) => (id) =>
+    id && c.weapons[id] && WEAPONS[id]?.slot === slot && WEAPONS[id].classes.includes(c.cls);
+  if (!validFor('weapon')(c.activeWeapon)) {
+    c.activeWeapon = Object.keys(c.weapons).find(validFor('weapon')) || null;
+  }
+  if (!validFor('shield')(c.activeShield)) {
+    c.activeShield = Object.keys(c.weapons).find(validFor('shield')) || null;
+  }
+  return c;
+}
+
+// owned weapons: { [weaponId]: { tier } } — drop anything unknown or
+// outside this class's arsenal
+function sanitizeWeapons(weapons, cls) {
+  const out = {};
+  if (!weapons || typeof weapons !== 'object') return out;
+  for (const [id, w] of Object.entries(weapons)) {
+    const def = WEAPONS[id];
+    if (!def || !def.classes.includes(cls) || !w || typeof w !== 'object') continue;
+    const tier = Math.min(Math.max(Math.round(Number(w.tier) || 0), 0), WEAPON_TIER_MAX);
+    out[id] = { tier };
+  }
+  return out;
 }
 
 // owned pets: { [petId]: { lvl, xp, name } } — drop anything unknown
@@ -44,13 +84,25 @@ function sanitize(c) {
   const pets = sanitizePets(c.pets);
   const activePet = pets[c.activePet] ? c.activePet : (Object.keys(pets)[0] || null);
   const coins = Math.max(Math.round(Number(c.coins) || 0), 0);
-  return { id, name: (c.name || '').slice(0, NAME_MAX), cls, colors, pets, activePet, coins };
+  return grantStarterWeapons({
+    id, name: (c.name || '').slice(0, NAME_MAX), cls, colors, pets, activePet,
+    weapons: sanitizeWeapons(c.weapons, cls),
+    activeWeapon: c.activeWeapon, activeShield: c.activeShield,
+    coins,
+  });
 }
 
 // the equipped pet as the {id, lvl, name} reference the sim understands
 export function petRefOf(c) {
   const owned = c?.activePet && c.pets?.[c.activePet];
   return owned ? { id: c.activePet, lvl: owned.lvl, name: owned.name } : null;
+}
+
+// the equipped weapon + shield as { weapon: {id,tier}, shield: {id,tier} }
+// — the loadout reference the sim understands (shield is tanker-only)
+export function loadoutOf(c) {
+  const ref = (id) => (id && c?.weapons?.[id]) ? { id, tier: c.weapons[id].tier } : null;
+  return { weapon: ref(c?.activeWeapon), shield: ref(c?.activeShield) };
 }
 
 // Feed collected XP to a character's ACTIVE pet (mutates `c`), leveling

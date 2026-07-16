@@ -1,0 +1,63 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>weapon preview renderer</title>
+  <style>body { margin: 0; background: transparent; }</style>
+</head>
+<body>
+  <!-- Offscreen turntable used by scripts/gen-weapon-previews.mjs to
+       render one PNG per purchasable weapon into public/img/weapons/.
+       Serve with `vite` and drive via window.__show(id). -->
+  <canvas id="c" width="128" height="128"></canvas>
+  <script type="module">
+    import * as THREE from 'three';
+    import { loadAssets, instantiate } from '/src/render/assets.js';
+    import { WEAPON_PROPS } from '/src/render/view.js';
+    import { WEAPONS } from '/src/config.js';
+
+    const canvas = document.getElementById('c');
+    const renderer = new THREE.WebGLRenderer({
+      canvas, antialias: true, alpha: true, preserveDrawingBuffer: true,
+    });
+    renderer.setPixelRatio(1);
+    renderer.setSize(128, 128, false);
+
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(30, 1, 0.01, 50);
+    scene.add(new THREE.HemisphereLight(0xbfc6ff, 0x30263f, 1.6));
+    const key = new THREE.DirectionalLight(0xfff2d6, 2.2);
+    key.position.set(2.5, 4, 3);
+    scene.add(key);
+    const rim = new THREE.DirectionalLight(0x88aaff, 1.2);
+    rim.position.set(-3, 2, -2);
+    scene.add(rim);
+
+    let current = null;
+
+    await loadAssets();
+    window.__ids = Object.keys(WEAPONS);
+    window.__show = (id) => {
+      if (current) scene.remove(current);
+      const spec = WEAPON_PROPS[id];
+      if (!spec) return false;
+      const obj = spec.gen ? spec.gen() : instantiate(spec.key, { shadows: false }).group;
+      const box = new THREE.Box3().setFromObject(obj);
+      const size = box.getSize(new THREE.Vector3());
+      const center = box.getCenter(new THREE.Vector3());
+      obj.position.sub(center);
+      const holder = new THREE.Group();
+      holder.add(obj);
+      holder.scale.setScalar(1 / Math.max(size.x, size.y, size.z, 1e-4));
+      holder.rotation.set(0.15, 0.6, 0); // gentle 3/4 view
+      scene.add(holder);
+      current = holder;
+      camera.position.set(0, 0.22, 2.15);
+      camera.lookAt(0, 0, 0);
+      renderer.render(scene, camera);
+      return true;
+    };
+    window.__ready = true;
+  </script>
+</body>
+</html>

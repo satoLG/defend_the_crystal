@@ -1,13 +1,15 @@
 import {
   CLASSES, TOWERS, TOWER_LEVEL_MAX, TOWER_UPGRADE, CRYSTAL_BREACH_LIMIT, SKILLS, NAME_MAX,
-  PETS, PET, petEffectText, petXpNext,
+  PETS, PET, petEffectText, petXpNext, petEffects,
+  WEAPONS, WEAPON_TIER_NAMES, WEAPON_TIER_MAX, CLASS_WEAPONS,
+  weaponEffects, weaponStatText, weaponUpgradeCost,
 } from './config.js';
 import { sfx, setSfxVolume } from './audio.js';
 import { normalizeRoomCode } from './utils.js';
 import { icon, mountIcons } from './icons.js';
 import { settings } from './settings.js';
 import { music } from './music.js';
-import { loadRoster, saveRoster, defaultCharacter, petRefOf, grantPetXp } from './character.js';
+import { loadRoster, saveRoster, defaultCharacter, petRefOf, grantPetXp, loadoutOf } from './character.js';
 import { getSlots } from './render/customize.js';
 
 // class accent colours (mirror the 3D CLASS_TINT) used to tint the
@@ -70,6 +72,13 @@ const entityImg = (name) =>
 const petImgSrc = (petId) =>
   `${import.meta.env.BASE_URL || './'}img/pets/animal-${petId}.png`;
 
+const weaponImgSrc = (weaponId) =>
+  `${import.meta.env.BASE_URL || './'}img/weapons/${weaponId}.png`;
+
+// tier badge chip (Normal / Gold / Crystal)
+const tierBadge = (tier) =>
+  `<span class="wpn-tier t${tier}">${WEAPON_TIER_NAMES[tier] || 'Normal'}</span>`;
+
 // ============================================================
 // All DOM: screens, HUD, build cards, panels, toasts.
 // Game logic never touches the DOM directly — it goes via UI.
@@ -96,6 +105,9 @@ export class UI {
     this.petPickerCtx = null;  // active pet-picker step callback bundle
     this.ppPick = 'dog';       // selected starter in the picker
     this.ppName = '';          // typed pet name in the picker
+    this.smithNear = false;    // standing at Baru's smithy (main.js feeds this)
+    this.weaponTab = 'mine';   // weapon panel tab: 'mine' | 'shop'
+    this.weaponPanelOpen = false;
 
     mountIcons();
     this.bindStart();
@@ -105,6 +117,7 @@ export class UI {
     this.bindLobby();
     this.bindHud();
     this.bindPets();
+    this.bindWeapons();
     this.bindOverlays();
     this.bindSettings();
   }
@@ -745,6 +758,7 @@ export class UI {
     this._goldShown = null;
     this.toast(`+${amt} gold coin${amt > 1 ? 's' : ''}!`, 'gold');
     if (this.petPanelOpen) this.renderPetPanel();
+    if (this.weaponPanelOpen) this.renderWeaponPanel();
   }
 
   // XP the hero collects also feeds its companion — permanently
@@ -997,6 +1011,185 @@ export class UI {
     }
   }
 
+  // ---------------- weapons (Baru's smithy) ----------------
+
+  // main.js flips this as the hero walks up to / away from the smithy.
+  // Same rules as the pet stall: buying, upgrading and swapping weapons
+  // is ONLY possible here (i.e. during checkpoints, when you can roam).
+  setSmithNear(near) {
+    if (near === this.smithNear) return;
+    this.smithNear = near;
+    $('weaponshop-prompt').classList.toggle('hidden', !near);
+    if (near) sfx.notify();
+    else if (this.weaponPanelOpen) this.closeWeaponPanel();
+    if (this.weaponPanelOpen) this.renderWeaponPanel();
+  }
+
+  bindWeapons() {
+    bindTap($('weaponshop-prompt'), () => { sfx.click(); this.openWeaponPanel('mine'); });
+    $('weapon-close').addEventListener('click', () => { sfx.click(); this.closeWeaponPanel(); });
+    $('weapon-panel').addEventListener('click', (e) => {
+      if (e.target === $('weapon-panel')) this.closeWeaponPanel();
+    });
+    $('weapon-tab-mine').addEventListener('click', () => { sfx.click(); this.weaponTab = 'mine'; this.renderWeaponPanel(); });
+    $('weapon-tab-shop').addEventListener('click', () => { sfx.click(); this.weaponTab = 'shop'; this.renderWeaponPanel(); });
+
+    // one delegated handler covers equip / upgrade / buy on every card
+    $('weapon-list').addEventListener('click', (e) => {
+      const card = e.target.closest('.pet-card');
+      if (!card) return;
+      const id = card.dataset.weapon;
+      const act = e.target.closest('[data-act]')?.dataset.act;
+      if (act === 'equip') this.equipWeapon(id);
+      else if (act === 'buy') this.buyWeapon(id);
+      else if (act === 'upgrade') this.upgradeWeapon(id);
+    });
+  }
+
+  openWeaponPanel(tab = 'mine') {
+    if (!this.smithNear) return; // arsenal/shop is smith-only
+    this.weaponTab = tab;
+    this.weaponPanelOpen = true;
+    this.renderWeaponPanel();
+    this.show('weapon-panel');
+  }
+
+  closeWeaponPanel() {
+    this.weaponPanelOpen = false;
+    this.hide('weapon-panel');
+  }
+
+  // push the (changed) equipped loadout to the sim via main.js
+  notifyLoadout() {
+    this.cb.onLoadoutChange?.(loadoutOf(this.character));
+  }
+
+  equipWeapon(id) {
+    const c = this.character;
+    const def = WEAPONS[id];
+    if (!def || !c.weapons[id]) return;
+    if (!this.smithNear) return this.toast("Only at Baru's smithy can you switch weapons", 'error');
+    const slot = def.slot === 'shield' ? 'activeShield' : 'activeWeapon';
+    if (c[slot] === id) return;
+    c[slot] = id;
+    this.persistCharacter();
+    sfx.success();
+    this.renderWeaponPanel();
+    this.notifyLoadout();
+  }
+
+  buyWeapon(id) {
+    const c = this.character;
+    const def = WEAPONS[id];
+    if (!def || c.weapons[id] || !def.classes.includes(c.cls)) return;
+    if (!this.smithNear) return this.toast("Visit Baru's smithy in the sanctuary to buy", 'error');
+    if (c.coins < def.price) return this.toast('Not enough gold coins', 'error');
+    c.coins -= def.price;
+    c.weapons[id] = { tier: 0 };
+    this.persistCharacter();
+    this._goldShown = null;
+    sfx.success();
+    this.toast(`${def.name} added to your arsenal!`, 'gold');
+    this.weaponTab = 'mine';
+    this.renderWeaponPanel();
+  }
+
+  upgradeWeapon(id) {
+    const c = this.character;
+    const owned = c.weapons[id];
+    if (!owned || owned.tier >= WEAPON_TIER_MAX) return;
+    if (!this.smithNear) return this.toast("Visit Baru's smithy in the sanctuary to upgrade", 'error');
+    const cost = weaponUpgradeCost(id, owned.tier);
+    if (c.coins < cost) return this.toast('Not enough gold coins', 'error');
+    c.coins -= cost;
+    owned.tier += 1;
+    this.persistCharacter();
+    this._goldShown = null;
+    sfx.levelUp();
+    this.toast(`${WEAPONS[id].name} forged to ${WEAPON_TIER_NAMES[owned.tier]}!`, 'gold');
+    this.renderWeaponPanel();
+    // an upgraded equipped weapon changes live stats & looks
+    if (c.activeWeapon === id || c.activeShield === id) this.notifyLoadout();
+  }
+
+  renderWeaponPanel() {
+    $('weapon-gold-label').textContent = this.character.coins;
+    $('weapon-tab-mine').classList.toggle('active', this.weaponTab === 'mine');
+    $('weapon-tab-shop').classList.toggle('active', this.weaponTab === 'shop');
+    $('weapon-shop-hint').classList.toggle('hidden', this.weaponTab !== 'shop' || this.smithNear);
+    const host = $('weapon-list');
+    host.innerHTML = '';
+    if (this.weaponTab === 'mine') this.renderOwnedWeapons(host);
+    else this.renderWeaponShop(host);
+  }
+
+  renderOwnedWeapons(host) {
+    const c = this.character;
+    const arsenal = (CLASS_WEAPONS[c.cls] || []).filter((id) => c.weapons[id]);
+    for (const id of arsenal) {
+      const def = WEAPONS[id];
+      const owned = c.weapons[id];
+      const active = c.activeWeapon === id || c.activeShield === id;
+      const maxed = owned.tier >= WEAPON_TIER_MAX;
+      const cost = weaponUpgradeCost(id, owned.tier);
+      const afford = c.coins >= cost;
+      const card = document.createElement('div');
+      card.className = 'pet-card' + (active ? ' active' : '');
+      card.dataset.weapon = id;
+      card.innerHTML =
+        `<img class="pet-img" src="${weaponImgSrc(id)}" alt="">
+         <div class="pet-meta">
+           <div class="pet-kind">${def.name} ${tierBadge(owned.tier)}</div>
+           <div class="pet-effect">${weaponStatText(id, owned.tier)}</div>
+           ${maxed
+             ? '<div class="pet-effect muted">Fully forged — Crystal is the final tier.</div>'
+             : `<div class="pet-effect muted">Next (${WEAPON_TIER_NAMES[owned.tier + 1]}): ${weaponStatText(id, owned.tier + 1)}</div>`}
+         </div>
+         <div class="pet-actions">
+           ${active
+             ? `<span class="pet-equipped">${icon('swords')} Equipped</span>`
+             : '<button class="btn small primary" data-act="equip">Equip</button>'}
+           ${maxed
+             ? ''
+             : `<button class="btn small wpn-upg-btn" data-act="upgrade" ${!this.smithNear || !afford ? 'disabled' : ''}>
+                  ⬆ ${icon('goldcoin')}${cost}
+                </button>`}
+         </div>`;
+      host.appendChild(card);
+    }
+  }
+
+  renderWeaponShop(host) {
+    const c = this.character;
+    const forSale = (CLASS_WEAPONS[c.cls] || [])
+      .slice()
+      .sort((a, b) => WEAPONS[a].price - WEAPONS[b].price);
+    for (const id of forSale) {
+      const def = WEAPONS[id];
+      const owned = !!c.weapons[id];
+      const afford = c.coins >= def.price;
+      const starter = def.starterFor?.includes(c.cls);
+      const card = document.createElement('div');
+      card.className = 'pet-card shop' + (owned ? ' owned' : '');
+      card.dataset.weapon = id;
+      card.innerHTML =
+        `<img class="pet-img" src="${weaponImgSrc(id)}" alt="">
+         <div class="pet-meta">
+           <div class="pet-kind">${def.name}${starter ? ' <b class="pet-starter">STARTER</b>' : ''}</div>
+           <div class="pet-effect">${def.blurb}</div>
+           <div class="pet-effect muted">${weaponStatText(id, 0)}</div>
+         </div>
+         <div class="pet-actions">
+           ${owned
+             ? '<span class="pet-equipped">Owned</span>'
+             : `<button class="btn small primary" data-act="buy" ${!this.smithNear || !afford ? 'disabled' : ''}>
+                  ${icon('goldcoin')}${def.price}
+                </button>`}
+         </div>`;
+      host.appendChild(card);
+    }
+  }
+
   // ---------------- character stats sheet ----------------
 
   openStats() {
@@ -1009,8 +1202,10 @@ export class UI {
 
   closeStats() { this.statsOpen = false; this.hide('stats-panel'); }
 
-  // full stat breakdown for the local hero — the level-scaled values
-  // (HP, attack) come live from the snapshot, the rest from the class
+  // Full stat breakdown for the local hero. The level-scaled values
+  // (HP, attack) come live from the snapshot; the rest is consolidated
+  // client-side from class base + pet bonus + equipped weapon & shield
+  // — the same math the sim runs — so the sheet shows FINAL stats.
   renderStats(me) {
     const cls = me[1];
     const def = CLASSES[cls] || {};
@@ -1023,24 +1218,50 @@ export class UI {
     $('stats-title').textContent = (me[15] || 'Hero');
     $('stats-sub').textContent = `${def.name || ''} · Level ${lvl}`;
 
+    // snapshot columns: pet 20/21/22, weapon 23/24, shield 25/26
+    const petId = me[20], petName = me[21], petLvl = me[22];
+    const wpnId = me[23], wpnTier = me[24] || 0, shdId = me[25], shdTier = me[26] || 0;
+    const pfx = petEffects(petId, petLvl);
+    const wfx = weaponEffects(wpnId, wpnTier);
+    const sfx2 = weaponEffects(shdId, shdTier);
+    const magic = WEAPONS[wpnId]?.kind === 'magic';
+
     const rows = [
       ['Health', `${hp} / ${mhp}`],
-      ['Attack', `${Math.round(atk)}`],
-      ['Defense', `${Math.round((def.def || 0) * 100)}%`],
-      ['Range', `${(def.range || 0).toFixed(1)}`],
-      ['Attack speed', `${(def.rate || 0).toFixed(2)}/s`],
-      // snapshot row 19 carries the live (pet-buffed) move speed
+      [magic ? 'Magic power' : 'Attack', `${Math.round(atk)}`],
+      ['Defense', `${Math.round(Math.min((def.def || 0) + pfx.def + sfx2.def, PET.DEF_CAP) * 100)}%`],
+      ['Range', `${((def.range || 0) + wfx.range).toFixed(1)}`],
+      ['Attack speed', `${((def.rate || 0) * pfx.rate * wfx.rate).toFixed(2)}/s`],
+      // snapshot row 19 carries the live (pet+weapon-adjusted) move speed
       ['Move speed', `${(typeof me[19] === 'number' && me[19] > 0 ? me[19] : def.speed || 0).toFixed(1)}`],
-      ['Knockback', `${(def.knockback || 0).toFixed(1)}`],
+      ['Knockback', `${((def.knockback || 0) * pfx.kbMult).toFixed(1)}`],
     ];
-    if (def.aoe) rows.push(['Blast area', `${def.aoe.toFixed(1)}`]);
+    const crit = pfx.crit + wfx.crit;
+    if (crit > 0) rows.push(['Crit chance', `${Math.round(crit * 100)}% (×${PET.CRIT_MULT} damage)`]);
+    if (sfx2.block > 0) rows.push(['Block chance', `${Math.round(sfx2.block * 100)}%`]);
+    if (wfx.stun > 0) rows.push(['Stun chance', `${Math.round(wfx.stun * 100)}%`]);
+    if (def.aoe) {
+      rows.push(wfx.bolts > 0
+        ? ['Guided bolts', `${wfx.bolts} per cast`]
+        : ['Blast area', `${(def.aoe * wfx.aoe).toFixed(1)}`]);
+    }
     rows.push(['Experience', `${xp} / ${xpn}`]);
     rows.push(['Kills', `${kills}`]);
 
+    // equipped weapon & shield blocks — the gear the stats above
+    // already include (managed at Baru's smithy during checkpoints)
+    const gearBlock = (id, tier) => (id && WEAPONS[id])
+      ? `<div class="stat-pet">
+           <img class="stat-pet-img" src="${weaponImgSrc(id)}" alt="">
+           <div class="stat-pet-meta">
+             <span class="sp-name">${WEAPONS[id].name} ${tierBadge(tier)}</span>
+             <span class="sp-desc">${weaponStatText(id, tier)}</span>
+           </div>
+         </div>`
+      : '';
+
     // pet bonus block: read the companion off the snapshot row so it's
-    // clear where the extra stats are coming from (pet id/name/level at
-    // snapshot indices 20/21/22)
-    const petId = me[20], petName = me[21], petLvl = me[22];
+    // clear where the extra stats are coming from
     const petBlock = (petId && PETS[petId])
       ? `<div class="stat-pet">
            <img class="stat-pet-img" src="${petImgSrc(petId)}" alt="">
@@ -1053,7 +1274,7 @@ export class UI {
 
     $('stats-body').innerHTML =
       rows.map(([k, v]) => `<div class="stat-line"><span class="sk">${k}</span><span class="sv">${v}</span></div>`).join('') +
-      petBlock +
+      gearBlock(wpnId, wpnTier) + gearBlock(shdId, shdTier) + petBlock +
       `<div class="stat-power">
          <span class="sp-name">${SKILLS[cls]?.name || 'Special'}</span>
          <span class="sp-desc">${POWER_DESC[cls] || ''}</span>
@@ -1125,9 +1346,10 @@ export class UI {
         el.innerHTML = icon('cls-' + cls);
         el.style.color = CLASS_COLORS[cls] || 'var(--gold)';
       }
-      // keep an open stats sheet in sync as HP / level / attack change
+      // keep an open stats sheet in sync as HP / level / attack /
+      // pet / equipped gear change
       if (this.statsOpen) {
-        const key = `${lvl}|${hp}|${mhp}|${xp}|${me[14]}|${me[18]}`;
+        const key = `${lvl}|${hp}|${mhp}|${xp}|${me[14]}|${me[18]}|${me[20]}|${me[22]}|${me[23]}|${me[24]}|${me[25]}|${me[26]}`;
         if (key !== this._statsKey) { this._statsKey = key; this.renderStats(me); }
       }
       // hero name (so the player always sees who they are, top-left)

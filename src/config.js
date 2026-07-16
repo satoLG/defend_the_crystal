@@ -216,6 +216,203 @@ export function sanitizePetRef(pet) {
   return { id: pet.id, lvl, name };
 }
 
+// ---------- weapons & shields ----------
+// Bought with gold coins at the sanctuary weapon smith (opposite side
+// of the plaza from the pet vendor) and PERMANENT per character, like
+// pets. Every weapon carries its own stats which stack multiplicatively
+// (or additively where noted) on top of the class base + pet bonus:
+//   atk    damage multiplier (magic power for mage weapons)
+//   rate   attack-speed multiplier
+//   crit   critical-hit chance ADDED (physical weapons only)
+//   range  attack range ADDED (world units)
+//   move   move-speed multiplier — big heavy weapons slow you slightly
+//   aoe    blast-area multiplier (magic weapons)
+//   def    damage absorption ADDED (shields)
+//   block  chance to fully block a hit (shields)
+// Starting weapons are (near-)neutral so current class performance
+// barely moves; everything else is priced in gold coins.
+export const WEAPON_TIER_NAMES = ['Normal', 'Gold', 'Crystal'];
+export const WEAPON_TIER_MAX = 2; // 0 normal → 1 gold → 2 crystal
+
+// per-tier growth applied on top of a weapon's base stats
+export const WEAPON_TIER_FX = [
+  { atk: 1,    rate: 1,    crit: 0,    range: 0,   def: 0,    block: 0,    bonus: 1 },
+  { atk: 1.14, rate: 1.05, crit: 0.03, range: 0.2, def: 0.03, block: 0.04, bonus: 1.5 },
+  { atk: 1.30, rate: 1.10, crit: 0.06, range: 0.4, def: 0.06, block: 0.08, bonus: 2 },
+];
+
+export const STUN = { DUR: 1.1, BOSS_MULT: 0.4 }; // hammer bonus
+export const ORB = { BOLT_MULT: 0.45 };           // damage per guided bolt
+
+export const WEAPONS = {
+  // ---- melee (physical): atk, rate, crit, range, move ----
+  axe: {
+    name: 'Axe', slot: 'weapon', kind: 'melee', price: 4,
+    classes: ['berserker', 'tanker'], starterFor: ['berserker'],
+    atk: 1.12, rate: 0.92, crit: 0.08,
+    blurb: 'Hits harder than a sword and bites deep on crits, but swings slower.',
+  },
+  greataxe: {
+    name: 'Great Axe', slot: 'weapon', kind: 'melee', price: 8,
+    classes: ['berserker'],
+    atk: 1.32, rate: 0.8, crit: 0.08, range: 0.4, move: 0.96,
+    blurb: 'A monstrous axe — huge damage and reach, slow swings, heavy to carry.',
+  },
+  hammer: {
+    name: 'War Hammer', slot: 'weapon', kind: 'melee', price: 6,
+    classes: ['berserker'],
+    atk: 1.12, rate: 0.86, crit: 0.08, move: 0.98, stun: 0.10,
+    blurb: 'Axe-grade damage a touch slower — and skulls ring: chance to stun.',
+    bonusText: (v) => `${Math.round(v * 100)}% chance to stun enemies`,
+  },
+  spear: {
+    name: 'Spear', slot: 'weapon', kind: 'melee', price: 5,
+    classes: ['tanker'],
+    atk: 0.95, rate: 1.0, crit: 0.03, range: 0.8,
+    blurb: 'Slightly lighter hits, but the longest reach of any melee weapon.',
+  },
+  sword: {
+    name: 'Sword', slot: 'weapon', kind: 'melee', price: 3,
+    classes: ['tanker'], starterFor: ['tanker'],
+    atk: 1.0, rate: 1.0, crit: 0.05,
+    blurb: 'The all-rounder blade every other weapon is measured against.',
+  },
+  greatsword: {
+    name: 'Great Sword', slot: 'weapon', kind: 'melee', price: 8,
+    classes: ['berserker'],
+    atk: 1.18, rate: 0.9, crit: 0.05, range: 0.4, move: 0.98,
+    blurb: 'A two-hander: more damage and reach than a sword, slightly slower.',
+  },
+  // ---- shields (tanker off-hand): def, block, move ----
+  shield: {
+    name: 'Shield', slot: 'shield', kind: 'shield', price: 3,
+    classes: ['tanker'], starterFor: ['tanker'],
+    block: 0.05,
+    blurb: 'A trusty round shield — every so often it blocks a hit outright.',
+  },
+  greatshield: {
+    name: 'Great Shield', slot: 'shield', kind: 'shield', price: 6,
+    classes: ['tanker'],
+    def: 0.06, block: 0.12, move: 0.94,
+    blurb: 'A wall of a shield: more absorption, more blocks, a heavier stride.',
+  },
+  // ---- bows (physical, ranged) ----
+  bow: {
+    name: 'Bow', slot: 'weapon', kind: 'bow', price: 3,
+    classes: ['archer'], starterFor: ['archer'],
+    atk: 1.0, rate: 1.0, crit: 0.05,
+    blurb: 'The trusty longbow — balanced damage, range and speed.',
+  },
+  greatbow: {
+    name: 'Great Bow', slot: 'weapon', kind: 'bow', price: 7,
+    classes: ['archer'],
+    atk: 1.2, rate: 0.85, crit: 0.05, range: 1.2, move: 0.97,
+    blurb: 'A towering warbow: harder hits from farther away, slower to draw.',
+  },
+  crossbow: {
+    name: 'Crossbow', slot: 'weapon', kind: 'bow', price: 5,
+    classes: ['archer'],
+    atk: 0.85, rate: 1.25, crit: 0.05,
+    blurb: 'Lighter bolts but a rapid trigger — the fastest shooter of the bows.',
+  },
+  // ---- magic (mage): atk = magic power, aoe = blast-area multiplier ----
+  staff: {
+    name: 'Arcane Staff', slot: 'weapon', kind: 'magic', price: 3,
+    classes: ['mage'], starterFor: ['mage'],
+    atk: 1.0, rate: 1.0, aoe: 1.0,
+    blurb: 'The full-size caster staff — the strongest single blast a mage can throw.',
+  },
+  wand: {
+    name: 'Wand', slot: 'weapon', kind: 'magic', price: 5,
+    classes: ['mage'],
+    atk: 0.88, rate: 1.18, aoe: 0.75,
+    blurb: 'A short red-crystal wand: quicker casts, smaller blasts.',
+  },
+  orb: {
+    name: 'Arcane Orb', slot: 'weapon', kind: 'magic', price: 7,
+    classes: ['mage'],
+    atk: 0.8, rate: 1.22, aoe: 0, bolts: 3,
+    blurb: 'No blast at all — instead it launches guided bolts at several enemies.',
+    bonusText: (v) => `${v} guided bolts per cast`,
+  },
+};
+
+// which weapons each class may buy/equip (derived once)
+export const CLASS_WEAPONS = {};
+for (const [id, def] of Object.entries(WEAPONS)) {
+  for (const cls of def.classes) (CLASS_WEAPONS[cls] ??= []).push(id);
+}
+
+export function classStarterWeapons(cls) {
+  return Object.entries(WEAPONS)
+    .filter(([, d]) => d.starterFor?.includes(cls))
+    .map(([id]) => id);
+}
+
+const clampTier = (t) => Math.min(Math.max(Math.round(Number(t) || 0), 0), WEAPON_TIER_MAX);
+
+// Resolved stats for a weapon at a tier — every field present so the
+// sim can apply the whole struct unconditionally (identity defaults).
+export function weaponEffects(id, tier) {
+  const fx = {
+    atk: 1, rate: 1, crit: 0, range: 0, move: 1,
+    aoe: 1, def: 0, block: 0, stun: 0, bolts: 0,
+  };
+  const def = WEAPONS[id];
+  if (!def) return fx;
+  const t = WEAPON_TIER_FX[clampTier(tier)];
+  fx.atk = (def.atk ?? 1) * t.atk;
+  fx.rate = (def.rate ?? 1) * t.rate;
+  fx.crit = def.crit ? def.crit + t.crit : 0;
+  fx.range = (def.range || 0) + (def.slot === 'weapon' && def.kind !== 'shield' ? t.range : 0);
+  fx.move = def.move ?? 1;
+  fx.aoe = def.aoe ?? 1;
+  fx.def = (def.def || 0) + (def.slot === 'shield' ? t.def : 0);
+  fx.block = def.block ? def.block + t.block : 0;
+  fx.stun = def.stun ? Math.min(def.stun * t.bonus, 0.35) : 0;
+  fx.bolts = def.bolts ? def.bolts + clampTier(tier) : 0; // 3 → 4 → 5
+  return fx;
+}
+
+// upgrade to the NEXT tier costs this many gold coins
+export function weaponUpgradeCost(id, tier) {
+  const def = WEAPONS[id];
+  if (!def || clampTier(tier) >= WEAPON_TIER_MAX) return 0;
+  return Math.max(2, Math.round(def.price * (clampTier(tier) === 0 ? 1 : 1.6)));
+}
+
+// short human stat lines for the shop cards & the character sheet
+export function weaponStatText(id, tier) {
+  const def = WEAPONS[id];
+  if (!def) return '';
+  const fx = weaponEffects(id, tier);
+  const pc = (v) => `${v > 1 ? '+' : ''}${Math.round((v - 1) * 100)}%`;
+  const parts = [];
+  if (def.slot === 'shield') {
+    if (fx.def) parts.push(`+${Math.round(fx.def * 100)}% defense`);
+    parts.push(`${Math.round(fx.block * 100)}% block`);
+  } else {
+    if (fx.atk !== 1) parts.push(`${pc(fx.atk)} ${def.kind === 'magic' ? 'magic power' : 'damage'}`);
+    if (fx.rate !== 1) parts.push(`${pc(fx.rate)} atk speed`);
+    if (fx.crit) parts.push(`${Math.round(fx.crit * 100)}% crit`);
+    if (fx.range) parts.push(`+${fx.range.toFixed(1)} range`);
+    if (def.kind === 'magic' && !def.bolts && fx.aoe !== 1) parts.push(`${pc(fx.aoe)} blast area`);
+  }
+  if (fx.move !== 1) parts.push(`${pc(fx.move)} move speed`);
+  if (def.bonusText) parts.push(def.bonusText(def.stun ? fx.stun : fx.bolts));
+  return parts.join(' · ');
+}
+
+// validate a {id, tier} weapon reference (wire / storage); `slot`
+// restricts to weapon-or-shield, `cls` to that class's arsenal
+export function sanitizeWeaponRef(ref, cls, slot) {
+  if (!ref || typeof ref !== 'object') return null;
+  const def = WEAPONS[ref.id];
+  if (!def || def.slot !== slot) return null;
+  if (cls && !def.classes.includes(cls)) return null;
+  return { id: ref.id, tier: clampTier(ref.tier) };
+}
+
 // ---------- gold coins ----------
 // Permanent currency for sanctuary vendors. Only (mini-)bosses drop
 // them, one orb PER PLAYER (like all drops), so everyone earns the same.

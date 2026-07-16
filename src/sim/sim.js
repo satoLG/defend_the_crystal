@@ -5,6 +5,7 @@ import {
   OBSTACLE_STOCK_CAP, ENEMIES, ENEMY, WAVES, SCALING, scaleFor,
   CRYSTAL_BREACH_LIMIT, GRID, JUMP, DROPS, SUMMON, BOSSES, SKILLS, NAME_MAX,
   PET, GOLD, petEffects, sanitizePetRef, jumpDurFor,
+  WEAPONS, STUN, ORB, weaponEffects, sanitizeWeaponRef, classStarterWeapons,
 } from '../config.js';
 import {
   Grid, cellToWorld, worldToCell, canJumpFrom, enemyJumpShortcut, idx,
@@ -55,11 +56,17 @@ export class Sim {
 
   // ---------------- players ----------------
 
-  addPlayer(id, name, cls, colors, pet = null) {
+  addPlayer(id, name, cls, colors, pet = null, loadout = null) {
     if (this.getPlayer(id)) return;
     if (!CLASSES[cls]) cls = 'berserker';
     const base = CLASSES[cls];
     const spawn = this.playerSpawnPos();
+    // fall back to the class's free starter weapon/shield when the
+    // client sent nothing (or something that isn't in this class's arsenal)
+    const starterRef = (slot) => {
+      const wid = classStarterWeapons(cls).find((w) => WEAPONS[w].slot === slot);
+      return wid ? { id: wid, tier: 0 } : null;
+    };
     const p = this.world.add({
       player: true, id, name: (name || 'Hero').slice(0, NAME_MAX), cls,
       colors: colors || {},
@@ -67,16 +74,19 @@ export class Sim {
       hp: base.hp, maxHp: base.hp, atk: base.atk, def: base.def,
       range: base.range, rate: base.rate, speed: base.speed,
       aoe: base.aoe || 0, kbPower: base.knockback,
-      // raw = class base grown by hero level-ups only; the pet bonus is
-      // layered on top by applyPetStats so it can be swapped mid-match
+      // raw = class base grown by hero level-ups only; pet + weapon
+      // bonuses are layered on top by applyStats so both can be
+      // swapped mid-match
       rawMaxHp: base.hp, rawAtk: base.atk,
       pet: sanitizePetRef(pet),
+      weapon: sanitizeWeaponRef(loadout?.weapon, cls, 'weapon') || starterRef('weapon'),
+      shield: sanitizeWeaponRef(loadout?.shield, cls, 'shield') || starterRef('shield'),
       lvl: 1, xp: 0, xpNext: this.xpNext(1),
       dead: false, respawnT: 0, atkCd: 0, lastDmg: -99, jumpT: 0,
       skillCd: 0, wallT: 0, dashT: 0,
       kills: 0, obst: 0, lastInputT: this.time,
     });
-    this.applyPetStats(p);
+    this.applyStats(p);
     p.hp = p.maxHp;
     if (this.phase !== 'lobby') {
       // late joiner: give them the starting obstacle stock
@@ -110,19 +120,28 @@ export class Sim {
 
   xpNext(lvl) { return Math.round(PLAYER.XP_BASE * Math.pow(lvl, PLAYER.XP_POW)); }
 
-  // (Re)derive every pet-affected stat from the raw (hero-level-scaled)
-  // values + the equipped pet's effects. Safe to call at any time: on
-  // join, on every hero level-up and whenever the pet is swapped.
-  applyPetStats(p) {
+  // (Re)derive every stat from the raw (hero-level-scaled) values +
+  // the equipped pet's effects + the equipped weapon & shield. Safe to
+  // call at any time: on join, on every hero level-up and whenever the
+  // pet or the loadout is swapped.
+  applyStats(p) {
     const base = CLASSES[p.cls];
     const fx = petEffects(p.pet?.id, p.pet?.lvl);
+    const wfx = weaponEffects(p.weapon?.id, p.weapon?.tier);
+    const sfx = weaponEffects(p.shield?.id, p.shield?.tier);
     p.maxHp = Math.round(p.rawMaxHp * fx.hp);
-    p.atk = p.rawAtk * fx.atk;
-    p.def = Math.min(base.def + fx.def, PET.DEF_CAP);
-    p.speed = base.speed * fx.spd;
-    p.rate = base.rate * fx.rate;
+    p.atk = p.rawAtk * fx.atk * wfx.atk;
+    p.def = Math.min(base.def + fx.def + sfx.def, PET.DEF_CAP);
+    // big heavy weapons (and the great shield) weigh the stride down a bit
+    p.speed = base.speed * fx.spd * wfx.move * sfx.move;
+    p.rate = base.rate * fx.rate * wfx.rate;
+    p.range = base.range + wfx.range;
+    p.aoe = (base.aoe || 0) * wfx.aoe;
     p.kbPower = base.knockback * fx.kbMult;
-    p.critCh = fx.crit;
+    p.critCh = fx.crit + wfx.crit;
+    p.blockCh = sfx.block;  // shield: chance to fully block a hit
+    p.stunCh = wfx.stun;    // war hammer: chance to stun on hit
+    p.bolts = wfx.bolts;    // arcane orb: guided bolts instead of a blast
     p.luck = fx.luck;
     p.ptsMult = fx.pts;
     p.collectCells = DROPS.COLLECT_CELLS + fx.collect;
@@ -140,8 +159,23 @@ export class Sim {
     const pet = sanitizePetRef(act?.pet);
     const changed = p.pet?.id !== pet?.id;
     p.pet = pet;
-    this.applyPetStats(p);
+    this.applyStats(p);
     if (changed && this.phase !== 'lobby') this.emit({ t: 'petswap', id: p.id });
+  }
+
+  // swap the equipped weapon/shield — the owning client already
+  // validated ownership & tier, the host only sanity-checks the refs
+  // against the class arsenal and re-derives the stats
+  trySetLoadout(p, act) {
+    const weapon = sanitizeWeaponRef(act?.weapon, p.cls, 'weapon');
+    const shield = sanitizeWeaponRef(act?.shield, p.cls, 'shield');
+    const changed =
+      (weapon && (p.weapon?.id !== weapon.id || p.weapon?.tier !== weapon.tier)) ||
+      p.shield?.id !== shield?.id || p.shield?.tier !== shield?.tier;
+    if (weapon) p.weapon = weapon; // the main weapon can never be unequipped
+    p.shield = shield;
+    this.applyStats(p);
+    if (changed && this.phase !== 'lobby') this.emit({ t: 'wswap', id: p.id });
   }
 
   // client-authoritative position, sanity-clamped by the host
@@ -187,7 +221,10 @@ export class Sim {
 
   restart() {
     // wipe entities, keep the roster
-    const roster = this.players.entities.map((p) => ({ id: p.id, name: p.name, cls: p.cls, colors: p.colors, pet: p.pet }));
+    const roster = this.players.entities.map((p) => ({
+      id: p.id, name: p.name, cls: p.cls, colors: p.colors, pet: p.pet,
+      loadout: { weapon: p.weapon, shield: p.shield },
+    }));
     for (const e of [...this.enemies.entities]) this.removeEnemy(e);
     for (const t of [...this.towers.entities]) this.world.remove(t);
     for (const o of [...this.obstacles.entities]) this.world.remove(o);
@@ -199,7 +236,7 @@ export class Sim {
     this.pending = [];
     this.drops = [];
     this.contReady.clear();
-    for (const r of roster) this.addPlayer(r.id, r.name, r.cls, r.colors, r.pet);
+    for (const r of roster) this.addPlayer(r.id, r.name, r.cls, r.colors, r.pet, r.loadout);
     this.start();
     this.emit({ t: 'restart' });
   }
@@ -277,6 +314,7 @@ export class Sim {
       case 'jump': return this.tryJump(p, act);
       case 'skill': return this.trySkill(p, act);
       case 'pet': return this.trySetPet(p, act);
+      case 'loadout': return this.trySetLoadout(p, act);
       case 'start': if (this.phase === 'build') this.startWave(); return;
       case 'cont': return this.setContinue(id);
       case 'restart': if (this.phase === 'over') this.restart(); return;
@@ -578,7 +616,7 @@ export class Sim {
       hp: stats.hp, maxHp: stats.hp, dmg: stats.dmg, speed: stats.speed,
       pts: stats.pts, xp: stats.xp, scale: stats.scale, breach: stats.breach,
       boss, flying: !!def.flying, state: 'path', targetId: null,
-      atkCd: 0, kbx: 0, kbz: 0, yaw: 0,
+      atkCd: 0, kbx: 0, kbz: 0, yaw: 0, stunT: 0,
       // special powers
       archer,
       jumper: !!def.jumper && !def.flying,
@@ -627,6 +665,13 @@ export class Sim {
       e.kbz += (dz / d) * mag;
     }
     this.emit({ t: 'hit', id: e.id });
+    // war hammer bonus: chance to stun (bosses shrug most of it off)
+    if (e.hp > 0 && killer && killer.stunCh > 0 && Math.random() < killer.stunCh) {
+      const dur = e.boss ? STUN.DUR * STUN.BOSS_MULT : STUN.DUR;
+      if (dur > (e.stunT || 0)) e.stunT = dur;
+      const pos = e.vehicle.position;
+      this.emit({ t: 'stun', id: e.id, x: rnd2(pos.x), z: rnd2(pos.z) });
+    }
     if (e.hp <= 0) {
       const pos = e.vehicle.position;
       this.emit({ t: 'die', id: e.id, kind: e.kind, x: rnd2(pos.x), z: rnd2(pos.z), boss: e.boss });
@@ -748,10 +793,10 @@ export class Sim {
       p.xp -= p.xpNext;
       p.lvl += 1;
       p.xpNext = this.xpNext(p.lvl);
-      // grow the raw stats, then re-layer the pet bonus on top
+      // grow the raw stats, then re-layer the pet + weapon bonuses on top
       p.rawMaxHp = Math.round(p.rawMaxHp * PLAYER.LEVEL_HP_MULT);
       p.rawAtk *= PLAYER.LEVEL_ATK_MULT;
-      this.applyPetStats(p);
+      this.applyStats(p);
       p.hp = Math.min(p.maxHp, p.hp + (p.maxHp - p.hp) * PLAYER.LEVEL_HEAL);
       this.emit({ t: 'lvl', id: p.id, lvl: p.lvl });
     }
@@ -759,6 +804,11 @@ export class Sim {
 
   damagePlayer(p, rawDmg, kbx, kbz) {
     if (p.dead) return;
+    // shields can block a hit outright — no damage, no knockback
+    if (p.blockCh > 0 && Math.random() < p.blockCh) {
+      this.emit({ t: 'block', id: p.id, x: rnd2(p.x), z: rnd2(p.z) });
+      return;
+    }
     // wall mode (tanker skill): doubled defense, immune to knockback
     const wall = p.wallT > 0;
     const def = wall ? Math.min(p.def * SKILLS.tanker.defMult, SKILLS.tanker.defCap) : p.def;
@@ -972,6 +1022,31 @@ export class Sim {
           const e = this.enemies.entities.find((n) => n.id === id);
           if (e) this.damageEnemy(e, dmg, kx, kz, pid);
         }});
+      } else if (p.cls === 'mage' && p.bolts > 0) {
+        // arcane orb: no blast — several guided bolts split across the
+        // nearest enemies in range (cycling when there are fewer foes)
+        const foes = [];
+        for (const e of this.enemies) {
+          const ep = e.vehicle.position;
+          const d = dist2d(p.x, p.z, ep.x, ep.z);
+          if (d <= p.range + ENEMY.RADIUS) foes.push({ e, d });
+        }
+        foes.sort((a, b) => a.d - b.d);
+        const targets = foes.slice(0, p.bolts);
+        for (let i = 0; i < p.bolts; i++) {
+          const f = targets[i % targets.length];
+          const bp = f.e.vehicle.position;
+          const ft = Math.max(f.d / 14, 0.12) + i * 0.05; // staggered volley
+          this.emit({
+            t: 'shoot', k: 'magic',
+            f: [rnd2(p.x), 1.15, rnd2(p.z)], to: [rnd2(bp.x), 0.6, rnd2(bp.z)], ft: rnd2(ft),
+          });
+          const id = f.e.id, dmg = p.atk * ORB.BOLT_MULT, pid = p.id;
+          this.pending.push({ at: this.time + ft, fn: () => {
+            const e = this.enemies.entities.find((n) => n.id === id);
+            if (e) this.damageEnemy(e, dmg, 0.5, 0, pid);
+          }});
+        }
       } else if (p.cls === 'mage') {
         const cx = tp.x, cz = tp.z, dmg = p.atk, r = p.aoe, pid = p.id, kb = p.kbPower;
         this.emit({
@@ -1069,6 +1144,15 @@ export class Sim {
         e.kbx *= decay; e.kbz *= decay;
         if (Math.abs(e.kbx) < 0.02) e.kbx = 0;
         if (Math.abs(e.kbz) < 0.02) e.kbz = 0;
+      }
+
+      // stunned (war hammer): rooted in place, can't attack or march —
+      // knockback above still shoves the ragdoll around
+      if (e.stunT > 0) {
+        e.stunT = Math.max(e.stunT - dt, 0);
+        e.seek.target.copy(pos);
+        e.vehicle.velocity.set(0, 0, 0);
+        continue;
       }
 
       // acquire / drop aggro
@@ -1266,6 +1350,10 @@ export class Sim {
         // pet-affected move speed (clients predict with it) + the
         // companion itself, so every peer can render & label it
         rnd2(p.speed), p.pet?.id || '', p.pet?.name || '', p.pet?.lvl || 0,
+        // equipped weapon & shield (+ tiers) so every peer renders the
+        // right prop with the right gold/crystal finish
+        p.weapon?.id || '', p.weapon?.tier || 0,
+        p.shield?.id || '', p.shield?.tier || 0,
       ]),
       en: this.enemies.entities.map((e) => [
         e.id, e.kind, rnd2(e.vehicle.position.x), rnd2(e.vehicle.position.z),

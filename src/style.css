@@ -802,6 +802,33 @@ input:focus { border-color: var(--gold); }
   50% { box-shadow: 0 4px 16px rgba(0, 0, 0, 0.55), 0 0 26px rgba(232, 184, 75, 0.85); }
 }
 
+/* floating call-to-action when standing at Baru's smithy (opposite
+   corner from the pet stall, so the two never show together) */
+#weaponshop-prompt {
+  position: absolute; left: 50%; transform: translateX(-50%);
+  bottom: calc(max(10px, env(safe-area-inset-bottom)) + 150px);
+  background: linear-gradient(180deg, #9fc8e8, #4a7aa8);
+  color: #0c1a28; border: 2px solid #cfe6f7; border-radius: 20px;
+  padding: 9px 20px; font-family: inherit; font-weight: 800; font-size: 0.95rem;
+  cursor: pointer; display: flex; align-items: center; gap: 8px;
+  animation: weaponshop-glow 1.6s infinite; touch-action: none;
+}
+@keyframes weaponshop-glow {
+  0%, 100% { box-shadow: 0 4px 16px rgba(0, 0, 0, 0.55), 0 0 14px rgba(143, 208, 255, 0.4); }
+  50% { box-shadow: 0 4px 16px rgba(0, 0, 0, 0.55), 0 0 26px rgba(143, 208, 255, 0.85); }
+}
+
+/* weapon tier badges: Normal → Gold → Crystal */
+.wpn-tier {
+  display: inline-block; padding: 1px 7px; border-radius: 8px;
+  font-size: 0.62rem; font-weight: 800; text-transform: uppercase;
+  letter-spacing: 0.5px; vertical-align: middle;
+  background: rgba(240, 233, 216, 0.14); color: rgba(240, 233, 216, 0.75);
+}
+.wpn-tier.t1 { background: rgba(232, 184, 75, 0.22); color: #f0c45e; }
+.wpn-tier.t2 { background: rgba(102, 224, 255, 0.2); color: #8fe0ff; }
+.wpn-upg-btn { white-space: nowrap; }
+
 /* pet panel (manage + shop) */
 .pet-modal { position: relative; max-width: 420px; text-align: left; }
 .pet-modal h2 { text-align: center; }
