@@ -25,27 +25,47 @@ const MOUNTS = {
   axe: { bone: 'arm-right', pos: [-0.225, 0.01, 0.09], rot: [0.66, 0.6, -0.45] },
   sword: { bone: 'arm-right', pos: [-0.225, 0.065, 0.115], rot: [0.54, 1.09, 0.11] },
   shield: { bone: 'arm-left', pos: [0.175, 0.055, 0.195], rot: [-0.26, 0.29, -0.2] },
-  bow: { bone: 'arm-right', pos: [0.02, -0.155, 0.255], rot: [-2.78, 0.23, -1] },
+  // bow mount dialed in with the creation-screen bow tuner
+  bow: { bone: 'arm-right', pos: [0.025, -0.155, 0.22], rot: [-0.862, 0.668, -1.962] },
+  // the crossbow model carries its own base orientation, so it keeps
+  // the original bow mount rather than the tuned longbow one
+  crossbow: { bone: 'arm-right', pos: [0.02, -0.155, 0.255], rot: [-2.78, 0.23, -1] },
   staff: { bone: 'arm-right', pos: [-0.225, 0.29, 0.175], rot: [0, 0.35, 3.142] },
 };
 
-// one prop spec per purchasable weapon (see WEAPONS in config.js)
+// one prop spec per purchasable weapon (see WEAPONS in config.js).
+// tierMode decides how the gold/crystal upgrade finish is painted on:
+//   'metal'  — only the grey metal of the weapon (blade/head), so wood
+//              handles keep their look (melee weapons & shields)
+//   'all'    — the whole model (bows)
+//   'crystal'— only the separate crystal gem(s) (mage staff / wand)
+//   'orb'    — the whole procedural orb
 export const WEAPON_PROPS = {
-  axe: { gen: makeAxe, ...MOUNTS.axe, scale: 1 },
-  greataxe: { gen: makeGreatAxe, ...MOUNTS.axe, scale: 1 },
-  hammer: { gen: makeHammer, ...MOUNTS.axe, scale: 1 },
-  sword: { key: 'prop-sword', ...MOUNTS.sword, scale: 0.94 },
-  greatsword: { gen: makeGreatSword, ...MOUNTS.sword, scale: 0.94 },
-  spear: { gen: makeSpear, ...MOUNTS.sword, scale: 1 },
-  shield: { key: 'prop-shield', ...MOUNTS.shield, scale: 1.32 },
-  greatshield: { gen: makeGreatShield, ...MOUNTS.shield, scale: 1.32 },
-  bow: { gen: makeBow, ...MOUNTS.bow, scale: 1.1 },
-  greatbow: { gen: () => makeBow(0.6), ...MOUNTS.bow, scale: 1.25 },
-  crossbow: { gen: makeCrossbow, ...MOUNTS.bow, scale: 1.4 },
-  staff: { key: 'prop-staff', ...MOUNTS.staff, scale: 1.32, crystalTip: 0x8a2be2 },
-  wand: { gen: makeWand, ...MOUNTS.staff, scale: 1.32 },
-  orb: { gen: makeOrbProp, bone: 'arm-right', pos: [-0.225, 0.06, 0.14], rot: [0, 0, 0], scale: 1 },
+  axe: { gen: makeAxe, ...MOUNTS.axe, scale: 1, tierMode: 'metal' },
+  greataxe: { gen: makeGreatAxe, ...MOUNTS.axe, scale: 1, tierMode: 'metal' },
+  hammer: { gen: makeHammer, ...MOUNTS.axe, scale: 1, tierMode: 'metal' },
+  sword: { key: 'prop-sword', ...MOUNTS.sword, scale: 0.94, tierMode: 'metal' },
+  greatsword: { gen: makeGreatSword, ...MOUNTS.sword, scale: 0.94, tierMode: 'metal' },
+  spear: { gen: makeSpear, ...MOUNTS.sword, scale: 1, tierMode: 'metal' },
+  shield: { key: 'prop-shield', ...MOUNTS.shield, scale: 1.32, tierMode: 'metal' },
+  greatshield: { gen: makeGreatShield, ...MOUNTS.shield, scale: 1.32, tierMode: 'metal' },
+  bow: { gen: makeBow, ...MOUNTS.bow, scale: 1.1, tierMode: 'all' },
+  greatbow: { gen: () => makeBow(0.6), ...MOUNTS.bow, scale: 1.25, tierMode: 'all' },
+  crossbow: { gen: makeCrossbow, ...MOUNTS.crossbow, scale: 1.4, tierMode: 'all' },
+  staff: { key: 'prop-staff', ...MOUNTS.staff, scale: 1.32, crystalTip: 0x8a2be2, tierMode: 'crystal' },
+  wand: { gen: makeWand, ...MOUNTS.staff, scale: 1.32, tierMode: 'crystal' },
+  orb: { gen: makeOrbProp, bone: 'arm-right', pos: [-0.225, 0.06, 0.14], rot: [0, 0, 0], scale: 1, tierMode: 'orb' },
 };
+
+// per-tier accent colours reused by the finishes, projectiles and
+// attack effects: index 0 normal (unused), 1 gold, 2 crystal
+export const TIER_COLORS = [null, 0xffc41f, 0x7fe6ff];
+
+// swap an effect's base colour for the weapon's tier accent (gold /
+// crystal) so upgraded weapons throw upgraded-looking hits
+function tierEffectColor(base, wt) {
+  return wt > 0 && TIER_COLORS[wt] ? TIER_COLORS[wt] : base;
+}
 
 const QUIVER_SPEC = { gen: makeQuiver, bone: 'torso', pos: [-0.145, 0.055, -0.12], rot: [-0.02, -0.81, 0.41], scale: 1.03 };
 
@@ -178,6 +198,7 @@ export function makeWand() {
       o.material.color.set(0xff5a4a);
       o.material.emissive.set(0xd42a1a);
       o.material.emissiveIntensity = 0.85;
+      o.userData.isCrystal = true; // tier finish repaints only the gem
     }
   });
   holder.add(tip);
@@ -194,6 +215,7 @@ export function makeOrbProp() {
       roughness: 0.25, metalness: 0.1,
     })
   );
+  core.userData.orbCore = true;
   holder.add(core);
   const halo = new THREE.Mesh(
     new THREE.SphereGeometry(0.13, 12, 12),
@@ -213,23 +235,124 @@ export function makeOrbProp() {
   return holder;
 }
 
-// gold / crystal upgrade finish painted over a weapon prop's meshes
-export function applyTierFinish(holder, tier) {
+// ---- gold / crystal upgrade finish -------------------------------
+// Kenney weapons are a single textured mesh (one "colormap" atlas), so
+// a flat material tint would gild the wooden handle too. Instead we
+// recolour the ATLAS PIXELS: for melee weapons only the grey (metal)
+// swatches turn gold/crystal; bows recolour the whole texture. The
+// recoloured textures are cached and shared across every holder.
+const skinCache = new Map();
+const clamp255 = (v) => Math.max(0, Math.min(255, v | 0));
+
+function tintTexture(map, tier, metalOnly) {
+  const key = `${map.uuid}|${tier}|${metalOnly ? 'm' : 'a'}`;
+  if (skinCache.has(key)) return skinCache.get(key);
+  const img = map.image;
+  const W = img.width, H = img.height;
+  const cv = document.createElement('canvas');
+  cv.width = W; cv.height = H;
+  const ctx = cv.getContext('2d', { willReadFrequently: true });
+  ctx.drawImage(img, 0, 0);
+  const data = ctx.getImageData(0, 0, W, H);
+  const d = data.data;
+  const gold = tier === 1;
+  for (let i = 0; i < d.length; i += 4) {
+    if (d[i + 3] < 8) continue;
+    const r = d[i], g = d[i + 1], b = d[i + 2];
+    const mx = Math.max(r, g, b), mn = Math.min(r, g, b);
+    const sat = mx === 0 ? 0 : (mx - mn) / mx;
+    // metal = a fairly unsaturated, not-too-dark swatch
+    if (metalOnly && !(sat < 0.22 && mx > 55)) continue;
+    const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+    if (gold) {
+      // bright, saturated gold (kept light — a dark map + metalness
+      // reads brown, so the colour itself carries the shine)
+      d[i] = clamp255(lum * 150 + 100);
+      d[i + 1] = clamp255(lum * 130 + 78);
+      d[i + 2] = clamp255(lum * 45 + 8);
+    } else {
+      d[i] = clamp255(lum * 120 + 25);
+      d[i + 1] = clamp255(lum * 205 + 60);
+      d[i + 2] = clamp255(lum * 205 + 95);
+    }
+  }
+  ctx.putImageData(data, 0, 0);
+  const tex = new THREE.CanvasTexture(cv);
+  tex.flipY = map.flipY;
+  tex.colorSpace = map.colorSpace;
+  tex.wrapS = map.wrapS; tex.wrapT = map.wrapT;
+  tex.magFilter = map.magFilter; tex.minFilter = map.minFilter;
+  tex.needsUpdate = true;
+  skinCache.set(key, tex);
+  return tex;
+}
+
+// paint the gold/crystal finish onto a built weapon holder per its mode
+export function applyTierFinish(holder, tier, mode = 'metal') {
   if (!tier) return;
   const gold = tier === 1;
+  const accent = new THREE.Color(gold ? 0xffb000 : 0x8fe0ff);
+  const emiss = new THREE.Color(gold ? 0x5a3c00 : 0x1f7fa0);
+
+  if (mode === 'crystal') {
+    // mage staff / wand — repaint only the gem, keep it solid (this is
+    // what used to break: the crystal turning translucent & invisible)
+    holder.traverse((o) => {
+      if (!o.isMesh || !o.material || !o.userData.isCrystal) return;
+      o.material = o.material.clone();
+      o.material.transparent = false; o.material.opacity = 1;
+      o.material.color.set(gold ? 0xffcf3a : 0xbdefff);
+      if (o.material.emissive) {
+        o.material.emissive.set(gold ? 0xc98a00 : 0x39b6e0);
+        o.material.emissiveIntensity = gold ? 0.6 : 0.95;
+      }
+    });
+    return;
+  }
+
+  if (mode === 'orb') {
+    // procedural orb — tint the core (solid) and recolour the halo/motes
+    // WITHOUT touching their additive/transparent blend (that was the bug)
+    holder.traverse((o) => {
+      if (!o.isMesh || !o.material) return;
+      o.material = o.material.clone();
+      if (o.userData.orbCore) {
+        o.material.color.set(gold ? 0xffd66a : 0xcdf3ff);
+        if (o.material.emissive) {
+          o.material.emissive.set(gold ? 0xc98a00 : 0x39b6e0);
+          o.material.emissiveIntensity = 1;
+        }
+      } else {
+        o.material.color.set(gold ? 0xffc21a : 0x8fe0ff); // halo/motes only
+      }
+    });
+    return;
+  }
+
+  // metal / all — recolour the atlas texture (metal-only for melee)
+  const metalOnly = mode === 'metal';
   holder.traverse((o) => {
     if (!o.isMesh || !o.material) return;
     o.material = o.material.clone();
-    if (gold) {
-      o.material.color.lerp(new THREE.Color(0xffc84a), 0.72);
-      if ('metalness' in o.material) { o.material.metalness = 0.8; o.material.roughness = 0.35; }
-      if (o.material.emissive) { o.material.emissive.set(0x6a4a08); o.material.emissiveIntensity = 0.3; }
+    if (o.material.map && o.material.map.image) {
+      o.material.map = tintTexture(o.material.map, tier, metalOnly);
+      o.material.color.set(0xffffff);            // let the texture show true
+      o.material.needsUpdate = true;
+      // keep metalness LOW — without an env map a metallic surface just
+      // renders dark (that's what made the gold read brown); a faint
+      // emissive gives the shine instead. Non-metal (wood) pixels were
+      // left untouched in the texture, so the glow tinting them slightly
+      // is negligible.
+      if ('metalness' in o.material) {
+        o.material.metalness = 0.15;
+        o.material.roughness = gold ? 0.45 : 0.3;
+        o.material.emissive.set(gold ? 0x3a2600 : 0x0f3a48);
+        o.material.emissiveIntensity = gold ? 0.35 : 0.45;
+      }
     } else {
-      o.material.color.lerp(new THREE.Color(0x9fe8ff), 0.78);
-      o.material.transparent = true;
-      o.material.opacity = 0.92;
-      if ('metalness' in o.material) { o.material.metalness = 0.25; o.material.roughness = 0.15; }
-      if (o.material.emissive) { o.material.emissive.set(0x2f9fc0); o.material.emissiveIntensity = 0.5; }
+      // procedural fallback (no texture) — flat tint
+      o.material.color.lerp(accent, 0.7);
+      if (o.material.emissive) { o.material.emissive.copy(emiss); o.material.emissiveIntensity = 0.4; }
     }
   });
 }
@@ -264,6 +387,42 @@ export function makeQuiver() {
   return g;
 }
 
+// Build the holder for one prop spec: the model (generator or key), an
+// optional staff crystal tip, and its gold/crystal upgrade finish.
+// Shared by the in-game actors, the creation preview and the offscreen
+// preview-image renderer so all three look identical.
+function buildProp(spec) {
+  const holder = new THREE.Group();
+  holder.add(spec.gen ? spec.gen() : instantiate(spec.key, { shadows: false }).group);
+  if (spec.crystalTip) {
+    // glowing crystal nestled in the staff's hook (values dialed in
+    // with a dev overlay while tuning weapon placement)
+    const tip = instantiate('prop-crystal', { shadows: false, cloneMaterials: true }).group;
+    tip.scale.setScalar(0.45);
+    tip.position.set(0, 0.055, -0.005);
+    tip.rotation.set(-3.15, 0.29, 0.05);
+    tip.traverse((o) => {
+      if (o.isMesh && o.material.emissive) {
+        o.material.emissive.set(spec.crystalTip);
+        o.material.emissiveIntensity = 0.7;
+        o.userData.isCrystal = true; // tier finish repaints only the gem
+      }
+    });
+    holder.add(tip);
+  }
+  // upgraded weapons wear their gold/crystal finish
+  applyTierFinish(holder, spec.tier || 0, spec.tierMode);
+  return holder;
+}
+
+// a fully-built, tier-finished weapon model at the origin (no bone
+// placement) — for the offscreen preview-image renderer
+export function buildWeaponPreview(id, tier = 0) {
+  const base = WEAPON_PROPS[id];
+  if (!base) return null;
+  return buildProp({ ...base, tier });
+}
+
 // Parent hand props onto a character's bones. Shared by the in-game
 // actors and the character-creation preview. Returns the holders so a
 // live actor can strip them again when its loadout changes.
@@ -272,26 +431,7 @@ export function attachProps(group, specs) {
   for (const spec of specs || []) {
     const bone = group.getObjectByName(spec.bone);
     if (!bone) continue;
-    const holder = new THREE.Group();
-    holder.add(spec.gen ? spec.gen() : instantiate(spec.key, { shadows: false }).group);
-    if (spec.crystalTip) {
-      // glowing crystal nestled in the staff's hook (values dialed in
-      // with a dev overlay while tuning weapon placement, relative to
-      // the staff holder)
-      const tip = instantiate('prop-crystal', { shadows: false, cloneMaterials: true }).group;
-      tip.scale.setScalar(0.45);
-      tip.position.set(0, 0.055, -0.005);
-      tip.rotation.set(-3.15, 0.29, 0.05);
-      tip.traverse((o) => {
-        if (o.isMesh && o.material.emissive) {
-          o.material.emissive.set(spec.crystalTip);
-          o.material.emissiveIntensity = 0.7;
-        }
-      });
-      holder.add(tip);
-    }
-    // upgraded weapons wear their gold/crystal finish
-    applyTierFinish(holder, spec.tier);
+    const holder = buildProp(spec);
     // raw props: bone space == raw model units, and the bone already
     // carries the character's scale, so placement is direct
     holder.scale.setScalar(spec.scale || 1);
@@ -1332,14 +1472,16 @@ export class GameView {
         if (typeof ev.tx === 'number') {
           a.group.rotation.y = Math.atan2(ev.tx - a.group.position.x, ev.tz - a.group.position.z);
         }
-        // melee swings get a visible slash arc + swing sound
+        // melee swings get a visible flourish + swing sound
         // (ev.r marks ranged enemy attacks: arrows / lobbed pumpkins)
         const isMelee = a.cls ? (a.cls === 'berserker' || a.cls === 'tanker') : !ev.r;
         if (isMelee) {
-          this.spawnSlash(
-            a.group.position.x, a.group.position.z, a.group.rotation.y,
-            a.cls ? 0xffe9a8 : 0xff9a8a
-          );
+          const px = a.group.position.x, pz = a.group.position.z, yaw = a.group.rotation.y;
+          // upgraded weapons swing in gold / crystal instead of steel
+          const col = tierEffectColor(a.cls ? 0xffe9a8 : 0xff9a8a, ev.wt);
+          if (ev.wid === 'spear') this.spawnThrust(px, pz, yaw, col);       // stab
+          else if (ev.wid === 'hammer') this.spawnBash(px, pz, yaw, col);   // pound
+          else this.spawnSlash(px, pz, yaw, col);                           // slash
           sfx.melee();
         }
         break;
@@ -1559,6 +1701,57 @@ export class GameView {
     this.corpses.push({ actor: a, t: 0 });
   }
 
+  // spear stab: a bright lance streaking forward from the attacker,
+  // stretching along the facing then fading (a thrust, not an arc)
+  spawnThrust(x, z, yaw, color) {
+    const lance = new THREE.Mesh(
+      new THREE.ConeGeometry(0.16, 1.3, 8),
+      new THREE.MeshBasicMaterial({
+        color, transparent: true, opacity: 0.9,
+        depthWrite: false, blending: THREE.AdditiveBlending,
+      })
+    );
+    // cone points +Y by default — lay it along +Z (forward) tip-first
+    lance.rotation.x = Math.PI / 2;
+    lance.position.z = 0.65;
+    const holder = new THREE.Group();
+    holder.add(lance);
+    holder.position.set(x, 0.85, z);
+    holder.rotation.y = yaw;
+    this.scene.add(holder);
+    this.effects.push({ mesh: holder, inner: lance, t: 0, dur: 0.2, type: 'thrust' });
+  }
+
+  // war hammer pound: a heavy downward smash — a shockwave ring at the
+  // impact spot out front plus a quick vertical slam streak, no slicing
+  spawnBash(x, z, yaw, color) {
+    const ix = x + Math.sin(yaw) * 0.95, iz = z + Math.cos(yaw) * 0.95;
+    // ground shockwave
+    const ring = new THREE.Mesh(
+      this._ringGeo,
+      new THREE.MeshBasicMaterial({
+        color, transparent: true, opacity: 0.95,
+        depthWrite: false, side: THREE.DoubleSide,
+      })
+    );
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.set(ix, 0.06, iz);
+    ring.scale.setScalar(0.2);
+    this.scene.add(ring);
+    this.effects.push({ mesh: ring, t: 0, dur: 0.32, type: 'burst', r: 1.5 });
+    // vertical slam streak
+    const slam = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.16, 0.02, 1.1, 7),
+      new THREE.MeshBasicMaterial({
+        color, transparent: true, opacity: 0.85,
+        depthWrite: false, blending: THREE.AdditiveBlending,
+      })
+    );
+    slam.position.set(ix, 0.6, iz);
+    this.scene.add(slam);
+    this.effects.push({ mesh: slam, inner: slam, t: 0, dur: 0.16, type: 'slam' });
+  }
+
   // quick swipe arc that sweeps in front of a melee attacker
   spawnSlash(x, z, yaw, color) {
     const arc = new THREE.Mesh(
@@ -1585,17 +1778,20 @@ export class GameView {
   spawnProjectile(ev) {
     if (ev.k === 'magic') {
       // glowing bolt from the mage's staff (ev.big: the skill's
-      // giant arcane orb — same bolt, way scaled up)
+      // giant arcane orb — same bolt, way scaled up). Upgraded weapons
+      // recolour the bolt gold / crystal instead of arcane purple.
       const s = ev.big ? 2.8 : 1;
+      const coreCol = tierEffectColor(0xe6c4ff, ev.wt);
+      const haloCol = tierEffectColor(0xa050ff, ev.wt);
       const bolt = new THREE.Group();
       const core = new THREE.Mesh(
         new THREE.SphereGeometry(0.16 * s, 10, 10),
-        new THREE.MeshBasicMaterial({ color: 0xe6c4ff })
+        new THREE.MeshBasicMaterial({ color: coreCol })
       );
       const halo = new THREE.Mesh(
         new THREE.SphereGeometry(0.3 * s, 10, 10),
         new THREE.MeshBasicMaterial({
-          color: 0xa050ff, transparent: true, opacity: 0.45,
+          color: haloCol, transparent: true, opacity: 0.45,
           blending: THREE.AdditiveBlending, depthWrite: false,
         })
       );
@@ -1614,10 +1810,20 @@ export class GameView {
       arrow: 'ammo-arrow', cannonball: 'ammo-cannonball',
       boulder: 'ammo-boulder', pumpkin: 'prop-pumpkin',
     }[ev.k] || 'ammo-arrow';
-    const mesh = instantiate(key, { shadows: false }).group;
+    const mesh = instantiate(key, { shadows: false, cloneMaterials: ev.k === 'arrow' && ev.wt > 0 }).group;
     if (ev.k === 'boulder') mesh.scale.setScalar(1.5);
     if (ev.k === 'arrow') mesh.scale.setScalar(0.55);
     if (ev.k === 'pumpkin') mesh.scale.setScalar(1.6);
+    // a gold / crystal arrow for upgraded bows
+    if (ev.k === 'arrow' && ev.wt > 0) {
+      const glow = new THREE.Color(TIER_COLORS[ev.wt]);
+      mesh.traverse((o) => {
+        if (o.isMesh && o.material) {
+          o.material.color.lerp(glow, 0.8);
+          if (o.material.emissive) { o.material.emissive.copy(glow); o.material.emissiveIntensity = 0.5; }
+        }
+      });
+    }
     this.scene.add(mesh);
     this.projectiles.push({
       mesh,
@@ -1631,7 +1837,8 @@ export class GameView {
   }
 
   spawnAoe(ev) {
-    const color = { mage: 0xc07dff, cannonball: 0xffa040, boulder: 0xcfa070, pumpkin: 0xff8c1a }[ev.k] || 0xffffff;
+    let color = { mage: 0xc07dff, cannonball: 0xffa040, boulder: 0xcfa070, pumpkin: 0xff8c1a }[ev.k] || 0xffffff;
+    if (ev.k === 'mage') color = tierEffectColor(color, ev.wt); // gold/crystal blast
     if (ev.ft > 0) {
       // telegraph circle, then burst
       const warn = new THREE.Mesh(
@@ -1831,6 +2038,14 @@ export class GameView {
         e.mesh.rotation.y = e.baseYaw - 0.55 + easeOut(k) * 1.2;
         e.inner.material.opacity = 0.9 * (1 - k * k);
         e.inner.scale.setScalar(1 + k * 0.25);
+      } else if (e.type === 'thrust') {
+        // lunge the lance forward then fade (a stab)
+        e.inner.position.z = 0.35 + easeOut(k) * 0.7;
+        e.inner.material.opacity = 0.9 * (1 - k);
+      } else if (e.type === 'slam') {
+        // hammer's vertical smash streak drops and fades fast
+        e.inner.material.opacity = 0.85 * (1 - k);
+        e.inner.scale.y = 1 - k * 0.6;
       }
     }
 

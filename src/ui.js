@@ -72,8 +72,10 @@ const entityImg = (name) =>
 const petImgSrc = (petId) =>
   `${import.meta.env.BASE_URL || './'}img/pets/animal-${petId}.png`;
 
-const weaponImgSrc = (weaponId) =>
-  `${import.meta.env.BASE_URL || './'}img/weapons/${weaponId}.png`;
+// the weapon's preview render for its upgrade tier (0 base / 1 gold /
+// 2 crystal) — the 3D model, and thus the print, changes on upgrade
+const weaponImgSrc = (weaponId, tier = 0) =>
+  `${import.meta.env.BASE_URL || './'}img/weapons/${weaponId}${['', '-g', '-c'][tier] || ''}.png`;
 
 // tier badge chip (Normal / Gold / Crystal)
 const tierBadge = (tier) =>
@@ -1137,7 +1139,7 @@ export class UI {
       card.className = 'pet-card' + (active ? ' active' : '');
       card.dataset.weapon = id;
       card.innerHTML =
-        `<img class="pet-img" src="${weaponImgSrc(id)}" alt="">
+        `<img class="pet-img" src="${weaponImgSrc(id, owned.tier)}" alt="">
          <div class="pet-meta">
            <div class="pet-kind">${def.name} ${tierBadge(owned.tier)}</div>
            <div class="pet-effect">${weaponStatText(id, owned.tier)}</div>
@@ -1252,7 +1254,7 @@ export class UI {
     // already include (managed at Baru's smithy during checkpoints)
     const gearBlock = (id, tier) => (id && WEAPONS[id])
       ? `<div class="stat-pet">
-           <img class="stat-pet-img" src="${weaponImgSrc(id)}" alt="">
+           <img class="stat-pet-img" src="${weaponImgSrc(id, tier)}" alt="">
            <div class="stat-pet-meta">
              <span class="sp-name">${WEAPONS[id].name} ${tierBadge(tier)}</span>
              <span class="sp-desc">${weaponStatText(id, tier)}</span>

@@ -538,15 +538,20 @@ export class Sim {
     }
     const tp = best.vehicle.position;
     const cx = tp.x, cz = tp.z;
-    const r = p.aoe * S.aoeMult, dmg = p.atk * S.dmgMult, kb = p.kbPower * S.kbMult;
+    // the Arcane Orb skill is a big blast even for the orb weapon (whose
+    // normal attack has no area at all, p.aoe === 0) — floor the radius
+    // to the class's base area so the skill never collapses to nothing
+    const baseAoe = Math.max(p.aoe || 0, CLASSES[p.cls].aoe || 1.9);
+    const r = baseAoe * S.aoeMult, dmg = p.atk * S.dmgMult, kb = p.kbPower * S.kbMult;
     const ft = S.flightT;
+    const wt = p.weapon?.tier || 0;
     p.yaw = Math.atan2(cx - p.x, cz - p.z);
-    this.emit({ t: 'atk', id: p.id, tx: rnd2(cx), tz: rnd2(cz) });
+    this.emit({ t: 'atk', id: p.id, tx: rnd2(cx), tz: rnd2(cz), wt });
     this.emit({
-      t: 'shoot', k: 'magic', big: 1,
+      t: 'shoot', k: 'magic', big: 1, wt,
       f: [rnd2(p.x), 1.3, rnd2(p.z)], to: [rnd2(cx), 0.5, rnd2(cz)], ft,
     });
-    this.emit({ t: 'aoe', x: rnd2(cx), z: rnd2(cz), r: rnd2(r), k: 'mage', ft, big: 1 });
+    this.emit({ t: 'aoe', x: rnd2(cx), z: rnd2(cz), r: rnd2(r), k: 'mage', ft, big: 1, wt });
     const pid = p.id;
     this.pending.push({ at: this.time + ft, fn: () => {
       for (const e of [...this.enemies.entities]) {
@@ -1007,12 +1012,15 @@ export class Sim {
       p.atkCd = 1 / p.rate;
       const tp = best.vehicle.position;
       p.yaw = Math.atan2(tp.x - p.x, tp.z - p.z);
-      this.emit({ t: 'atk', id: p.id, tx: rnd2(tp.x), tz: rnd2(tp.z) });
+      // weapon tier tints the swing/projectile; weapon id lets the view
+      // pick the right melee flourish (spear stab / hammer bash)
+      const wt = p.weapon?.tier || 0, wid = p.weapon?.id;
+      this.emit({ t: 'atk', id: p.id, tx: rnd2(tp.x), tz: rnd2(tp.z), wt, wid });
 
       if (p.cls === 'archer') {
         const ft = bestD / 16;
         this.emit({
-          t: 'shoot', k: 'arrow',
+          t: 'shoot', k: 'arrow', wt,
           f: [rnd2(p.x), 1.0, rnd2(p.z)], to: [rnd2(tp.x), 0.7, rnd2(tp.z)], ft: rnd2(ft),
         });
         // with the hog pet even arrows carry a punch
@@ -1038,7 +1046,7 @@ export class Sim {
           const bp = f.e.vehicle.position;
           const ft = Math.max(f.d / 14, 0.12) + i * 0.05; // staggered volley
           this.emit({
-            t: 'shoot', k: 'magic',
+            t: 'shoot', k: 'magic', wt,
             f: [rnd2(p.x), 1.15, rnd2(p.z)], to: [rnd2(bp.x), 0.6, rnd2(bp.z)], ft: rnd2(ft),
           });
           const id = f.e.id, dmg = p.atk * ORB.BOLT_MULT, pid = p.id;
@@ -1050,10 +1058,10 @@ export class Sim {
       } else if (p.cls === 'mage') {
         const cx = tp.x, cz = tp.z, dmg = p.atk, r = p.aoe, pid = p.id, kb = p.kbPower;
         this.emit({
-          t: 'shoot', k: 'magic',
+          t: 'shoot', k: 'magic', wt,
           f: [rnd2(p.x), 1.15, rnd2(p.z)], to: [rnd2(cx), 0.5, rnd2(cz)], ft: 0.35,
         });
-        this.emit({ t: 'aoe', x: rnd2(cx), z: rnd2(cz), r, k: 'mage', ft: 0.35 });
+        this.emit({ t: 'aoe', x: rnd2(cx), z: rnd2(cz), r, k: 'mage', ft: 0.35, wt });
         this.pending.push({ at: this.time + 0.35, fn: () => {
           for (const e of [...this.enemies.entities]) {
             const ep = e.vehicle.position;

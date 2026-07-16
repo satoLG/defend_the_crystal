@@ -32,12 +32,17 @@ try {
 
   const ids = await page.evaluate('window.__ids');
   mkdirSync('public/img/weapons', { recursive: true });
+  // one image per weapon per upgrade tier: base id.png, gold id-g.png,
+  // crystal id-c.png — the shop/arsenal/stats UI picks by the owned tier
+  const suffix = ['', '-g', '-c'];
   for (const id of ids) {
-    const ok = await page.evaluate(`window.__show(${JSON.stringify(id)})`);
-    if (!ok) throw new Error(`no prop spec for weapon "${id}"`);
-    const buf = await page.locator('#c').screenshot({ omitBackground: true });
-    writeFileSync(`public/img/weapons/${id}.png`, buf);
-    console.log(`✓ ${id}.png`);
+    for (let tier = 0; tier < 3; tier++) {
+      const ok = await page.evaluate(`window.__show(${JSON.stringify(id)}, ${tier})`);
+      if (!ok) throw new Error(`no prop spec for weapon "${id}"`);
+      const buf = await page.locator('#c').screenshot({ omitBackground: true });
+      writeFileSync(`public/img/weapons/${id}${suffix[tier]}.png`, buf);
+      console.log(`✓ ${id}${suffix[tier]}.png`);
+    }
   }
   await browser.close();
 } finally {

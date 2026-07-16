@@ -12,8 +12,8 @@
   <canvas id="c" width="128" height="128"></canvas>
   <script type="module">
     import * as THREE from 'three';
-    import { loadAssets, instantiate } from '/src/render/assets.js';
-    import { WEAPON_PROPS } from '/src/render/view.js';
+    import { loadAssets } from '/src/render/assets.js';
+    import { buildWeaponPreview } from '/src/render/view.js';
     import { WEAPONS } from '/src/config.js';
 
     const canvas = document.getElementById('c');
@@ -37,11 +37,11 @@
 
     await loadAssets();
     window.__ids = Object.keys(WEAPONS);
-    window.__show = (id) => {
+    // render weapon `id` at upgrade `tier` (0 normal / 1 gold / 2 crystal)
+    window.__show = (id, tier = 0) => {
       if (current) scene.remove(current);
-      const spec = WEAPON_PROPS[id];
-      if (!spec) return false;
-      const obj = spec.gen ? spec.gen() : instantiate(spec.key, { shadows: false }).group;
+      const obj = buildWeaponPreview(id, tier);
+      if (!obj) return false;
       const box = new THREE.Box3().setFromObject(obj);
       const size = box.getSize(new THREE.Vector3());
       const center = box.getCenter(new THREE.Vector3());
