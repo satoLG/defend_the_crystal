@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "smoke": "node scripts/smoke.mjs",
+    "gen:weapons": "node scripts/gen-weapon-previews.mjs"
   },
   "dependencies": {
     "@rexa-developer/tiks": "^0.3.0",
@@ -18,6 +20,7 @@
     "yuka": "^0.7.8"
   },
   "devDependencies": {
+    "playwright-core": "^1.61.1",
     "vite": "^7.3.0"
   }
 }

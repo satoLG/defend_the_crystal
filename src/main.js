@@ -1,6 +1,8 @@
 import { loadAssets } from './render/assets.js';
 import { GameScene } from './render/scene.js';
-import { GameView, PET_SHOP_POS, PET_SHOP_RADIUS } from './render/view.js';
+import {
+  GameView, PET_SHOP_POS, PET_SHOP_RADIUS, WEAPON_SHOP_POS, WEAPON_SHOP_RADIUS,
+} from './render/view.js';
 import { CharacterPreview } from './render/preview.js';
 import { Sim } from './sim/sim.js';
 import { Grid, worldToCell, cellToWorld, canJumpFrom, computeDashEnd } from './sim/grid.js';
@@ -13,7 +15,7 @@ import {
   CLASSES, PLAYER, NET, SIM_DT, TOWERS, TOWER_UPGRADE, GRID, JUMP, SKILLS,
   petEffects, jumpDurFor,
 } from './config.js';
-import { petRefOf } from './character.js';
+import { petRefOf, loadoutOf } from './character.js';
 import { makeRoomCode, lerp, dist2d } from './utils.js';
 import { settings } from './settings.js';
 import { music } from './music.js';
@@ -108,6 +110,9 @@ async function boot() {
     // the equipped pet changed (swap / rename / level-up) — tell the
     // host so the buffs & the follower everyone sees update live
     onPetChange: (pet) => { if (state.started) sendAction({ t: 'pet', pet }); },
+    // the equipped weapon/shield changed (swap or tier upgrade at the
+    // smith) — tell the host so stats & the rendered props update live
+    onLoadoutChange: (loadout) => { if (state.started) sendAction({ t: 'loadout', ...loadout }); },
     onExit: () => location.reload(),
   });
 
@@ -148,12 +153,15 @@ function hostGame(character) {
   const code = makeRoomCode();
   state.net = new Net(code);
   state.sim = new Sim();
-  state.sim.addPlayer(selfId, character.name, character.cls, character.colors, petRefOf(character));
+  state.sim.addPlayer(
+    selfId, character.name, character.cls, character.colors,
+    petRefOf(character), loadoutOf(character)
+  );
   syncSelfFromSim();
 
   state.net.on('hello', (data, peerId) => {
     if (!state.sim.getPlayer(peerId)) {
-      state.sim.addPlayer(peerId, data?.name, data?.cls, data?.colors, data?.pet);
+      state.sim.addPlayer(peerId, data?.name, data?.cls, data?.colors, data?.pet, data?.loadout);
     }
     broadcastLobby();
   });
@@ -189,7 +197,7 @@ function joinGame(code, character) {
 
   const hello = () => state.net.send('hello', {
     name: character.name, cls: character.cls, colors: character.colors,
-    pet: petRefOf(character),
+    pet: petRefOf(character), loadout: loadoutOf(character),
   });
   state.net.onPeerJoin = () => hello();
 
@@ -502,6 +510,13 @@ function handleEvent(ev) {
     case 'petswap':
       if (ev.id === selfId) sfx.notify();
       break;
+    case 'wswap':
+      if (ev.id === selfId) sfx.notify();
+      break;
+    case 'block':
+      if (ev.id === selfId) sfx.place(); // a solid "clonk" off the shield
+      break;
+    case 'stun': sfx.hit(); break;
     case 'jump':
       // own jump is predicted locally in doJump()
       if (ev.id !== selfId) view.startJump(ev.id, ev.dur);
@@ -713,10 +728,19 @@ function frame(t) {
   }
 
   // standing at Tonho's stall in the plaza unlocks buying at the shop
-  const atShop = state.started && !state.over && !state.self.dead &&
-    (state.role === 'host' || state.selfInit) &&
+  const canRoam = state.started && !state.over && !state.self.dead &&
+    (state.role === 'host' || state.selfInit);
+  const atShop = canRoam &&
     dist2d(state.self.x, state.self.z, PET_SHOP_POS.x, PET_SHOP_POS.z) < PET_SHOP_RADIUS;
   ui.setShopNear(atShop);
+  // …and Baru's smithy across the plaza unlocks the weapon shop
+  const atSmith = canRoam &&
+    dist2d(state.self.x, state.self.z, WEAPON_SHOP_POS.x, WEAPON_SHOP_POS.z) < WEAPON_SHOP_RADIUS;
+  ui.setSmithNear(atSmith);
+  // pin each shop button under its vendor's model (screen-space) rather
+  // than at a fixed corner — project the NPC's feet and drop it below
+  pinPrompt('petshop-prompt', PET_SHOP_POS);
+  pinPrompt('weaponshop-prompt', WEAPON_SHOP_POS);
 
   gs.update(dt);
   if (view) view.update(dt, gs.camera, selfPose());
@@ -727,6 +751,18 @@ function selfPose() {
   return state.selfInit
     ? { x: state.self.x, z: state.self.z, yaw: state.self.yaw, moving: state.self.moving }
     : null;
+}
+
+// pin a shop's HTML prompt just under its vendor's model. Skips work
+// while the button is hidden (not near the shop) or the vendor is
+// behind the camera.
+function pinPrompt(id, worldPos) {
+  const el = document.getElementById(id);
+  if (!el || el.classList.contains('hidden')) return;
+  const s = gs.projectToScreen(worldPos.x, 0.1, worldPos.z);
+  if (!s) return;
+  el.style.left = `${s.x}px`;
+  el.style.top = `${s.y + 12}px`;
 }
 
 boot();

@@ -58,6 +58,12 @@ const MANIFEST = {
   'prop-shield': M('props/shield.glb', { raw: true }),
   'prop-staff': M('props/staff.glb', { raw: true }),
   'prop-crystal': M('props/crystal-small.glb', { raw: true }),
+  // purchasable weapons (kit units differ — normalized by their makers)
+  'prop-axe-great': M('props/axe-great.glb', { raw: true }),
+  'prop-hammer': M('props/hammer.glb', { raw: true }),
+  'prop-spear': M('props/spear.glb', { raw: true }),
+  'prop-shield-great': M('props/shield-great.glb', { raw: true }),
+  'prop-sword-great': M('props/sword-great.glb', { raw: true }),
   // graveyard-kit props for the boss powers (kit units — normalized here)
   'prop-gravestone': M('props/gravestone.glb', { h: 1.0 }),
   'prop-grave-mound': M('props/grave-mound.glb', { fp: 1.5 }),
@@ -88,6 +94,14 @@ const MANIFEST = {
   'dungeon-stall': M('dungeon/wood-structure.glb', { fp: 2.6 }),
   'dungeon-banner': M('dungeon/banner.glb', { h: 1.1 }),
   'dungeon-chest': M('dungeon/chest.glb', { fp: 0.9 }),
+  // mini-arena kit pieces: the weapon smith's hut across the plaza
+  'arena-rack': M('arena/weapon-rack.glb', { h: 1.5 }),
+  'arena-wall': M('arena/wall.glb', { h: 1.7 }),
+  'arena-banner': M('arena/banner.glb', { h: 1.6 }),
+  'arena-column': M('arena/column.glb', { h: 1.9 }),
+  'arena-trophy': M('arena/trophy.glb', { h: 0.55 }),
+  'arena-block': M('arena/block.glb', { fp: 0.85 }),
+  'arena-anvil': M('arena/anvil.glb', { h: 0.7 }),
   // environment
   'env-tile': M('env/tile.glb', { tile: true }),
   'env-tile-dirt': M('env/tile-dirt.glb', { tile: true }),

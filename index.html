@@ -235,6 +235,7 @@
       </div>
 
       <button id="petshop-prompt" class="hidden"><i data-icon="paw"></i> Pet Shop</button>
+      <button id="weaponshop-prompt" class="hidden"><i data-icon="swords"></i> Weapon Smith</button>
 
       <div id="toasts"></div>
     </div>
@@ -312,6 +313,23 @@
           Gold coins drop from mini-bosses and bosses.<br/>Visit Tonho's stall in the sanctuary plaza to buy.
         </div>
         <div id="pet-list" class="pet-list"></div>
+      </div>
+    </div>
+
+    <!-- ============ WEAPON PANEL (arsenal + Baru's smithy) ============ -->
+    <div id="weapon-panel" class="screen overlay hidden">
+      <div class="panel center-panel pet-modal">
+        <button id="weapon-close" class="btn small corner-btn" title="Close"><i data-icon="x"></i></button>
+        <h2><i data-icon="swords"></i> Weapons</h2>
+        <div class="pet-gold"><i data-icon="goldcoin"></i> <span id="weapon-gold-label">0</span> gold coins</div>
+        <div class="pet-tabs">
+          <button id="weapon-tab-mine" class="pet-tab active">My arsenal</button>
+          <button id="weapon-tab-shop" class="pet-tab">Shop</button>
+        </div>
+        <div id="weapon-shop-hint" class="muted pet-shop-hint hidden">
+          Gold coins drop from mini-bosses and bosses.<br/>Visit Baru's smithy in the sanctuary plaza to buy &amp; upgrade.
+        </div>
+        <div id="weapon-list" class="pet-list"></div>
       </div>
     </div>
 

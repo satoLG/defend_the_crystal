@@ -302,8 +302,8 @@ export class GameScene {
       return group;
     };
 
-    // twin fountains — the heart of the plaza, scaled up to be seen
-    for (const sx of [-1, 1]) this.makeFountain(sx * 4.1, pz, 1.5);
+    // (the twin fountains that used to sit at ±4.1 were removed — the
+    // two sanctuary vendors stand on those spots now, see GameView)
 
     // statues guard the plaza entrance, facing the battlefield
     for (const sx of [-1, 1]) {
@@ -784,6 +784,18 @@ export class GameScene {
     this.rangeGroup.scale.setScalar(range);
   }
   hideRange() { this.rangeGroup.visible = false; }
+
+  // world point -> screen (CSS) pixels, or null if behind the camera.
+  // Used to pin a shop's HTML prompt right under its vendor's model.
+  projectToScreen(x, y, z) {
+    const v = new THREE.Vector3(x, y, z).project(this.camera);
+    if (v.z > 1) return null; // behind the camera
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    return {
+      x: rect.left + (v.x * 0.5 + 0.5) * rect.width,
+      y: rect.top + (-v.y * 0.5 + 0.5) * rect.height,
+    };
+  }
 
   // pointer (client coords) -> world point on the ground plane
   pointerToGround(clientX, clientY) {
