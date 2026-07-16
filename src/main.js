@@ -16,7 +16,6 @@ import {
   petEffects, jumpDurFor,
 } from './config.js';
 import { petRefOf, loadoutOf } from './character.js';
-import { seedTestHeroes, TEST_MODE } from './dev-seed.js';
 import { makeRoomCode, lerp, dist2d } from './utils.js';
 import { settings } from './settings.js';
 import { music } from './music.js';
@@ -99,9 +98,6 @@ async function boot() {
 
   const canvas = document.getElementById('game-canvas');
 
-  // TEST-ONLY: preload four ready-made heroes on the Vercel preview
-  seedTestHeroes();
-
   ui = new UI({
     onHost: hostGame,
     onJoin: joinGame,
@@ -139,9 +135,6 @@ async function boot() {
   // live 3D turntable for the character-creation screen
   const preview = new CharacterPreview(document.getElementById('preview-canvas'));
   ui.attachPreview(preview);
-  // TEST-ONLY: bow placement overlay (shows for the archer on the
-  // creation screen); remove with the dev-seed import
-  if (TEST_MODE) preview.enableBowTuner();
 
   // land on the start screen (with a Play button) once assets are in —
   // never drop the player straight into character creation. From there

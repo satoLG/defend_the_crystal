@@ -83,17 +83,12 @@ export class CharacterPreview {
     const idle = inst.animations.find((c) => c.name === 'idle') || inst.animations[0];
     if (idle) mixer.clipAction(idle).play();
     const specs = CLASS_PROPS[cls] || [];
-    this.propHolders = attachProps(inst.group, specs);
+    attachProps(inst.group, specs);
     this.actor = { group: inst.group, mixer, modelKey };
     this.charPivot.add(inst.group);
     this.charPivot.rotation.y = 0.3;
     this.setColors(this.colors);
-    if (this._tuner) this._tuner.onClassChange(cls);
   }
-
-  // the weapon holder (index 0 of the loadout props) — used by the bow
-  // placement tuner to nudge the bow live on the creation screen
-  weaponHolder() { return this.propHolders?.[0] || null; }
 
   setColors(colors) {
     this.colors = colors || {};
@@ -126,79 +121,6 @@ export class CharacterPreview {
   stop() {
     this.running = false;
     if (this._raf) cancelAnimationFrame(this._raf);
-  }
-
-  // ---- bow placement tuner (test-only) ----------------------------
-  // A small on-screen panel to nudge the bow's position/rotation/scale
-  // live while the archer is shown on the creation screen. The readout
-  // prints the exact values to paste into WEAPON_PROPS.bow. Enabled by
-  // main.js only in test mode; safe to delete together with that call.
-  enableBowTuner() {
-    if (this._tuner) return;
-    const panel = document.createElement('div');
-    panel.id = 'bow-tuner';
-    panel.style.cssText =
-      'position:fixed;top:8px;right:8px;z-index:9999;background:rgba(12,10,24,0.92);' +
-      'border:1px solid #66e0ff;border-radius:10px;padding:10px 12px;color:#e8e0d0;' +
-      'font:12px/1.4 monospace;width:210px;display:none;';
-    // pos x/y/z, rot x/y/z (radians), scale
-    const fields = [
-      ['posX', -0.6, 0.6, 0.005], ['posY', -0.6, 0.6, 0.005], ['posZ', -0.6, 0.6, 0.005],
-      ['rotX', -Math.PI, Math.PI, 0.01], ['rotY', -Math.PI, Math.PI, 0.01], ['rotZ', -Math.PI, Math.PI, 0.01],
-      ['scale', 0.2, 3, 0.01],
-    ];
-    let html = '<b style="color:#66e0ff">Bow tuner</b><br/>';
-    for (const [name] of fields) {
-      html += `<label style="display:flex;justify-content:space-between;gap:6px">` +
-        `${name}<input type="range" data-f="${name}" style="flex:1"/></label>`;
-    }
-    html += '<pre id="bow-tuner-out" style="white-space:pre-wrap;margin:6px 0 0;color:#9fe8ff"></pre>';
-    panel.innerHTML = html;
-    document.body.appendChild(panel);
-
-    const inputs = {};
-    for (const [name, min, max, step] of fields) {
-      const el = panel.querySelector(`[data-f="${name}"]`);
-      el.min = min; el.max = max; el.step = step;
-      el.addEventListener('input', () => this._tunerApply());
-      inputs[name] = el;
-    }
-    this._tuner = {
-      panel, inputs,
-      onClassChange: (cls) => {
-        const on = cls === 'archer';
-        panel.style.display = on ? 'block' : 'none';
-        if (on) this._tunerSync();
-      },
-    };
-    this._tuner.onClassChange(this.cls);
-  }
-
-  // load the current bow holder's transform into the sliders
-  _tunerSync() {
-    const h = this.weaponHolder();
-    if (!h) return;
-    const i = this._tuner.inputs;
-    i.posX.value = h.position.x; i.posY.value = h.position.y; i.posZ.value = h.position.z;
-    i.rotX.value = h.rotation.x; i.rotY.value = h.rotation.y; i.rotZ.value = h.rotation.z;
-    i.scale.value = h.scale.x;
-    this._tunerApply();
-  }
-
-  // write the sliders onto the bow holder + refresh the readout
-  _tunerApply() {
-    const h = this.weaponHolder();
-    if (!h) return;
-    const i = this._tuner.inputs;
-    const n = (k) => Number(i[k].value);
-    h.position.set(n('posX'), n('posY'), n('posZ'));
-    h.rotation.set(n('rotX'), n('rotY'), n('rotZ'));
-    h.scale.setScalar(n('scale'));
-    const r = (v) => Math.round(v * 1000) / 1000;
-    this._tuner.panel.querySelector('#bow-tuner-out').textContent =
-      `pos: [${r(n('posX'))}, ${r(n('posY'))}, ${r(n('posZ'))}]\n` +
-      `rot: [${r(n('rotX'))}, ${r(n('rotY'))}, ${r(n('rotZ'))}]\n` +
-      `scale: ${r(n('scale'))}`;
   }
 
   resize() {
