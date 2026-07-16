@@ -25,30 +25,34 @@ export const NAME_MAX = 10;
 // ---------- player classes ----------
 // def = fraction of incoming damage absorbed.
 export const CLASSES = {
+  // NOTE: base atk is deliberately a bit below the pre-weapon value —
+  // the class's free STARTER weapon carries the rest (base × starter
+  // multiplier ≈ the old atk), so a starter loadout performs the same
+  // as before while every weapon shows a real, non-zero damage number.
   berserker: {
     name: 'Berserker', icon: 'axe',
-    hp: 230, def: 0.25, atk: 36, range: 1.8, rate: 1.15, speed: 4.3,
+    hp: 230, def: 0.25, atk: 28, range: 1.8, rate: 1.15, speed: 4.3,
     knockback: 1.8, model: 'char-berserker',
     weapon: 'Battle axe',
     blurb: 'A frontline bruiser who trades safety for devastating melee hits.',
   },
   tanker: {
     name: 'Tanker', icon: 'shield',
-    hp: 340, def: 0.45, atk: 18, range: 1.8, rate: 1.0, speed: 3.4,
+    hp: 340, def: 0.45, atk: 16, range: 1.8, rate: 1.0, speed: 3.4,
     knockback: 1.3, model: 'char-tanker',
     weapon: 'Sword & shield',
     blurb: 'An immovable wall that soaks damage and always holds the line.',
   },
   archer: {
     name: 'Archer', icon: 'bow',
-    hp: 150, def: 0.10, atk: 15, range: 7.0, rate: 2.3, speed: 5.3,
+    hp: 150, def: 0.10, atk: 13, range: 7.0, rate: 2.3, speed: 5.3,
     knockback: 0.6, model: 'char-archer',
     weapon: 'Longbow',
     blurb: 'A nimble sharpshooter raining fast arrows from a safe distance.',
   },
   mage: {
     name: 'Mage', icon: 'orb',
-    hp: 175, def: 0.22, atk: 16, range: 8.5, rate: 0.85, speed: 4.4,
+    hp: 175, def: 0.22, atk: 13, range: 8.5, rate: 0.85, speed: 4.4,
     knockback: 0.8, aoe: 1.9, model: 'char-mage',
     weapon: 'Arcane staff',
     blurb: 'A ranged caster that melts whole clusters with area blasts.',
@@ -244,43 +248,47 @@ export const WEAPON_TIER_FX = [
 export const STUN = { DUR: 1.1, BOSS_MULT: 0.4 }; // hammer bonus
 export const ORB = { BOLT_MULT: 0.45 };           // damage per guided bolt
 
+// Damage multipliers are all comfortably above 1: the STANDARD weapon of
+// each family (sword / bow / staff) already grants a real damage bonus
+// (~+15%), and the class base atk was lowered to match, so nothing ever
+// reads "0% damage". Heavier weapons climb from there.
 export const WEAPONS = {
   // ---- melee (physical): atk, rate, crit, range, move ----
   axe: {
     name: 'Axe', slot: 'weapon', kind: 'melee', price: 4,
     classes: ['berserker', 'tanker'], starterFor: ['berserker'],
-    atk: 1.12, rate: 0.92, crit: 0.08,
+    atk: 1.28, rate: 0.92, crit: 0.08,
     blurb: 'Hits harder than a sword and bites deep on crits, but swings slower.',
   },
   greataxe: {
     name: 'Great Axe', slot: 'weapon', kind: 'melee', price: 8,
     classes: ['berserker'],
-    atk: 1.32, rate: 0.8, crit: 0.08, range: 0.4, move: 0.96,
+    atk: 1.5, rate: 0.8, crit: 0.08, range: 0.4, move: 0.96,
     blurb: 'A monstrous axe — huge damage and reach, slow swings, heavy to carry.',
   },
   hammer: {
     name: 'War Hammer', slot: 'weapon', kind: 'melee', price: 6,
     classes: ['berserker'],
-    atk: 1.12, rate: 0.86, crit: 0.08, move: 0.98, stun: 0.10,
+    atk: 1.28, rate: 0.86, crit: 0.08, move: 0.98, stun: 0.10,
     blurb: 'Axe-grade damage a touch slower — and skulls ring: chance to stun.',
     bonusText: (v) => `${Math.round(v * 100)}% chance to stun enemies`,
   },
   spear: {
     name: 'Spear', slot: 'weapon', kind: 'melee', price: 5,
     classes: ['tanker'],
-    atk: 0.95, rate: 1.0, crit: 0.03, range: 0.8,
-    blurb: 'Slightly lighter hits, but the longest reach of any melee weapon.',
+    atk: 1.08, rate: 1.0, crit: 0.03, range: 0.8,
+    blurb: 'A touch lighter than a sword, but the longest reach of any melee weapon.',
   },
   sword: {
     name: 'Sword', slot: 'weapon', kind: 'melee', price: 3,
     classes: ['tanker'], starterFor: ['tanker'],
-    atk: 1.0, rate: 1.0, crit: 0.05,
+    atk: 1.15, rate: 1.0, crit: 0.05,
     blurb: 'The all-rounder blade every other weapon is measured against.',
   },
   greatsword: {
     name: 'Great Sword', slot: 'weapon', kind: 'melee', price: 8,
     classes: ['berserker'],
-    atk: 1.18, rate: 0.9, crit: 0.05, range: 0.4, move: 0.98,
+    atk: 1.36, rate: 0.9, crit: 0.05, range: 0.4, move: 0.98,
     blurb: 'A two-hander: more damage and reach than a sword, slightly slower.',
   },
   // ---- shields (tanker off-hand): def, block, move ----
@@ -300,38 +308,38 @@ export const WEAPONS = {
   bow: {
     name: 'Bow', slot: 'weapon', kind: 'bow', price: 3,
     classes: ['archer'], starterFor: ['archer'],
-    atk: 1.0, rate: 1.0, crit: 0.05,
+    atk: 1.15, rate: 1.0, crit: 0.05,
     blurb: 'The trusty longbow — balanced damage, range and speed.',
   },
   greatbow: {
     name: 'Great Bow', slot: 'weapon', kind: 'bow', price: 7,
     classes: ['archer'],
-    atk: 1.2, rate: 0.85, crit: 0.05, range: 1.2, move: 0.97,
+    atk: 1.38, rate: 0.85, crit: 0.05, range: 1.2, move: 0.97,
     blurb: 'A towering warbow: harder hits from farther away, slower to draw.',
   },
   crossbow: {
     name: 'Crossbow', slot: 'weapon', kind: 'bow', price: 5,
     classes: ['archer'],
-    atk: 0.85, rate: 1.25, crit: 0.05,
+    atk: 1.02, rate: 1.25, crit: 0.05,
     blurb: 'Lighter bolts but a rapid trigger — the fastest shooter of the bows.',
   },
   // ---- magic (mage): atk = magic power, aoe = blast-area multiplier ----
   staff: {
     name: 'Arcane Staff', slot: 'weapon', kind: 'magic', price: 3,
     classes: ['mage'], starterFor: ['mage'],
-    atk: 1.0, rate: 1.0, aoe: 1.0,
+    atk: 1.2, rate: 1.0, aoe: 1.0,
     blurb: 'The full-size caster staff — the strongest single blast a mage can throw.',
   },
   wand: {
     name: 'Wand', slot: 'weapon', kind: 'magic', price: 5,
     classes: ['mage'],
-    atk: 0.88, rate: 1.18, aoe: 0.75,
+    atk: 1.04, rate: 1.18, aoe: 0.75,
     blurb: 'A short red-crystal wand: quicker casts, smaller blasts.',
   },
   orb: {
     name: 'Arcane Orb', slot: 'weapon', kind: 'magic', price: 7,
     classes: ['mage'],
-    atk: 0.8, rate: 1.22, aoe: 0, bolts: 3,
+    atk: 0.95, rate: 1.22, aoe: 0, bolts: 3,
     blurb: 'No blast at all — instead it launches guided bolts at several enemies.',
     bonusText: (v) => `${v} guided bolts per cast`,
   },

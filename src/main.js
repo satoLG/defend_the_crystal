@@ -16,6 +16,7 @@ import {
   petEffects, jumpDurFor,
 } from './config.js';
 import { petRefOf, loadoutOf } from './character.js';
+import { seedTestHeroes, TEST_MODE } from './dev-seed.js';
 import { makeRoomCode, lerp, dist2d } from './utils.js';
 import { settings } from './settings.js';
 import { music } from './music.js';
@@ -98,6 +99,9 @@ async function boot() {
 
   const canvas = document.getElementById('game-canvas');
 
+  // TEST-ONLY: preload four ready-made heroes on the Vercel preview
+  seedTestHeroes();
+
   ui = new UI({
     onHost: hostGame,
     onJoin: joinGame,
@@ -135,6 +139,9 @@ async function boot() {
   // live 3D turntable for the character-creation screen
   const preview = new CharacterPreview(document.getElementById('preview-canvas'));
   ui.attachPreview(preview);
+  // TEST-ONLY: bow placement overlay (shows for the archer on the
+  // creation screen); remove with the dev-seed import
+  if (TEST_MODE) preview.enableBowTuner();
 
   // land on the start screen (with a Play button) once assets are in —
   // never drop the player straight into character creation. From there
@@ -737,6 +744,10 @@ function frame(t) {
   const atSmith = canRoam &&
     dist2d(state.self.x, state.self.z, WEAPON_SHOP_POS.x, WEAPON_SHOP_POS.z) < WEAPON_SHOP_RADIUS;
   ui.setSmithNear(atSmith);
+  // pin each shop button under its vendor's model (screen-space) rather
+  // than at a fixed corner — project the NPC's feet and drop it below
+  pinPrompt('petshop-prompt', PET_SHOP_POS);
+  pinPrompt('weaponshop-prompt', WEAPON_SHOP_POS);
 
   gs.update(dt);
   if (view) view.update(dt, gs.camera, selfPose());
@@ -747,6 +758,18 @@ function selfPose() {
   return state.selfInit
     ? { x: state.self.x, z: state.self.z, yaw: state.self.yaw, moving: state.self.moving }
     : null;
+}
+
+// pin a shop's HTML prompt just under its vendor's model. Skips work
+// while the button is hidden (not near the shop) or the vendor is
+// behind the camera.
+function pinPrompt(id, worldPos) {
+  const el = document.getElementById(id);
+  if (!el || el.classList.contains('hidden')) return;
+  const s = gs.projectToScreen(worldPos.x, 0.1, worldPos.z);
+  if (!s) return;
+  el.style.left = `${s.x}px`;
+  el.style.top = `${s.y + 12}px`;
 }
 
 boot();

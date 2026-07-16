@@ -39,9 +39,9 @@ export const WEAPON_PROPS = {
   spear: { gen: makeSpear, ...MOUNTS.sword, scale: 1 },
   shield: { key: 'prop-shield', ...MOUNTS.shield, scale: 1.32 },
   greatshield: { gen: makeGreatShield, ...MOUNTS.shield, scale: 1.32 },
-  bow: { gen: makeBow, ...MOUNTS.bow, scale: 1.6 },
-  greatbow: { gen: () => makeBow(0.68), ...MOUNTS.bow, scale: 1.6 },
-  crossbow: { gen: makeCrossbow, ...MOUNTS.bow, scale: 1.6 },
+  bow: { gen: makeBow, ...MOUNTS.bow, scale: 1.1 },
+  greatbow: { gen: () => makeBow(0.6), ...MOUNTS.bow, scale: 1.25 },
+  crossbow: { gen: makeCrossbow, ...MOUNTS.bow, scale: 1.4 },
   staff: { key: 'prop-staff', ...MOUNTS.staff, scale: 1.32, crystalTip: 0x8a2be2 },
   wand: { gen: makeWand, ...MOUNTS.staff, scale: 1.32 },
   orb: { gen: makeOrbProp, bone: 'arm-right', pos: [-0.225, 0.06, 0.14], rot: [0, 0, 0], scale: 1 },
@@ -336,12 +336,15 @@ const ENEMY_PROPS = {
 const TOWER_LEVEL_COLORS = [0x9aa1ab, 0x4a86e8, 0x3fbf5f, 0xe0503a, 0x9a4ae0, 0xe8b84b];
 const TOWERS_MAX_VISUAL = 6;
 
-// the pet vendor's stall in the sanctuary plaza; main.js checks the
-// local hero's distance to it to unlock buying at the shop
-export const PET_SHOP_POS = { x: 4.3, z: HALF_H + PLAZA.DEPTH * 0.76 };
+// the two sanctuary vendors stand where the old fountains were (±4.1,
+// mid-plaza), both turned to face the camera so the player reads them
+// clearly. main.js checks the local hero's distance to unlock each
+// shop, and projects these to screen to pin the shop button under the
+// vendor. Tonho (pets) on the right, Baru (weapons) on the left.
+const VENDOR_Z = HALF_H + PLAZA.DEPTH / 2;
+export const PET_SHOP_POS = { x: 4.1, z: VENDOR_Z };
 export const PET_SHOP_RADIUS = 3.2;
-// the weapon smith's hut sits on the OPPOSITE side of the sanctuary
-export const WEAPON_SHOP_POS = { x: -4.3, z: HALF_H + PLAZA.DEPTH * 0.76 };
+export const WEAPON_SHOP_POS = { x: -4.1, z: VENDOR_Z };
 export const WEAPON_SHOP_RADIUS = 3.2;
 
 export class GameView {
@@ -855,21 +858,20 @@ export class GameView {
 
   // ---------------- pet vendor's stall ----------------
 
-  // a little wooden market stand in the plaza's back corner: Tonho the
-  // pet seller under a banner-draped canopy, a chest of coins beside
-  // him and two of his critters loafing around out front — impossible
-  // to mistake for anything but the pet shop
+  // Tonho the pet seller stands facing the camera (+z), his banner-
+  // draped canopy just behind him with a coin sign spinning overhead
+  // and two of his critters loafing about out front — impossible to
+  // mistake for anything but the pet shop.
   spawnPetShop() {
     const { x, z } = PET_SHOP_POS;
-    const faceCenter = Math.atan2(0 - x, HALF_H + PLAZA.DEPTH * 0.45 - z);
 
+    // the stall sits just north of (behind) Tonho, opening toward camera
     const stall = new THREE.Group();
-    stall.position.set(x, 0, z);
-    stall.rotation.y = faceCenter;
+    stall.position.set(x, 0, z - 1.0);
     const frame = instantiate('dungeon-stall').group;
     stall.add(frame);
     const frameBox = new THREE.Box3().setFromObject(frame);
-    // banners hang off the canopy's front corners
+    // banners hang off the canopy's front corners (facing the camera)
     for (const sx of [-1, 1]) {
       const banner = instantiate('dungeon-banner', { shadows: false }).group;
       banner.position.set(sx * (frameBox.max.x - 0.28), frameBox.max.y - 0.18, frameBox.max.z - 0.12);
@@ -877,7 +879,7 @@ export class GameView {
     }
     const chest = instantiate('dungeon-chest').group;
     chest.scale.setScalar(0.75);
-    chest.position.set(-0.95, 0, 0.55);
+    chest.position.set(-(frameBox.max.x - 0.15), 0, 0.5);
     chest.rotation.y = 0.5;
     stall.add(chest);
     // a big slowly-spinning coin as the shop sign
@@ -888,17 +890,15 @@ export class GameView {
     this.petShopSign = sign;
     this.scene.add(stall);
 
-    // Tonho stands under the canopy, facing out
+    // Tonho stands out front, turned to face the camera
     this.mkNpc({
       model: 'char-berserker', name: 'Tonho', tint: 0x9ad86a,
-      x: x - Math.sin(faceCenter) * 0.15, z: z - Math.cos(faceCenter) * 0.15,
-      yaw: faceCenter, bubble: 'Pets!',
+      x, z, yaw: 0, bubble: 'Pets!',
     });
 
-    // his display critters: a dog and a cat pottering about out front —
-    // on the CAMERA side of the stall (south), never hidden by the
-    // canopy — idling / eating / dancing / strolling little circles
-    for (const [key, ox, oz] of [['pet-dog', -2.3, 0.5], ['pet-cat', 1.6, 1.4]]) {
+    // his display critters potter about out front (camera side), never
+    // hidden by the canopy — idling / eating / dancing / strolling
+    for (const [key, ox, oz] of [['pet-dog', -1.9, 1.1], ['pet-cat', 1.7, 1.3]]) {
       const actor = this.makeAnimated(key);
       actor.group.position.set(x + ox, 0, z + oz);
       this.scene.add(actor.group);
@@ -912,97 +912,93 @@ export class GameView {
 
   // ---------------- weapon smith's hut ----------------
 
-  // Baru's forge-front on the opposite side of the plaza from Tonho:
-  // a mini-arena stone hut (walls + columns + banner) with a weapon
-  // rack, blades hung on the wall, one axe dropped casually on the
-  // ground and a spinning trophy for a shop sign. Same rules as the
-  // pet stall: walk up during a checkpoint to trade.
+  // Baru's forge-front, facing the camera (+z) like Tonho across the
+  // plaza: a mini-arena stone wall behind him with two weapon racks
+  // half-set into it (spears on the left, swords on the right), a couple
+  // of blades hung between them, an anvil and a dropped great axe on the
+  // ground out front, and a spinning trophy for a shop sign. Everything
+  // is laid out so no two models overlap. Same trade rules as the pets.
   spawnWeaponShop() {
     const { x, z } = WEAPON_SHOP_POS;
-    // face SOUTH-east (toward the camera and the plaza mouth) so the
-    // wall ends up behind the display and the interior stays visible
-    const face = Math.atan2(0 - x, HALF_H + PLAZA.DEPTH + 5 - z);
 
+    // hut origin sits on Baru; the wall is built a bit north (−z) so it
+    // ends up behind him and the whole display opens toward the camera
     const hut = new THREE.Group();
     hut.position.set(x, 0, z);
-    hut.rotation.y = face;
+    this.scene.add(hut);
 
-    // back wall, two segments wide, with columns at the front corners
+    // measure one wall segment
     let wallH = 1.7, wallW = 2;
     {
       const probe = instantiate('arena-wall', { shadows: false }).group;
-      const b = new THREE.Box3().setFromObject(probe);
-      const s = b.getSize(new THREE.Vector3());
+      const s = new THREE.Box3().setFromObject(probe).getSize(new THREE.Vector3());
       wallH = s.y; wallW = Math.max(s.x, s.z);
     }
+    const WALLZ = -1.35;               // wall line (behind Baru)
+    // back wall, two segments wide, spanning ±wallW
     for (const sx of [-0.5, 0.5]) {
       const wall = instantiate('arena-wall').group;
-      wall.position.set(sx * wallW, 0, -1.15);
+      wall.position.set(sx * wallW, 0, WALLZ);
       hut.add(wall);
     }
-    for (const sx of [-1, 1]) {
-      const col = instantiate('arena-column').group;
-      col.position.set(sx * (wallW - 0.25), 0, 0.95);
-      hut.add(col);
+
+    // two weapon racks half-set into the wall (one per segment), a touch
+    // in front of the wall line so they read as embedded in it
+    const rackZ = WALLZ + 0.28;
+    // left rack — spears; right rack — swords
+    for (const [side, mk, n] of [[-1, makeSpear, 2], [1, () => instantiate('prop-sword', { shadows: false }).group, 2]]) {
+      const rack = instantiate('arena-rack').group;
+      rack.position.set(side * wallW * 0.5, 0, rackZ);
+      hut.add(rack);
+      for (let i = 0; i < n; i++) {
+        const w = mk();
+        const dx = (i - (n - 1) / 2) * 0.16;
+        w.position.set(side * wallW * 0.5 + dx, 0.5, rackZ + 0.06);
+        w.rotation.z = dx * 1.2; // fan them slightly in the rack
+        if (mk !== makeSpear) w.scale.setScalar(1.1);
+        hut.add(w);
+      }
     }
-    // banner hanging off the wall between the weapons
-    const banner = instantiate('arena-banner', { shadows: false }).group;
-    banner.position.set(-wallW * 0.72, wallH - 0.12, -1.02);
-    hut.add(banner);
 
-    // weapon rack beside the wall with a spear standing in it
-    const rack = instantiate('arena-rack').group;
-    rack.position.set(wallW * 0.78, 0, -0.78);
-    rack.rotation.y = -0.35;
-    hut.add(rack);
-    const rackSpear = makeSpear();
-    rackSpear.scale.multiplyScalar(0.9);
-    rackSpear.position.set(wallW * 0.78, 0.62, -0.72);
-    rackSpear.rotation.z = 0.16;
-    hut.add(rackSpear);
-
-    // blades hung on the back wall
+    // a great sword hung flat between the racks + the banner beside it
     const hangSword = makeGreatSword();
     hangSword.scale.multiplyScalar(1.1);
-    hangSword.position.set(-wallW * 0.25, wallH * 0.62, -1.02);
-    hangSword.rotation.z = Math.PI * 0.78;
+    hangSword.position.set(0.15, wallH * 0.6, WALLZ + 0.05);
+    hangSword.rotation.set(0, 0, Math.PI * 0.78);
     hut.add(hangSword);
-    const hangBow = makeBow(0.62);
-    hangBow.position.set(wallW * 0.3, wallH * 0.6, -1.02);
-    hangBow.rotation.z = -0.35;
-    hut.add(hangBow);
+    const banner = instantiate('arena-banner', { shadows: false }).group;
+    banner.position.set(-wallW * 0.72, wallH - 0.1, WALLZ + 0.05);
+    hut.add(banner);
 
-    // a great axe dropped on the ground, like Baru just put it down
+    // anvil on the ground to Baru's right (out front, clear of him)
+    const anvil = instantiate('arena-anvil').group;
+    anvil.position.set(1.15, 0, 0.35);
+    anvil.rotation.y = -0.4;
+    hut.add(anvil);
+    // a great shield leaning against the anvil
+    const leanShield = makeGreatShield();
+    leanShield.scale.multiplyScalar(1.3);
+    leanShield.position.set(1.15, 0.42, 0.72);
+    leanShield.rotation.set(-1.15, 0.3, 0);
+    hut.add(leanShield);
+
+    // a great axe dropped flat on the ground to Baru's left
     const floorAxe = makeGreatAxe();
-    floorAxe.position.set(-1.05, 0.05, 0.85);
+    floorAxe.position.set(-1.2, 0.05, 0.45);
     floorAxe.rotation.set(Math.PI / 2 - 0.08, 0, 0.9);
     hut.add(floorAxe);
-
-    // a shield displayed on a stone block pedestal
-    const block = instantiate('arena-block').group;
-    block.position.set(-wallW * 0.8, 0, -0.3);
-    hut.add(block);
-    const blockBox = new THREE.Box3().setFromObject(block);
-    const dispShield = makeGreatShield();
-    dispShield.scale.multiplyScalar(1.4);
-    dispShield.position.set(-wallW * 0.8, blockBox.max.y + 0.28, -0.24);
-    dispShield.rotation.set(-0.18, 0.25, 0);
-    hut.add(dispShield);
 
     // spinning trophy = the shop sign (mirrors the pet stall's coin)
     const sign = instantiate('arena-trophy', { shadows: false }).group;
     sign.scale.setScalar(1.6);
-    sign.position.set(0, wallH + 0.55, -1.05);
+    sign.position.set(0, wallH + 0.5, WALLZ);
     hut.add(sign);
     this.weaponShopSign = sign;
 
-    this.scene.add(hut);
-
-    // Baru the smith stands out front, facing the plaza
+    // Baru the smith stands out front, turned to face the camera
     this.mkNpc({
       model: 'char-tanker', name: 'Baru', tint: 0xd87a5a,
-      x: x + Math.sin(face) * 0.9, z: z + Math.cos(face) * 0.9,
-      yaw: face, bubble: 'Weapons!',
+      x, z, yaw: 0, bubble: 'Weapons!',
     });
   }
 

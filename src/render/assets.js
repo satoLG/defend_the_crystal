@@ -101,6 +101,7 @@ const MANIFEST = {
   'arena-column': M('arena/column.glb', { h: 1.9 }),
   'arena-trophy': M('arena/trophy.glb', { h: 0.55 }),
   'arena-block': M('arena/block.glb', { fp: 0.85 }),
+  'arena-anvil': M('arena/anvil.glb', { h: 0.7 }),
   // environment
   'env-tile': M('env/tile.glb', { tile: true }),
   'env-tile-dirt': M('env/tile-dirt.glb', { tile: true }),
