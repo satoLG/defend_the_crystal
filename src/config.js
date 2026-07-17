@@ -503,6 +503,20 @@ export const TOWERS = {
     dmg: 45, range: 4.5, rate: 0.5, aoe: 1.8, projSpeed: 13,
     model: 'tower-cannon', ammo: 'cannonball',
   },
+  // pulses a mage-style blast on every enemy in the tiles around it;
+  // upgrades grow damage & rate as usual AND the pulse radius (aoeAdd)
+  crystal: {
+    name: 'Crystal', icon: 'crystal', cost: 190,
+    dmg: 22, range: 3.1, rate: 0.45, aoe: 3.1, projSpeed: 99,
+    model: 'tower-crystal', pulse: true, aoeGrow: 0.3, img: 'tower-crystal',
+  },
+  // sprays a burning jet at its target: modest impact damage plus a
+  // fire DoT that keeps ticking on everything the jet washes over
+  flame: {
+    name: 'Flamethrower', icon: 'flame', cost: 320,
+    dmg: 9, range: 4.2, rate: 1.1, aoe: 1.1, projSpeed: 99,
+    model: 'tower-flame', jet: true, burnDps: 11, burnDur: 2.4, img: 'tower-flame',
+  },
 };
 // 6 levels: grey → blue → green → red → purple → gold
 export const TOWER_LEVEL_MAX = 6;
@@ -510,6 +524,45 @@ export const TOWER_UPGRADE = {
   dmgMult: 1.45, rangeAdd: 0.35, rateMult: 1.12,
   costMult: [0, 0.9, 1.4, 2.0, 2.8, 3.8], // upgrade cost = base * costMult[currentLvl]
   sellRefund: 0.6,
+};
+
+// ---------- tower special effects (bonus upgrades) ----------
+// One-time purchases layered ON TOP of the normal level upgrades —
+// they never replace them. Each tower picks at most ONE special,
+// permanently. Where a tower offers two, they are exclusive paths.
+export const TOWER_SPECIALS = {
+  ballista: {
+    triple: { name: 'Triple Shot', cost: 170,
+              desc: 'Looses 3 arrows per volley at up to 3 different targets.' },
+    pierce: { name: 'Piercing Bolts', cost: 170,
+              desc: 'Bolts punch through, hitting every enemy along their line.' },
+  },
+  catapult: {
+    scatter: { name: 'Scatter Shot', cost: 210, balls: 5, dmgMult: 0.4, spread: 1.6,
+               desc: 'Hurls 5 spreading metal balls — together, double the damage.' },
+  },
+  cannon: {
+    napalm: { name: 'Burning Ground', cost: 250, dur: 3.5, dps: 10,
+              desc: 'Shells leave the ground burning where they land.' },
+  },
+  crystal: {
+    ice: { name: 'Ice Crystal', cost: 230, slowF: 0.5, slowDur: 2.2,
+           desc: 'Pulses chill enemies, slowing them for a few seconds.' },
+    storm: { name: 'Storm Crystal', cost: 230, chainR: 1.7, chainMult: 0.55,
+             desc: 'Damage arcs between enemies bunched close together.' },
+  },
+  flame: {
+    venom: { name: 'Venom Thrower', cost: 480, dpsMult: 1.25, durMult: 2.2, aoeMult: 1.5,
+             desc: 'Spits spreading poison that drains life far longer.' },
+  },
+};
+
+// status-effect tuning shared by sim & view
+export const STATUS = {
+  SLOW_F: 0.5,        // default speed multiplier while chilled
+  DOT_TICK: 0.45,     // seconds between burn/poison damage ticks
+  FIRE_KIND: 1,       // dot kinds (for stacking rules)
+  POISON_KIND: 2,
 };
 
 export const OBSTACLES = ['rocks', 'barrel']; // random cosmetic variety
@@ -576,8 +629,33 @@ export const BOSSES = {
   abobrado: { kind: 'ghost', name: 'Abobrado',
               hpMult: 26, dmgMult: 1, speedMult: 0.72,
               pumpkin: { range: 7.5, rate: 0.4, dmg: 26, aoe: 1.7, projSpeed: 8 } },
+  // not one boss but an infestation: 100 zombies flooding in at a
+  // brutal spawn rate. Green ones die normally, blue ones rise again
+  // twice, red ones three times (see HORDE below).
+  horda:    { kind: 'zombie', name: 'A Horda Zumbi', horde: true },
+  // Brutus hauls a great shield & great axe: by far the toughest boss
+  // on the field (heavy armor on top of a huge HP pool) — and by far
+  // the slowest march you'll ever get to prepare for.
+  brutus:   { kind: 'orc', name: 'Brutus',
+              hpMult: 6.5, dmgMult: 2.4, speedMult: 0.55, armor: 0.35 },
 };
-export const BOSS_ORDER = ['coveiro', 'tirocego', 'zecaixao', 'abobrado'];
+export const BOSS_ORDER = ['coveiro', 'tirocego', 'horda', 'zecaixao', 'brutus', 'abobrado'];
+
+// the zombie horde's composition & balance: per-zombie stats shrink so
+// a hundred of them stays beatable, and the spawn window is short so
+// the flood genuinely reads as a horde
+export const HORDE = {
+  GREEN: 50, BLUE: 35, RED: 15,   // blue revives ×2, red revives ×3
+  REVIVES: { blue: 2, red: 3 },
+  hpMult: 0.32, dmgMult: 0.8, speedMult: 1.15,
+  WINDOW: 42,      // seconds over which all 100 pour in
+  ptsMult: 0.5, xpMult: 0.5, // per-zombie loot halves (×100 zombies!)
+};
+
+// sub-bosses rotate through EVERY mob kind, never repeating until the
+// list wraps (waves 5, 15, 25, … — ordered so each kind is already a
+// familiar sight by the time its pumped-up version struts in)
+export const SUBBOSS_ORDER = ['zombie', 'skelarcher', 'orc', 'ghost', 'vampire', 'skeleton'];
 
 // ---------- waves ----------
 export const WAVES = {

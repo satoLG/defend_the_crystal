@@ -46,6 +46,9 @@ const MANIFEST = {
   'tower-catapult': M('towers/catapult.glb', { tile: true }),
   'tower-base': M('towers/base.glb', { tile: true }),
   'tower-crystals': M('towers/crystals.glb', { tile: true }),
+  // new tower types (Kenney tower-defense kit round towers)
+  'tower-crystal': M('towers/crystal-tower.glb', { h: 1.7 }),
+  'tower-flame': M('towers/flamethrower.glb', { h: 1.6 }),
   // ammo
   'ammo-arrow': M('ammo/arrow.glb', { tile: true }),
   'ammo-cannonball': M('ammo/cannonball.glb', { tile: true }),

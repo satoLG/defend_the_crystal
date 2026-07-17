@@ -14,7 +14,13 @@ import { sfx } from '../audio.js';
 // ============================================================
 
 const PL = { ID: 0, CLS: 1, X: 2, Z: 3, YAW: 4, HP: 5, MHP: 6, LVL: 7, XP: 8, XPN: 9, MOV: 10, DEAD: 11, RESP: 12, OBST: 13, KILLS: 14, NAME: 15, SKCD: 16, WALL: 17, ATK: 18, SPD: 19, PET: 20, PETNAME: 21, PETLVL: 22, WPN: 23, WPNT: 24, SHD: 25, SHDT: 26 };
-const EN = { ID: 0, KIND: 1, X: 2, Z: 3, YAW: 4, HP: 5, MHP: 6, SCALE: 7, BOSS: 8, MOV: 9 };
+const EN = { ID: 0, KIND: 1, X: 2, Z: 3, YAW: 4, HP: 5, MHP: 6, SCALE: 7, BOSS: 8, MOV: 9, ST: 10, VR: 11 };
+
+// EN.ST status bitmask (mirrors buildSnapshot): slow|burn|poison|stun
+const ST_SLOW = 1, ST_BURN = 2, ST_POISON = 4, ST_STUN = 8;
+// EN.VR visual variants: horde-blue / horde-red zombies, Brutus props
+const VR_BLUE = 1, VR_RED = 2, VR_BRUTUS = 3;
+const VR_TINTS = { [VR_BLUE]: 0x5f8fff, [VR_RED]: 0xff5f4d };
 
 // Hand props live in BONE space: raw Kenney units, grip at the origin.
 // The hand sits ~0.14 units down the arm bone; rot compensates the
@@ -470,6 +476,11 @@ const ENEMY_PROPS = {
   archer: CLASS_PROPS.archer,
   // Zé do Caixão hauls his own coffin on his back
   coffin: [{ key: 'prop-coffin', bone: 'torso', pos: [0, -0.18, -0.16], rot: [-Math.PI / 2, 0, 0.12], scale: 0.7 }],
+  // Brutus marches in behind a great shield with a great axe raised
+  brutus: [
+    { ...WEAPON_PROPS.greataxe, tier: 0 },
+    { ...WEAPON_PROPS.greatshield, tier: 0 },
+  ],
 };
 
 // tower base color per upgrade level: grey→blue→green→red→purple→gold
@@ -506,6 +517,18 @@ export class GameView {
 
     this._ringGeo = new THREE.RingGeometry(0.85, 1, 40);
     this._discGeo = new THREE.CircleGeometry(1, 32);
+
+    // shared materials for the enemy status overlays (chill ring,
+    // embers, poison bubbles, stun stars) — one of each, ever
+    this._statusMats = {
+      slow: new THREE.MeshBasicMaterial({
+        color: 0x66c8ff, transparent: true, opacity: 0.75,
+        depthWrite: false, side: THREE.DoubleSide,
+      }),
+      burn: new THREE.SpriteMaterial({ color: 0xff8a2a, transparent: true, opacity: 0.9, depthWrite: false }),
+      poison: new THREE.SpriteMaterial({ color: 0x62e84a, transparent: true, opacity: 0.85, depthWrite: false }),
+      stun: new THREE.SpriteMaterial({ color: 0xffe066, transparent: true, opacity: 0.95, depthWrite: false }),
+    };
 
     // wall-mode aura resources, built ONCE and shared by every tanker.
     // A fresh MeshStandardMaterial used to be created on each activation,
@@ -969,6 +992,18 @@ export class GameView {
     if (a.isArcher) this.attachProps(a, ENEMY_PROPS.archer);
     if (kind === 'keeper') this.attachProps(a, ENEMY_PROPS.keeper);
     if (kind === 'vampire' && isBoss) this.attachProps(a, ENEMY_PROPS.coffin);
+    const vr = row[EN.VR] || 0;
+    if (vr === VR_BRUTUS) this.attachProps(a, ENEMY_PROPS.brutus);
+    // horde zombies come in colors: blue rises twice, red three times
+    if (VR_TINTS[vr]) {
+      const tint = new THREE.Color(VR_TINTS[vr]);
+      for (const m of a.mats) m.color.lerp(tint, 0.55);
+    }
+    // a hundred-zombie horde would melt the shadow pass — past a crowd
+    // threshold, newcomers stop casting shadows
+    if (this.enemies.size > 26) {
+      a.group.traverse((o) => { if (o.isMesh || o.isSkinnedMesh) o.castShadow = false; });
+    }
     if (row[EN.BOSS] > 0) {
       const crown = new THREE.Mesh(
         new THREE.ConeGeometry(0.16, 0.22, 5),
@@ -990,10 +1025,105 @@ export class GameView {
     a.hpBar = this.makeHpBar(row[EN.BOSS] ? 1.3 : 0.85, (top + 0.25) / scale);
     a.hpBar.visible = false;
     a.group.add(a.hpBar);
+    a.statusMask = 0;
+    a.statusFx = {};
+    a.topLocal = (top + 0.35) / scale;
     this.scene.add(a.group);
     this.enemies.set(id, a);
     this.setLoco(a, 'walk');
     return a;
+  }
+
+  // ---------------- enemy status-effect overlays ----------------
+
+  // one overlay per active status: chill ring (slow), rising embers
+  // (burn), rising bubbles (poison), orbiting stars (stun). Driven by
+  // the snapshot's status bitmask so every client shows the same state.
+  setStatusFx(a, mask) {
+    if (a.statusMask === mask) return;
+    const defs = [
+      [ST_SLOW, 'slow'], [ST_BURN, 'burn'], [ST_POISON, 'poison'], [ST_STUN, 'stun'],
+    ];
+    for (const [bit, key] of defs) {
+      const on = (mask & bit) !== 0, had = !!a.statusFx[key];
+      if (on && !had) a.statusFx[key] = this.makeStatusFx(a, key);
+      else if (!on && had) { a.group.remove(a.statusFx[key]); delete a.statusFx[key]; }
+    }
+    a.statusMask = mask;
+    // body glow: burn > poison > slow (the strongest tell wins)
+    a.statusTint = (mask & ST_BURN) ? 0xff7a22
+      : (mask & ST_POISON) ? 0x58d84a
+      : (mask & ST_SLOW) ? 0x66c8ff : null;
+  }
+
+  makeStatusFx(a, key) {
+    const g = new THREE.Group();
+    g.userData.fx = key;
+    if (key === 'slow') {
+      const ring = new THREE.Mesh(this._ringGeo, this._statusMats.slow);
+      ring.rotation.x = -Math.PI / 2;
+      ring.position.y = 0.06;
+      ring.scale.setScalar(0.6);
+      g.add(ring);
+    } else {
+      // floating particles: embers (burn), bubbles (poison), stars (stun)
+      const mat = this._statusMats[key];
+      const n = key === 'stun' ? 3 : 4;
+      for (let i = 0; i < n; i++) {
+        const spr = new THREE.Sprite(mat);
+        spr.scale.setScalar(key === 'stun' ? 0.16 : 0.2);
+        spr.userData.phase = Math.random();
+        spr.userData.ang = (i / n) * Math.PI * 2;
+        g.add(spr);
+      }
+      if (key === 'stun') g.position.y = a.topLocal || 1.5;
+    }
+    a.group.add(g);
+    return g;
+  }
+
+  // per-frame animation for every live status overlay
+  animateStatusFx(dt) {
+    for (const a of this.enemies.values()) {
+      if (!a.statusMask && !a.tintWas) continue;
+      for (const [key, g] of Object.entries(a.statusFx)) {
+        if (key === 'slow') {
+          const ring = g.children[0];
+          ring.rotation.z += dt * 2.2;
+          const k = 0.55 + Math.sin(this.time * 5) * 0.1;
+          ring.scale.setScalar(k);
+        } else if (key === 'stun') {
+          for (const spr of g.children) {
+            const ang = spr.userData.ang + this.time * 4;
+            spr.position.set(Math.cos(ang) * 0.34, 0.1 + Math.sin(this.time * 6) * 0.04, Math.sin(ang) * 0.34);
+          }
+        } else {
+          // embers / bubbles loop upward and fade near the top
+          for (const spr of g.children) {
+            const k = (this.time * (key === 'burn' ? 0.9 : 0.55) + spr.userData.phase) % 1;
+            spr.position.set(
+              Math.sin((spr.userData.phase + k) * Math.PI * 4) * 0.18,
+              0.25 + k * 1.0,
+              Math.cos((spr.userData.phase + k) * Math.PI * 3) * 0.18
+            );
+            spr.material = this._statusMats[key];
+            spr.scale.setScalar((key === 'burn' ? 0.24 : 0.18) * (1 - k * 0.6));
+          }
+        }
+      }
+      // steady tinted glow on the body while a status holds (the hit
+      // flash overrides it briefly and this restores it right after)
+      if (a.statusTint && (a.flashT || 0) <= 0) {
+        for (const m of a.mats) {
+          if (m.emissive) { m.emissive.set(a.statusTint); m.emissiveIntensity = 0.38; }
+        }
+      } else if (!a.statusTint && a.tintWas) {
+        for (const m of a.mats) {
+          if (m.emissive) { m.emissive.set(0x000000); m.emissiveIntensity = 1; }
+        }
+      }
+      a.tintWas = !!a.statusTint;
+    }
   }
 
   // ---------------- sanctuary NPCs ----------------
@@ -1238,8 +1368,9 @@ export class GameView {
 
   ensureTower(row) {
     const [id, kind, c, r, lvl] = row;
+    const spec = row[6] || 0;
     let a = this.towers.get(id);
-    if (a && a.lvl !== lvl) { this.removeTowerActor(id); a = null; }
+    if (a && (a.lvl !== lvl || a.spec !== spec)) { this.removeTowerActor(id); a = null; }
     if (a) return a;
     const w = cellToWorld(c, r);
     const group = new THREE.Group();
@@ -1259,9 +1390,29 @@ export class GameView {
     });
     group.add(base);
 
-    const weapon = instantiate(TOWERS[kind]?.model || 'tower-ballista').group;
+    const weapon = instantiate(TOWERS[kind]?.model || 'tower-ballista', {
+      cloneMaterials: !!spec,
+    }).group;
     weapon.position.y = 0.55;
     weapon.scale.setScalar(1 + (lvl - 1) * 0.07);
+    // a bought special dyes the turret so the path reads at a glance:
+    // ice blue, storm gold, venom green, napalm ember, triple/pierce steel-blue
+    const specTint = {
+      ice: 0x66c8ff, storm: 0xffd24a, venom: 0x62e84a,
+      napalm: 0xff7a22, triple: 0x9fb8ff, pierce: 0xb8fff2, scatter: 0xd8c8a8,
+    }[spec];
+    if (specTint) {
+      const tint = new THREE.Color(specTint);
+      weapon.traverse((o) => {
+        if (o.isMesh && o.material) {
+          o.material.color.lerp(tint, 0.45);
+          if (o.material.emissive) {
+            o.material.emissive.set(specTint);
+            o.material.emissiveIntensity = 0.18;
+          }
+        }
+      });
+    }
     group.add(weapon);
     if (lvl >= TOWERS_MAX_VISUAL) {
       const deco = instantiate('tower-crystals', { shadows: false }).group;
@@ -1283,7 +1434,7 @@ export class GameView {
       group.add(ring);
     }
     this.scene.add(group);
-    a = { group, weapon, lvl, kind, c, r, rot: Math.PI };
+    a = { group, weapon, lvl, kind, c, r, rot: Math.PI, spec };
     this.towers.set(id, a);
     return a;
   }
@@ -1403,6 +1554,7 @@ export class GameView {
       const frac = row[EN.HP] / row[EN.MHP];
       a.hpBar.visible = frac < 0.999;
       this.setHpBar(a.hpBar, frac);
+      this.setStatusFx(a, row[EN.ST] || 0);
     }
     for (const [id, a] of this.enemies) {
       if (!seenE.has(id)) { this.scene.remove(a.group); this.enemies.delete(id); }
@@ -1587,6 +1739,32 @@ export class GameView {
         // war-hammer stun: dizzy-yellow pop over the rooted enemy
         this.burst(ev.x, ev.z, 0.7, 0xffe066);
         this.spawnFloatText('STUN!', ev.x, ev.z, 0xffe066);
+        break;
+      }
+      case 'revive': {
+        // a horde zombie claws back up: dark pulse + callout
+        this.burst(ev.x, ev.z, 1.0, 0x9a4ae0);
+        this.spawnFloatText('REVIVE!', ev.x, ev.z, 0xc06aff);
+        break;
+      }
+      case 'zap': {
+        // storm crystal arc between two bunched enemies
+        this.spawnZap(ev.x1, ev.z1, ev.x2, ev.z2);
+        break;
+      }
+      case 'flame': {
+        // flamethrower jet: a fan of embers washing toward the target
+        this.spawnFlameJet(ev.x, ev.z, ev.tx, ev.tz, ev.v === 1);
+        break;
+      }
+      case 'gfire': {
+        // cannon napalm: the ground keeps burning where the shell hit
+        this.spawnGroundFire(ev.x, ev.z, ev.r, ev.dur);
+        break;
+      }
+      case 'spec': {
+        const w = cellToWorld(ev.c, ev.r);
+        this.burst(w.x, w.z, 1.6, 0xffd24a);
         break;
       }
       case 'spawn': {
@@ -1838,6 +2016,7 @@ export class GameView {
     if (ev.k === 'boulder') mesh.scale.setScalar(1.5);
     if (ev.k === 'arrow') mesh.scale.setScalar(0.55);
     if (ev.k === 'pumpkin') mesh.scale.setScalar(1.6);
+    if (ev.small) mesh.scale.setScalar(0.7); // catapult scatter balls
     // a gold / crystal arrow for upgraded bows
     if (ev.k === 'arrow' && ev.wt > 0) {
       const glow = new THREE.Color(TIER_COLORS[ev.wt]);
@@ -1861,7 +2040,10 @@ export class GameView {
   }
 
   spawnAoe(ev) {
-    let color = { mage: 0xc07dff, cannonball: 0xffa040, boulder: 0xcfa070, pumpkin: 0xff8c1a }[ev.k] || 0xffffff;
+    let color = {
+      mage: 0xc07dff, cannonball: 0xffa040, boulder: 0xcfa070, pumpkin: 0xff8c1a,
+      crystal: 0x8fd0ff, ice: 0x66c8ff, storm: 0xffe066,
+    }[ev.k] || 0xffffff;
     if (ev.k === 'mage') color = tierEffectColor(color, ev.wt); // gold/crystal blast
     if (ev.ft > 0) {
       // telegraph circle, then burst
@@ -1890,6 +2072,70 @@ export class GameView {
     ring.scale.setScalar(0.2);
     this.scene.add(ring);
     this.effects.push({ mesh: ring, t: 0, dur: 0.35, type: 'burst', r });
+  }
+
+  // jagged lightning arc between two enemies (storm crystal)
+  spawnZap(x1, z1, x2, z2) {
+    const pts = [];
+    const segs = 5;
+    for (let i = 0; i <= segs; i++) {
+      const k = i / segs;
+      const jx = i === 0 || i === segs ? 0 : (Math.random() - 0.5) * 0.4;
+      const jz = i === 0 || i === segs ? 0 : (Math.random() - 0.5) * 0.4;
+      pts.push(new THREE.Vector3(x1 + (x2 - x1) * k + jx, 0.7 + Math.random() * 0.25, z1 + (z2 - z1) * k + jz));
+    }
+    const geo = new THREE.BufferGeometry().setFromPoints(pts);
+    const line = new THREE.Line(geo, new THREE.LineBasicMaterial({
+      color: 0xffe066, transparent: true, opacity: 0.95, depthWrite: false,
+    }));
+    this.scene.add(line);
+    this.effects.push({ mesh: line, t: 0, dur: 0.22, type: 'zap' });
+    this.burst(x2, z2, 0.5, 0xffe066);
+  }
+
+  // flamethrower jet: a stream of ember sprites racing from the nozzle
+  // to the tip of the spray (green for the venom special)
+  spawnFlameJet(x, z, tx, tz, venom) {
+    const g = new THREE.Group();
+    const mat = venom ? this._statusMats.poison : this._statusMats.burn;
+    const parts = [];
+    for (let i = 0; i < 10; i++) {
+      const spr = new THREE.Sprite(mat);
+      spr.scale.setScalar(0.15);
+      g.add(spr);
+      parts.push({ spr, k: i / 10, side: (Math.random() - 0.5) * 0.8 });
+    }
+    this.scene.add(g);
+    this.effects.push({
+      mesh: g, t: 0, dur: 0.55, type: 'flamejet',
+      x, z, tx, tz, parts,
+    });
+  }
+
+  // lingering fire patch on the ground (cannon napalm)
+  spawnGroundFire(x, z, r, dur) {
+    const g = new THREE.Group();
+    const disc = new THREE.Mesh(
+      this._discGeo,
+      new THREE.MeshBasicMaterial({ color: 0xff5a1a, transparent: true, opacity: 0.3, depthWrite: false })
+    );
+    disc.rotation.x = -Math.PI / 2;
+    disc.position.y = 0.06;
+    disc.scale.setScalar(r);
+    g.add(disc);
+    const parts = [];
+    for (let i = 0; i < 8; i++) {
+      const spr = new THREE.Sprite(this._statusMats.burn);
+      const ang = Math.random() * Math.PI * 2, rad = Math.sqrt(Math.random()) * r * 0.8;
+      spr.position.set(Math.cos(ang) * rad, 0.2, Math.sin(ang) * rad);
+      spr.scale.setScalar(0.22);
+      spr.userData.phase = Math.random();
+      g.add(spr);
+      parts.push(spr);
+    }
+    g.position.set(x, 0, z);
+    this.scene.add(g);
+    this.effects.push({ mesh: g, t: 0, dur: dur || 3.5, type: 'gfire', disc, parts });
   }
 
   // ---------------- build ghost ----------------
@@ -1934,6 +2180,7 @@ export class GameView {
     this.updateNpcs(dt, selfPos);
     this.updateShowPets(dt);
     this.updatePets(dt);
+    this.animateStatusFx(dt);
 
     for (const a of this.players.values()) {
       // orbiting stone slabs of the tanker's wall mode
@@ -2070,6 +2317,32 @@ export class GameView {
         // hammer's vertical smash streak drops and fades fast
         e.inner.material.opacity = 0.85 * (1 - k);
         e.inner.scale.y = 1 - k * 0.6;
+      } else if (e.type === 'zap') {
+        e.mesh.material.opacity = 0.95 * (1 - k);
+      } else if (e.type === 'flamejet') {
+        // embers race along the jet line, spreading sideways as they go
+        for (const p of e.parts) {
+          const kk = (k + p.k) % 1;
+          const px = lerp(e.x, e.tx, kk), pz = lerp(e.z, e.tz, kk);
+          // perpendicular spread widens toward the tip of the spray
+          const dx = e.tx - e.x, dz = e.tz - e.z;
+          const len = Math.hypot(dx, dz) || 1;
+          p.spr.position.set(
+            px + (-dz / len) * p.side * kk,
+            0.75 + kk * 0.3,
+            pz + (dx / len) * p.side * kk
+          );
+          p.spr.scale.setScalar(0.13 + kk * 0.3);
+        }
+      } else if (e.type === 'gfire') {
+        // flames flicker on the burning ground, fading near the end
+        const fade = k > 0.75 ? 1 - (k - 0.75) / 0.25 : 1;
+        e.disc.material.opacity = 0.3 * fade;
+        for (const spr of e.parts) {
+          const kk = (this.time * 1.4 + spr.userData.phase) % 1;
+          spr.position.y = 0.1 + kk * 0.7;
+          spr.scale.setScalar(0.26 * (1 - kk * 0.7) * fade);
+        }
       }
     }
 

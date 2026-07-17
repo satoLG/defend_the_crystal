@@ -331,7 +331,10 @@ input:focus { border-color: var(--gold); }
   transform: translateX(-50%);
   display: flex; gap: 7px; align-items: stretch;
   padding: 0 8px;
+  /* six build cards now — allow a sideways scroll on narrow phones */
+  max-width: 100vw; overflow-x: auto; scrollbar-width: none;
 }
+#hud-bottom::-webkit-scrollbar { display: none; }
 .build-card {
   display: flex; flex-direction: column; align-items: center; gap: 1px;
   background: var(--panel); border: 2px solid var(--panel-border);
@@ -440,6 +443,20 @@ input:focus { border-color: var(--gold); }
 #upg-title { font-weight: 800; color: var(--gold); margin-bottom: 3px; }
 #upg-stats { white-space: pre-line; margin-bottom: 8px; font-size: 0.8rem; }
 .upg-actions { display: flex; gap: 8px; justify-content: center; }
+
+/* tower special effects (bonus upgrades) inside the upgrade panel */
+#upg-specials { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+.spec-btn {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
+  text-align: left; width: 100%; padding: 7px 10px;
+}
+.spec-btn b { color: var(--gold); }
+.spec-desc { font-size: 0.72rem; white-space: normal; line-height: 1.25; }
+.spec-owned {
+  font-size: 0.78rem; color: var(--gold); font-weight: 700;
+  padding: 4px 2px; text-align: left;
+}
+.spec-owned .muted { font-weight: 400; }
 
 /* ---------- toasts ---------- */
 #toasts {

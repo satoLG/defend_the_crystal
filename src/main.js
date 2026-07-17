@@ -331,7 +331,7 @@ function onCanvasTap(x, y, pointerType, button) {
     sfx.click();
     const w = cellToWorld(cell.c, cell.r);
     gs.showRange(w.x, w.z, towerRangeOf(tower));
-    return ui.openPanel({ type: 'tower', kind: tower[1], lvl: tower[4], c: cell.c, r: cell.r });
+    return ui.openPanel({ type: 'tower', kind: tower[1], lvl: tower[4], spec: tower[6] || 0, c: cell.c, r: cell.r });
   }
   const obst = snap.ob.find((o) => o[2] === cell.c && o[3] === cell.r);
   if (obst) {
@@ -355,6 +355,8 @@ function onKeyAction(action) {
     case 'card1': ui.selectCardByIndex(1); break;
     case 'card2': ui.selectCardByIndex(2); break;
     case 'card3': ui.selectCardByIndex(3); break;
+    case 'card4': ui.selectCardByIndex(4); break;
+    case 'card5': ui.selectCardByIndex(5); break;
     case 'cancel':
       ui.selectItem(null);
       ui.closePanel();
