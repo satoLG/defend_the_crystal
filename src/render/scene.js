@@ -15,6 +15,13 @@ import { instantiate } from './assets.js';
 
 const { COLS, ROWS, CELL, SPAWNS, CRYSTAL, BUILD_ROW_MIN, BUILD_ROW_MAX } = GRID;
 
+// unit view direction (from a look target toward the camera) for a given
+// pitch (tilt above the board) and yaw (swing left/right around the target)
+function camDirFromAngles(pitch, yaw) {
+  const cp = Math.cos(pitch), sp = Math.sin(pitch);
+  return new THREE.Vector3(Math.sin(yaw) * cp, sp, Math.cos(yaw) * cp).normalize();
+}
+
 export class GameScene {
   constructor(canvas) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
@@ -33,27 +40,22 @@ export class GameScene {
     this.camera = new THREE.PerspectiveCamera(50, 1, 0.5, 200);
     this.lookTarget = new THREE.Vector3(0, 0, 2.2);
 
-    // Two tunable camera modes, editable live from the camera overlay:
-    //   partida    – the fixed board framing held during a wave
-    //   checkpoint – the up-close follow-cam tracking the local hero
-    //                while strolling the sanctuary between waves
-    // pitch/yaw are radians; zoom scales the distance (higher = closer):
-    // partida.zoom on the auto-fit board distance, checkpoint.zoom on the
-    // follow distance. panX/panY/panZ (partida only) shift the point the
-    // board camera orbits and looks at, world units off this.lookTarget.
+    // partida: the fixed board framing held during a wave
+    this.boardDir = camDirFromAngles(60 * Math.PI / 180, 0);
+    this.boardZoom = 1.20;
+    this.boardPan = new THREE.Vector3(0, 0, -3.5);
+
+    // checkpoint: the up-close follow-cam tracking the local hero while
+    // strolling the sanctuary between waves
+    this.followDir = camDirFromAngles(35 * Math.PI / 180, 0);
+    this.followZoom = 1;
     this.CHK_BASE_DIST = 15; // follow-cam distance at zoom 1
-    this.camCfg = {
-      partida:    { pitch: 0.98, yaw: 0, zoom: 1, panX: 0, panY: 0, panZ: 0 },
-      checkpoint: { pitch: 35 * Math.PI / 180, yaw: 0, zoom: 1 },
-    };
-    this._recalcCamDirs();
 
     this.shake = 0;
     // checkpoint stroll: camera leaves the board framing to track the player
     this.followGoal = null;
     this.followPos = new THREE.Vector3();
     this.followBlend = 0;
-    this.followPreview = null; // overlay preview override: 'checkpoint' | 'partida' | null
     this._camPos = new THREE.Vector3();
     this._camLook = new THREE.Vector3();
     this._followCam = new THREE.Vector3();
@@ -857,19 +859,9 @@ export class GameScene {
     this.fitCamera();
   }
 
-  // the point the partida (board) camera orbits and looks at — the base
-  // look target shifted by the pan controls
-  _boardTarget() {
-    const c = this.camCfg.partida;
-    return this.lookTarget.clone().add(new THREE.Vector3(c.panX || 0, c.panY || 0, c.panZ || 0));
-  }
-
-  // binary-search the camera distance so the whole board fits. Always
-  // measured from the fixed board center (this.lookTarget), NEVER the
-  // panned target — otherwise panning would feed back into this search
-  // and silently override the pan with whatever distance keeps the
-  // board on screen (the "camera sobe" bug). Pan is applied afterward,
-  // as a pure translation, in _applyBoardZoom.
+  // binary-search the camera distance so the whole board fits, measured
+  // from the fixed board center — the board pan offset is applied
+  // afterward as a pure translation, never fed back into this search.
   fitCamera() {
     const corners = [
       new THREE.Vector3(-HALF_W - 0.8, 0, -HALF_H - 1.2),
@@ -884,7 +876,7 @@ export class GameScene {
     let lo = 8, hi = 130;
     for (let it = 0; it < 22; it++) {
       const mid = (lo + hi) / 2;
-      this.placeCamera(mid, this.lookTarget);
+      this.placeCamera(mid);
       let fits = true;
       for (const c of corners) {
         const p = c.clone().project(this.camera);
@@ -892,63 +884,17 @@ export class GameScene {
       }
       if (fits) hi = mid; else lo = mid;
     }
-    this.placeCamera(hi, this.lookTarget);
-    this.fitDist = hi;
-    this._applyBoardZoom();
+    this.placeCamera(hi);
+    const boardTarget = this.lookTarget.clone().add(this.boardPan);
+    this.baseCamPos = boardTarget.clone().addScaledVector(this.boardDir, hi / this.boardZoom);
+    this.baseCamLook = boardTarget;
   }
 
-  // the board framing sits at the fitted distance divided by the zoom
-  // multiplier (higher zoom = closer), along the partida view direction
-  _applyBoardZoom(target = this._boardTarget()) {
-    const d = (this.fitDist || 30) / (this.camCfg.partida.zoom || 1);
-    this.baseCamPos = target.clone().addScaledVector(this.boardDir, d);
-    this.baseCamLook = target;
-  }
-
-  placeCamera(dist, target = this.lookTarget) {
-    this.camera.position.copy(target).addScaledVector(this.boardDir, dist);
-    this.camera.lookAt(target);
+  placeCamera(dist) {
+    this.camera.position.copy(this.lookTarget).addScaledVector(this.boardDir, dist);
+    this.camera.lookAt(this.lookTarget);
     this.camera.updateMatrixWorld();
     this.camera.updateProjectionMatrix();
-  }
-
-  // view directions (unit vectors from look target toward the camera)
-  // derived from each mode's pitch (tilt above the board) and yaw
-  // (swing left/right around the target)
-  _camDir(pitch, yaw) {
-    const cp = Math.cos(pitch), sp = Math.sin(pitch);
-    return new THREE.Vector3(Math.sin(yaw) * cp, sp, Math.cos(yaw) * cp).normalize();
-  }
-
-  _recalcCamDirs() {
-    this.boardDir = this._camDir(this.camCfg.partida.pitch, this.camCfg.partida.yaw);
-    this.followDir = this._camDir(this.camCfg.checkpoint.pitch, this.camCfg.checkpoint.yaw);
-  }
-
-  // ---- camera-tuning overlay API ----
-  getCamCfg() {
-    return {
-      partida: { ...this.camCfg.partida },
-      checkpoint: { ...this.camCfg.checkpoint },
-    };
-  }
-
-  // apply a whole {partida, checkpoint} config (e.g. restored from storage)
-  applyCamCfg(cfg) {
-    for (const mode of ['partida', 'checkpoint']) {
-      if (cfg && cfg[mode]) Object.assign(this.camCfg[mode], cfg[mode]);
-    }
-    this._recalcCamDirs();
-    this.fitCamera();
-  }
-
-  // live-edit one field of one mode from the overlay sliders
-  setCamCfg(mode, key, value) {
-    if (!this.camCfg[mode] || !(key in this.camCfg[mode])) return;
-    this.camCfg[mode][key] = value;
-    this._recalcCamDirs();
-    // partida framing is baked into baseCamPos; checkpoint applies live in update()
-    this.fitCamera();
   }
 
   addShake(amount) {
@@ -1007,7 +953,7 @@ export class GameScene {
       if (this.followGoal) this.followPos.lerp(this.followGoal, Math.min(dt * 6, 1));
       const b = this.followBlend;
       const k = b * b * (3 - 2 * b); // smoothstep for a gentle glide
-      const fd = this.CHK_BASE_DIST / (this.camCfg.checkpoint.zoom || 1);
+      const fd = this.CHK_BASE_DIST / this.followZoom;
       this._followCam.copy(this.followPos).addScaledVector(this.followDir, fd);
       this._camPos.lerp(this._followCam, k);
       this._camLook.lerp(this.followPos, k);

@@ -19,7 +19,6 @@ import { petRefOf, loadoutOf } from './character.js';
 import { makeRoomCode, lerp, dist2d } from './utils.js';
 import { settings } from './settings.js';
 import { music } from './music.js';
-import { initCamTune } from './camtune.js';
 
 // ============================================================
 // Bootstraps everything and runs the two game loops:
@@ -132,10 +131,6 @@ async function boot() {
     if (k === 'shadows') gs.setShadows(v);
   });
   view = new GameView(gs);
-
-  // camera-tuning overlay: toggle between the "partida" and "checkpoint"
-  // framings and nudge each one's angle / rotation / zoom live
-  initCamTune(gs);
 
   // live 3D turntable for the character-creation screen
   const preview = new CharacterPreview(document.getElementById('preview-canvas'));
@@ -725,9 +720,7 @@ function frame(t) {
   const phase = state.role === 'host' ? state.sim?.phase : uiSnap?.ph;
   const waveN = state.role === 'host' ? state.sim?.wave : uiSnap?.w;
   const freeRoam = phase === 'checkpoint' || (phase === 'build' && waveN === 0);
-  // the camera-tuning overlay can force either framing to preview it live
-  const wantFollow = gs.followPreview ? gs.followPreview === 'checkpoint' : freeRoam;
-  if (state.started && !state.over && wantFollow &&
+  if (state.started && !state.over && freeRoam &&
       (state.role === 'host' || state.selfInit) && !state.self.dead) {
     gs.setFollow(state.self.x, state.self.z);
   } else {

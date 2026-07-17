@@ -431,13 +431,6 @@ input:focus { border-color: var(--gold); }
 #hud-settings { cursor: pointer; font-family: inherit; color: var(--text); }
 .resp-title { display: flex; align-items: center; gap: 10px; }
 
-/* ---------- camera-tuning overlay ---------- */
-#cam-tune-btn { cursor: pointer; font-family: inherit; color: var(--text); }
-.camtune-hint { margin: 0 0 6px; font-size: 13px; text-align: left; }
-.camtune-val { min-width: 46px; text-align: right; font-variant-numeric: tabular-nums; }
-.camtune-actions { display: flex; gap: 8px; margin-top: 16px; }
-.camtune-actions .btn.primary { flex: 1; }
-
 /* ---------- upgrade panel ---------- */
 #upgrade-panel {
   position: absolute; bottom: calc(max(10px, env(safe-area-inset-bottom)) + 92px);
