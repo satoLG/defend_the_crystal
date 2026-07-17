@@ -15,6 +15,13 @@ import { instantiate } from './assets.js';
 
 const { COLS, ROWS, CELL, SPAWNS, CRYSTAL, BUILD_ROW_MIN, BUILD_ROW_MAX } = GRID;
 
+// unit view direction (from a look target toward the camera) for a given
+// pitch (tilt above the board) and yaw (swing left/right around the target)
+function camDirFromAngles(pitch, yaw) {
+  const cp = Math.cos(pitch), sp = Math.sin(pitch);
+  return new THREE.Vector3(Math.sin(yaw) * cp, sp, Math.cos(yaw) * cp).normalize();
+}
+
 export class GameScene {
   constructor(canvas) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
@@ -32,7 +39,18 @@ export class GameScene {
 
     this.camera = new THREE.PerspectiveCamera(50, 1, 0.5, 200);
     this.lookTarget = new THREE.Vector3(0, 0, 2.2);
-    this.camDir = new THREE.Vector3(0, Math.sin(0.98), Math.cos(0.98)).normalize();
+
+    // partida: the fixed board framing held during a wave
+    this.boardDir = camDirFromAngles(60 * Math.PI / 180, 0);
+    this.boardZoom = 1.20;
+    this.boardPan = new THREE.Vector3(0, 0, -3.5);
+
+    // checkpoint: the up-close follow-cam tracking the local hero while
+    // strolling the sanctuary between waves
+    this.followDir = camDirFromAngles(35 * Math.PI / 180, 0);
+    this.followZoom = 1;
+    this.CHK_BASE_DIST = 15; // follow-cam distance at zoom 1
+
     this.shake = 0;
     // checkpoint stroll: camera leaves the board framing to track the player
     this.followGoal = null;
@@ -841,7 +859,9 @@ export class GameScene {
     this.fitCamera();
   }
 
-  // binary-search the camera distance so the whole board fits
+  // binary-search the camera distance so the whole board fits, measured
+  // from the fixed board center — the board pan offset is applied
+  // afterward as a pure translation, never fed back into this search.
   fitCamera() {
     const corners = [
       new THREE.Vector3(-HALF_W - 0.8, 0, -HALF_H - 1.2),
@@ -865,11 +885,13 @@ export class GameScene {
       if (fits) hi = mid; else lo = mid;
     }
     this.placeCamera(hi);
-    this.baseCamPos = this.camera.position.clone();
+    const boardTarget = this.lookTarget.clone().add(this.boardPan);
+    this.baseCamPos = boardTarget.clone().addScaledVector(this.boardDir, hi / this.boardZoom);
+    this.baseCamLook = boardTarget;
   }
 
   placeCamera(dist) {
-    this.camera.position.copy(this.lookTarget).addScaledVector(this.camDir, dist);
+    this.camera.position.copy(this.lookTarget).addScaledVector(this.boardDir, dist);
     this.camera.lookAt(this.lookTarget);
     this.camera.updateMatrixWorld();
     this.camera.updateProjectionMatrix();
@@ -926,12 +948,13 @@ export class GameScene {
     // follow-cam, then layer shake on top
     this.followBlend += ((this.followGoal ? 1 : 0) - this.followBlend) * Math.min(dt * 2, 1);
     this._camPos.copy(this.baseCamPos || this.camera.position);
-    this._camLook.copy(this.lookTarget);
+    this._camLook.copy(this.baseCamLook || this.lookTarget);
     if (this.followBlend > 0.003) {
       if (this.followGoal) this.followPos.lerp(this.followGoal, Math.min(dt * 6, 1));
       const b = this.followBlend;
       const k = b * b * (3 - 2 * b); // smoothstep for a gentle glide
-      this._followCam.copy(this.followPos).addScaledVector(this.camDir, 15);
+      const fd = this.CHK_BASE_DIST / this.followZoom;
+      this._followCam.copy(this.followPos).addScaledVector(this.followDir, fd);
       this._camPos.lerp(this._followCam, k);
       this._camLook.lerp(this.followPos, k);
     }
