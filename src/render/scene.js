@@ -168,12 +168,15 @@ export class GameScene {
         const tone = tones[Math.min(tones.length - 1, Math.floor(rng() * tones.length))];
         const jit = 0.9 + rng() * 0.18;
         let cr = tone[0] * jit, cg = tone[1] * jit, cb = tone[2] * jit;
-        // penumbra: only the very first row sits in the forest's shade —
-        // just a touch darker so the grid itself stays lit (the actual
-        // darkness belongs north of the board, over the spawn woods)
+        // penumbra: the forest's shade feathers half a tile onto the grid
+        // (row 0 shaded, row 1 barely) so the board→woods seam reads as a
+        // gradient instead of a hard line; the grid still stays lit
         if (r === 0) {
-          const dark = 0.74;
+          const dark = 0.72;
           cr *= dark; cg *= dark; cb *= dark * 1.05;
+        } else if (r === 1) {
+          const dark = 0.89;
+          cr *= dark; cg *= dark; cb *= dark * 1.02;
         }
         colors.push([cr, cg, cb]);
       }
@@ -683,7 +686,9 @@ export class GameScene {
       new THREE.MeshBasicMaterial({ map: spillTex, transparent: true, depthWrite: false })
     );
     spill.rotation.x = -Math.PI / 2;
-    spill.position.set(0, 0.035, -HALF_H - 7);
+    // half a tile further onto the board than before, so the shade drapes
+    // over the board→woods seam instead of stopping short of it
+    spill.position.set(0, 0.035, -HALF_H - 6);
     spill.renderOrder = 2;
     this.scene.add(spill);
 

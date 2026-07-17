@@ -32,12 +32,16 @@ const PHRASES = [
 // sanctuary breather to a pounding boss fight without ever sounding like
 // a different soundtrack.
 const MODES = {
-  // checkpoint / sanctuary rest: slow, sparse, warm — room to breathe
+  // checkpoint / sanctuary rest: calm but bright and hopeful. Same D-dorian
+  // pool as the wave loop (so the transition stays seamless), but the sad
+  // phrase is dropped for the ascending ones, the drone is a warm open
+  // D–A–D (no minor third to weigh it down) and each note gets a soft
+  // octave-up sparkle for good vibes
   peace: {
-    bpm: 66, order: [0, 3, 0, 3], octave: 0, playProb: 0.8,
-    droneNotes: [[0, -1], [7, -1]], droneType: 'sine', droneGain: 0.05, droneLP: 430,
-    drumEvery: 8, drumGain: 0.35, drumAccent: false,
-    pluckVel: 0.62, pluckLP: 1700, subProb: 0.1, boomEvery: 0,
+    bpm: 76, order: [2, 0, 1, 0], octave: 0, playProb: 0.82,
+    droneNotes: [[0, -1], [7, -1], [0, 0]], droneType: 'sine', droneGain: 0.048, droneLP: 560,
+    drumEvery: 8, drumGain: 0.3, drumAccent: false,
+    pluckVel: 0.66, pluckLP: 2300, subProb: 0.28, subOct: 1, boomEvery: 0,
   },
   // normal wave in progress: the original loop
   wave: {
@@ -54,13 +58,15 @@ const MODES = {
     drumEvery: 2, drumGain: 1, drumAccent: true,
     pluckVel: 1.0, pluckLP: 2500, subProb: 0.3, boomEvery: 0,
   },
-  // checkpoint boss: ominous and low — the melody drops an octave, a
-  // tritone sits under the drone and a timpani boom lands on the downbeat
+  // checkpoint boss: driving, intense action with danger — the sub-boss's
+  // clean D-minor drone taken lower and heavier (NO tritone, which turned
+  // into a grating constant horn), a harder-hitting drum, a low melody and
+  // a timpani boom on the downbeat for impact
   boss: {
-    bpm: 100, order: [2, 3, 1, 3, 2], octave: -1, playProb: 0.92,
-    droneNotes: [[0, -2], [0, -1], [6, -1]], droneType: 'sawtooth', droneGain: 0.08, droneLP: 720,
-    drumEvery: 2, drumGain: 1.15, drumAccent: true,
-    pluckVel: 1.05, pluckLP: 1500, subProb: 0.42, boomEvery: 8,
+    bpm: 108, order: [1, 2, 1, 2, 3], octave: -1, playProb: 0.95,
+    droneNotes: [[0, -2], [3, -1], [7, -1]], droneType: 'sawtooth', droneGain: 0.055, droneLP: 600,
+    drumEvery: 2, drumGain: 1.2, drumAccent: true,
+    pluckVel: 1.1, pluckLP: 1700, subProb: 0.4, boomEvery: 8,
   },
 };
 let currentMode = 'wave';
@@ -262,7 +268,9 @@ function schedule() {
     if (semi !== null && Math.random() < m.playProb) {
       const jitter = (Math.random() - 0.5) * 0.014;
       pluck(N(semi, m.octave), nextNoteTime + jitter, m.pluckVel * (0.8 + Math.random() * 0.35), m.pluckLP);
-      if (Math.random() < m.subProb) pluck(N(semi, m.octave - 1), nextNoteTime + jitter, m.pluckVel * 0.4, m.pluckLP);
+      // doubling: a low octave adds weight (default), or an octave-up adds
+      // a bright sparkle where a mode asks for it (subOct: 1)
+      if (Math.random() < m.subProb) pluck(N(semi, m.octave + (m.subOct ?? -1)), nextNoteTime + jitter, m.pluckVel * 0.4, m.pluckLP);
     }
     if (m.drumEvery && idx % m.drumEvery === 0) {
       drum(nextNoteTime, m.drumAccent && idx % 4 === 0, m.drumGain);
