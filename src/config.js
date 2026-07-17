@@ -587,6 +587,17 @@ export const ENEMY = {
   ATTACK_RATE: 0.8,      // attacks per second
   AGGRO_RADIUS: 3.2,     // notice characters this close
   LEASH_RADIUS: 8.0,     // give up chase beyond this
+  // Aggro only ever sticks when the enemy has a CLEAR straight path to
+  // the character (no tower/obstacle cell between them), and never when
+  // the crystal is closer to the enemy than the character is — the
+  // crystal always outranks the bait.
+  // Anti-kiting: while chasing, walking the enemy BACK toward its spawn
+  // (away from its closest-yet approach to the crystal) charges a drag
+  // timer; past DRAG_TIME it shrugs the chase off and won't re-aggro
+  // for AGGRO_REFRACT seconds, so it genuinely returns to the path.
+  DRAG_SLACK: 1.2,       // world units of pull-back tolerated freely
+  DRAG_TIME: 2.6,        // seconds being dragged backward before giving up
+  AGGRO_REFRACT: 5,      // seconds of aggro immunity after giving up
   KNOCKBACK_ON_PLAYER: 2.4,
   SEPARATION_WEIGHT: 1.4,
   BREACH_DIST: 1.0,      // how close to the crystal counts as a breach

@@ -9,7 +9,7 @@ import {
   TOWER_SPECIALS, STATUS,
 } from '../config.js';
 import {
-  Grid, cellToWorld, worldToCell, canJumpFrom, enemyJumpShortcut, idx,
+  Grid, cellToWorld, worldToCell, canJumpFrom, enemyJumpShortcut, idx, inBounds,
   computeDashEnd, CRYSTAL_POS, HALF_W, HALF_H,
 } from './grid.js';
 import { buildWavePlan, enemyStats } from './waves.js';
@@ -322,6 +322,15 @@ export class Sim {
       case 'start': if (this.phase === 'build') this.startWave(); return;
       case 'cont': return this.setContinue(id);
       case 'restart': if (this.phase === 'over') this.restart(); return;
+      // TEMP dev shortcut: jump straight to a boss wave to preview it
+      // (buttons in the HUD; remove together with them once tuned)
+      case 'debugwave':
+        if (this.phase === 'build' || this.phase === 'checkpoint') {
+          this.wave = Math.max(1, (act.wave | 0)) - 1;
+          this.contReady.clear();
+          this.startWave();
+        }
+        return;
     }
   }
 
@@ -648,6 +657,7 @@ export class Sim {
       pts: stats.pts, xp: stats.xp, scale: stats.scale, breach: stats.breach,
       boss, flying: !!def.flying, state: 'path', targetId: null,
       atkCd: 0, kbx: 0, kbz: 0, yaw: 0, stunT: 0,
+      aggroCd: 0, chaseBestD: 0, dragT: 0,
       // status effects (towers): chill slow, fire / poison DoTs
       slowT: 0, slowF: 1, burnT: 0, burnDps: 0, poisonT: 0, poisonDps: 0,
       dotTick: 0,
@@ -706,6 +716,15 @@ export class Sim {
       e.kbz += (dz / d) * mag;
     }
     this.emit({ t: 'hit', id: e.id });
+    // getting shot/blasted pulls aggro — but only under the same rules
+    // as proximity: clear line to the attacker and crystal not closer
+    if (e.hp > 0 && killer && !killer.dead && e.state !== 'chase') {
+      const pos = e.vehicle.position;
+      const d = dist2d(pos.x, pos.z, killer.x, killer.z);
+      if (d <= ENEMY.LEASH_RADIUS && this.canAggro(e, killer, d)) {
+        this.startChase(e, killer);
+      }
+    }
     // war hammer bonus: chance to stun (bosses shrug most of it off)
     if (e.hp > 0 && killer && killer.stunCh > 0 && Math.random() < killer.stunCh) {
       const dur = e.boss ? STUN.DUR * STUN.BOSS_MULT : STUN.DUR;
@@ -734,6 +753,39 @@ export class Sim {
       this.removeEnemy(e);
       this.checkWaveCleared();
     }
+  }
+
+  // ---------------- aggro rules ----------------
+
+  // clear straight path over the grid between two world points: no
+  // tower/obstacle cell may sit between them. Cells outside the board
+  // (the spawn woods) never block. Flying enemies skip this entirely.
+  hasLos(x1, z1, x2, z2) {
+    const steps = Math.ceil(dist2d(x1, z1, x2, z2) / (GRID.CELL * 0.35));
+    for (let i = 1; i < steps; i++) {
+      const k = i / steps;
+      const { c, r } = worldToCell(x1 + (x2 - x1) * k, z1 + (z2 - z1) * k);
+      if (inBounds(c, r) && this.grid.blocked[idx(c, r)] === 1) return false;
+    }
+    return true;
+  }
+
+  // may enemy `e` take the bait `p` standing `d` away? The crystal
+  // always outranks the character when it's the closer of the two.
+  canAggro(e, p, d) {
+    if ((e.aggroCd || 0) > 0) return false;
+    const pos = e.vehicle.position;
+    if (dist2d(pos.x, pos.z, CRYSTAL_POS.x, CRYSTAL_POS.z) <= d) return false;
+    return e.flying || this.hasLos(pos.x, pos.z, p.x, p.z);
+  }
+
+  startChase(e, p) {
+    const pos = e.vehicle.position;
+    e.state = 'chase';
+    e.targetId = p.id;
+    // closest-yet approach to the crystal — the anti-kiting reference
+    e.chaseBestD = dist2d(pos.x, pos.z, CRYSTAL_POS.x, CRYSTAL_POS.z);
+    e.dragT = 0;
   }
 
   // ---------------- status effects (tower specials) ----------------
@@ -1270,24 +1322,47 @@ export class Sim {
         continue;
       }
 
-      // acquire / drop aggro
+      // aggro refractory period ticks down while marching
+      if (e.aggroCd > 0) e.aggroCd = Math.max(e.aggroCd - dt, 0);
+
+      // acquire aggro: nearest character in radius that passes the
+      // rules — clear straight path, and the crystal not closer
       if (e.state === 'path' && alive.length) {
         let best = null, bestD = Infinity;
         for (const p of alive) {
           const d = dist2d(pos.x, pos.z, p.x, p.z);
-          if (d < bestD) { bestD = d; best = p; }
+          if (d < bestD && d < ENEMY.AGGRO_RADIUS && this.canAggro(e, p, d)) {
+            bestD = d; best = p;
+          }
         }
-        if (best && bestD < ENEMY.AGGRO_RADIUS) {
-          e.state = 'chase';
-          e.targetId = best.id;
-        }
+        if (best) this.startChase(e, best);
       }
 
       let target = null;
       if (e.state === 'chase') {
         target = this.getPlayer(e.targetId);
-        if (!target || target.dead ||
-            dist2d(pos.x, pos.z, target.x, target.z) > ENEMY.LEASH_RADIUS) {
+        const td = target && !target.dead
+          ? dist2d(pos.x, pos.z, target.x, target.z) : Infinity;
+        // drop the chase when: target gone/dead, out of leash, or a
+        // wall/tower got between us (ghosts fly over, so they keep it)
+        let drop = !target || target.dead || td > ENEMY.LEASH_RADIUS ||
+          (!e.flying && !this.hasLos(pos.x, pos.z, target.x, target.z));
+        // anti-kiting: being walked back away from the crystal charges
+        // the drag timer; hold long enough and the enemy shrugs it off
+        if (!drop && target) {
+          const cd = dist2d(pos.x, pos.z, CRYSTAL_POS.x, CRYSTAL_POS.z);
+          if (cd < e.chaseBestD) e.chaseBestD = cd;
+          if (cd > e.chaseBestD + ENEMY.DRAG_SLACK) {
+            e.dragT = (e.dragT || 0) + dt;
+            if (e.dragT >= ENEMY.DRAG_TIME) {
+              drop = true;
+              e.aggroCd = ENEMY.AGGRO_REFRACT; // commit to the path a while
+            }
+          } else if (e.dragT > 0) {
+            e.dragT = Math.max(e.dragT - dt * 0.6, 0);
+          }
+        }
+        if (drop) {
           e.state = 'path';
           e.targetId = null;
           target = null;

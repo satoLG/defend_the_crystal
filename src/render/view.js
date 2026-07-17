@@ -487,6 +487,55 @@ const ENEMY_PROPS = {
 const TOWER_LEVEL_COLORS = [0x9aa1ab, 0x4a86e8, 0x3fbf5f, 0xe0503a, 0x9a4ae0, 0xe8b84b];
 const TOWERS_MAX_VISUAL = 6;
 
+// A bought special recolors ONE telling detail of the turret model —
+// never a full-body filter. The Kenney models keep their sub-parts as
+// named nodes, so: the crystal tower's crystals turn blue (ice) or
+// yellow (storm), the ballista's loaded arrow gets the gold/cyan
+// finish, the cannon's barrel glows ember, the catapult's throwing arm
+// goes iron. The flamethrower model is a single mesh, so venom hangs a
+// small green gem off the roof instead.
+const SPEC_DETAILS = {
+  ice: { color: 0x3f9fff, prefix: 'crystal' },
+  storm: { color: 0xffd224, prefix: 'crystal' },
+  triple: { color: 0xffc41f, prefix: 'arrow' },
+  pierce: { color: 0x4adfff, prefix: 'arrow' },
+  napalm: { color: 0xff6a22, prefix: 'barrel' },
+  scatter: { color: 0x6f7884, prefix: 'catapult' },
+  venom: { color: 0x39d824, gem: true },
+};
+
+function paintSpecDetail(weapon, spec) {
+  const d = SPEC_DETAILS[spec];
+  if (!d) return;
+  if (d.prefix) {
+    weapon.traverse((o) => {
+      if (o.isMesh && o.material && o.name.startsWith(d.prefix)) {
+        // drop the colormap on this part: a clean solid color reads as
+        // "the detail changed", not a filter (yellow × blue tex = mud)
+        o.material.map = null;
+        o.material.color.set(d.color);
+        if (o.material.emissive) {
+          o.material.emissive.set(d.color);
+          o.material.emissiveIntensity = 0.3;
+        }
+        o.material.needsUpdate = true;
+      }
+    });
+  }
+  if (d.gem) {
+    const gem = new THREE.Mesh(
+      new THREE.OctahedronGeometry(0.16),
+      new THREE.MeshStandardMaterial({
+        color: d.color, emissive: d.color, emissiveIntensity: 0.7,
+        roughness: 0.4, flatShading: true,
+      })
+    );
+    // the flame tower model is normalized to ~1.25 units tall
+    gem.position.y = 1.45;
+    weapon.add(gem);
+  }
+}
+
 // the two sanctuary vendors stand where the old fountains were (±4.1,
 // mid-plaza), both turned to face the camera so the player reads them
 // clearly. main.js checks the local hero's distance to unlock each
@@ -1395,24 +1444,7 @@ export class GameView {
     }).group;
     weapon.position.y = 0.55;
     weapon.scale.setScalar(1 + (lvl - 1) * 0.07);
-    // a bought special dyes the turret so the path reads at a glance:
-    // ice blue, storm gold, venom green, napalm ember, triple/pierce steel-blue
-    const specTint = {
-      ice: 0x66c8ff, storm: 0xffd24a, venom: 0x62e84a,
-      napalm: 0xff7a22, triple: 0x9fb8ff, pierce: 0xb8fff2, scatter: 0xd8c8a8,
-    }[spec];
-    if (specTint) {
-      const tint = new THREE.Color(specTint);
-      weapon.traverse((o) => {
-        if (o.isMesh && o.material) {
-          o.material.color.lerp(tint, 0.45);
-          if (o.material.emissive) {
-            o.material.emissive.set(specTint);
-            o.material.emissiveIntensity = 0.18;
-          }
-        }
-      });
-    }
+    if (spec) paintSpecDetail(weapon, spec);
     group.add(weapon);
     if (lvl >= TOWERS_MAX_VISUAL) {
       const deco = instantiate('tower-crystals', { shadows: false }).group;
