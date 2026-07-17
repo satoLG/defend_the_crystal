@@ -25,6 +25,17 @@ const PHRASES = [
   [-2, null, 0, null, 3, null, 0, -2, -4, null, -2, null, 0, null, null, null],
 ];
 
+// Casual rest-loop phrases — a separate, airy pentatonic (D E G A B, i.e.
+// degrees 0 2 5 7 9 12, no minor third and no leaps that clash) so the
+// checkpoint theme is easy on the ears for a long time instead of leaning
+// on the dorian colour that made it sound off. Still all in D, so it slides
+// smoothly back into the combat loop.
+const REST_PHRASES = [
+  [0, null, 2, null, 5, null, 7, null, 9, null, 7, null, 5, null, 2, null],
+  [7, null, 9, null, 12, null, 9, null, 7, null, 5, null, 7, null, null, null],
+  [9, null, 7, null, 5, null, 2, null, 0, null, null, 2, null, null, 0, null],
+];
+
 // Per-situation beds. They all share the same D-dorian lute / drone /
 // hand-drum palette so the game keeps ONE musical identity — what changes
 // is tempo, which phrases play, the melody's register, how hard the drum
@@ -32,16 +43,16 @@ const PHRASES = [
 // sanctuary breather to a pounding boss fight without ever sounding like
 // a different soundtrack.
 const MODES = {
-  // checkpoint / sanctuary rest: calm but bright and hopeful. Same D-dorian
-  // pool as the wave loop (so the transition stays seamless), but the sad
-  // phrase is dropped for the ascending ones, the drone is a warm open
-  // D–A–D (no minor third to weigh it down) and each note gets a soft
-  // octave-up sparkle for good vibes
+  // checkpoint / sanctuary rest: casual and easy — its own airy pentatonic
+  // (REST_PHRASES), NO sustained drone (that constant hum didn't suit a
+  // breather), just a soft alternating root/fifth bass under a mellow lute.
+  // Made to loop pleasantly for as long as the player wants to hang around.
   peace: {
-    bpm: 76, order: [2, 0, 1, 0], octave: 0, playProb: 0.82,
-    droneNotes: [[0, -1], [7, -1], [0, 0]], droneType: 'sine', droneGain: 0.048, droneLP: 560,
-    drumEvery: 8, drumGain: 0.3, drumAccent: false,
-    pluckVel: 0.66, pluckLP: 2300, subProb: 0.28, subOct: 1, boomEvery: 0,
+    bpm: 78, phrases: REST_PHRASES, order: [0, 1, 0, 2], octave: 0, playProb: 0.9,
+    droneNotes: [], droneType: 'sine', droneGain: 0, droneLP: 500,
+    drumEvery: 8, drumGain: 0.28, drumAccent: false,
+    pluckVel: 0.6, pluckLP: 1500, subProb: 0, boomEvery: 0,
+    bassEvery: 8, bassVel: 0.5,
   },
   // normal wave in progress: the original loop
   wave: {
@@ -260,10 +271,11 @@ function schedule() {
   if (nextNoteTime < ctx.currentTime - 0.05) {
     nextNoteTime = ctx.currentTime + 0.06;
   }
+  const phrases = m.phrases || PHRASES;
   while (nextNoteTime < ctx.currentTime + 0.35) {
     const bar = Math.floor(step / 16);
     const idx = step % 16;
-    const phrase = PHRASES[m.order[bar % m.order.length]];
+    const phrase = phrases[m.order[bar % m.order.length]];
     const semi = phrase[idx];
     if (semi !== null && Math.random() < m.playProb) {
       const jitter = (Math.random() - 0.5) * 0.014;
@@ -271,6 +283,12 @@ function schedule() {
       // doubling: a low octave adds weight (default), or an octave-up adds
       // a bright sparkle where a mode asks for it (subOct: 1)
       if (Math.random() < m.subProb) pluck(N(semi, m.octave + (m.subOct ?? -1)), nextNoteTime + jitter, m.pluckVel * 0.4, m.pluckLP);
+    }
+    // soft bass anchor for drone-less modes: alternate root / fifth so the
+    // casual loop still has a warm harmonic floor without a constant hum
+    if (m.bassEvery && idx % m.bassEvery === 0) {
+      const bn = idx % (m.bassEvery * 2) === 0 ? 0 : 7;
+      pluck(N(bn, m.octave - 1), nextNoteTime, m.bassVel ?? 0.5, 900);
     }
     if (m.drumEvery && idx % m.drumEvery === 0) {
       drum(nextNoteTime, m.drumAccent && idx % 4 === 0, m.drumGain);
