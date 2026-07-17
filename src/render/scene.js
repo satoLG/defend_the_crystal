@@ -73,7 +73,11 @@ export class GameScene {
     moon.shadow.camera.left = -s; moon.shadow.camera.right = s;
     moon.shadow.camera.top = s * 1.7; moon.shadow.camera.bottom = -s * 1.7;
     moon.shadow.camera.far = 60;
-    moon.shadow.bias = -0.001;
+    // normalBias pushes the shadow lookup along the surface normal, which
+    // clears the self-shadow "static" that peppered the near-flat grass
+    // tiles at high pixel ratios (invisible on lower-res mobile screens).
+    moon.shadow.bias = -0.0006;
+    moon.shadow.normalBias = 0.04;
     this.scene.add(moon);
 
     this.crystalLight = new THREE.PointLight(0x66e0ff, 30, 14, 1.8);
@@ -164,10 +168,15 @@ export class GameScene {
         const tone = tones[Math.min(tones.length - 1, Math.floor(rng() * tones.length))];
         const jit = 0.9 + rng() * 0.18;
         let cr = tone[0] * jit, cg = tone[1] * jit, cb = tone[2] * jit;
-        // penumbra: the forest swallows the top rows
-        if (r <= 3) {
-          const dark = 0.26 + r * 0.19;
-          cr *= dark; cg *= dark; cb *= dark * 1.08;
+        // penumbra: the forest's shade feathers half a tile onto the grid
+        // (row 0 shaded, row 1 barely) so the board→woods seam reads as a
+        // gradient instead of a hard line; the grid still stays lit
+        if (r === 0) {
+          const dark = 0.72;
+          cr *= dark; cg *= dark; cb *= dark * 1.05;
+        } else if (r === 1) {
+          const dark = 0.89;
+          cr *= dark; cg *= dark; cb *= dark * 1.02;
         }
         colors.push([cr, cg, cb]);
       }
@@ -221,21 +230,29 @@ export class GameScene {
       this.scene.add(inst);
     }
 
-    // the world around the clearing is forest floor, not a void:
-    // mossy green ground (close to the board's grass, a shade darker)
-    // stretching out under the trees
+    // the world around the clearing is forest floor, not a void: a dim
+    // mossy ground stretching out under the trees. Kept darker than the
+    // board so the flanks read as gloom, and biased back in the depth
+    // buffer (polygonOffset) so it never z-fights the grid tiles sitting
+    // just above it.
     const base = new THREE.Mesh(
       new THREE.PlaneGeometry(240, 240),
-      new THREE.MeshStandardMaterial({ color: 0x3d5230, roughness: 1 })
+      new THREE.MeshStandardMaterial({
+        color: 0x2b3a1f, roughness: 1,
+        polygonOffset: true, polygonOffsetFactor: 2, polygonOffsetUnits: 2,
+      })
     );
     base.rotation.x = -Math.PI / 2;
-    base.position.y = -tileTop - 0.02;
+    base.position.y = -tileTop - 0.06;
     base.receiveShadow = true;
     this.scene.add(base);
 
-    // subtle color breakup so the surrounding ground reads as terrain
+    // subtle color breakup so the surrounding ground reads as terrain.
+    // Each patch is nudged a hair higher than the last so overlapping
+    // circles never share a plane (which flickered against each other and
+    // the floor); they also sit clearly above the offset base.
     const patchGeo = new THREE.CircleGeometry(1, 10);
-    const patchMats = [0x466039, 0x33452a, 0x4c6b3e, 0x394d2e].map(
+    const patchMats = [0x33482a, 0x263420, 0x39502e, 0x2b3b22].map(
       (col) => new THREE.MeshStandardMaterial({ color: col, roughness: 1 })
     );
     for (let i = 0; i < 90; i++) {
@@ -247,7 +264,7 @@ export class GameScene {
       if (Math.abs(px) < HALF_W + 1 && pz > -HALF_H - 1 && pz < HALF_H + PLAZA.DEPTH + 1) continue;
       const patch = new THREE.Mesh(patchGeo, patchMats[Math.floor(rng() * patchMats.length)]);
       patch.rotation.x = -Math.PI / 2;
-      patch.position.set(px, -tileTop + 0.005, pz);
+      patch.position.set(px, -tileTop + 0.02 + i * 0.0004, pz);
       patch.scale.setScalar(1.5 + rng() * 3.5);
       this.scene.add(patch);
     }
@@ -259,9 +276,9 @@ export class GameScene {
     const vctx = vg.getContext('2d');
     const vgrad = vctx.createRadialGradient(128, 128, 0, 128, 128, 128);
     vgrad.addColorStop(0, 'rgba(21,17,40,0)');
-    vgrad.addColorStop(0.44, 'rgba(21,17,40,0)');
-    vgrad.addColorStop(0.62, 'rgba(21,17,40,0.6)');
-    vgrad.addColorStop(0.85, 'rgba(21,17,40,0.94)');
+    vgrad.addColorStop(0.40, 'rgba(21,17,40,0)');
+    vgrad.addColorStop(0.54, 'rgba(21,17,40,0.62)');
+    vgrad.addColorStop(0.74, 'rgba(21,17,40,0.95)');
     vgrad.addColorStop(1, 'rgba(21,17,40,0.98)');
     vctx.fillStyle = vgrad;
     vctx.fillRect(0, 0, 256, 256);
@@ -446,21 +463,15 @@ export class GameScene {
       }
     }
 
-    // --- far scatter so wide screens never stare into the void:
-    // a loose ring of dark trees beyond the flanks and wrapping the plaza
-    for (let i = 0; i < 46; i++) {
-      const south = rng() < 0.4;
-      let x, z;
-      if (south) {
-        x = -HALF_W - 12 + rng() * (COLS * CELL + 24);
-        z = HALF_H + 1.5 + rng() * 10;
-        // keep the plaza itself clear; trees hug its sides and back
-        if (Math.abs(x) < PLAZA.HALF_W + 1.2 && z < HALF_H + PLAZA.DEPTH + 1) continue;
-      } else {
-        const side = rng() < 0.5 ? -1 : 1;
-        x = side * (HALF_W + 7 + rng() * 11);
-        z = -HALF_H - 4 + rng() * 26;
-      }
+    // --- far scatter wrapping ONLY the plaza's back so it never stares
+    // into the void. The flanks are deliberately left empty — past the
+    // dense band the sides are meant to be fog then darkness, no lone
+    // trees hanging in the gloom.
+    for (let i = 0; i < 22; i++) {
+      const x = -HALF_W - 12 + rng() * (COLS * CELL + 24);
+      const z = HALF_H + 1.5 + rng() * 10;
+      // keep the plaza itself clear; trees hug its sides and back
+      if (Math.abs(x) < PLAZA.HALF_W + 1.2 && z < HALF_H + PLAZA.DEPTH + 1) continue;
       placeTree(x, z, 0.8 + rng() * 1.1, 0.3 + rng() * 0.15, rng() < 0.35);
     }
 
@@ -563,12 +574,17 @@ export class GameScene {
         push(x + jit(), z + jit(), 0.55);
       }
     }
-    // beyond the tree line: sparse silhouettes swallowed by the dark
-    for (let i = 0; i < 140; i++) {
+    // beyond the tree line: a few near-black silhouettes ONLY far behind
+    // the forest (north) and the plaza (south) for depth on wide screens.
+    // The flanks get nothing — the sides fade straight to darkness past
+    // the dense band, so any lone tree there is culled.
+    for (let i = 0; i < 90; i++) {
       const x = (rng() * 2 - 1) * 58;
       const z = -HALF_H - 26 + rng() * (ROWS * CELL + PLAZA.DEPTH + 26 + 16);
       if (Math.abs(x) < edgeX + bandW + 1 && z > -HALF_H - northD - 1 && z < southZ + 9) continue;
-      push(x, z, 0.28);
+      // cull side silhouettes near the board — the flanks stay empty
+      if (Math.abs(x) < 32 && z > -HALF_H - 2 && z < southZ + 2) continue;
+      push(x, z, 0.16);
     }
 
     const grabParts = (key) => {
@@ -649,10 +665,11 @@ export class GameScene {
     shroud.position.set(0, 5.1, -HALF_H - 1.4);
     this.scene.add(shroud);
 
-    // soft pool of darkness spilling out of the woods over the spawn
-    // rows — radial, fading in every direction, so no hard edge ever
-    // reads as a rectangle on the ground; it swallows the trees at the
-    // forest mouth and the enemies walking out of it alike
+    // soft pool of darkness over the forest mouth where the enemies spawn
+    // — radial, fading in every direction, so no hard edge ever reads as a
+    // rectangle on the ground. It sits north of the board (over the spawn
+    // woods) and only its faint tail laps onto the first grid row; the
+    // grid itself must stay lit.
     const spillCv = document.createElement('canvas');
     spillCv.width = spillCv.height = 256;
     const sctx = spillCv.getContext('2d');
@@ -665,11 +682,13 @@ export class GameScene {
     const spillTex = new THREE.CanvasTexture(spillCv);
     spillTex.colorSpace = THREE.SRGBColorSpace;
     const spill = new THREE.Mesh(
-      new THREE.PlaneGeometry(64, 22),
+      new THREE.PlaneGeometry(64, 18),
       new THREE.MeshBasicMaterial({ map: spillTex, transparent: true, depthWrite: false })
     );
     spill.rotation.x = -Math.PI / 2;
-    spill.position.set(0, 0.035, -HALF_H - 3);
+    // half a tile further onto the board than before, so the shade drapes
+    // over the board→woods seam instead of stopping short of it
+    spill.position.set(0, 0.035, -HALF_H - 6);
     spill.renderOrder = 2;
     this.scene.add(spill);
 
@@ -696,8 +715,14 @@ export class GameScene {
     mkFog(4, 1.2, -HALF_H - 2.6, 10, 3.6, 0.26);
     mkFog(0, 0.8, -HALF_H + 0.6, 8, 2.4, 0.22);
     mkFog(-8, 1.4, -HALF_H - 4, 11, 4, 0.20);
-    mkFog(-10.5, 0.9, -4, 6, 2.2, 0.10);
-    mkFog(11, 0.9, 2, 6, 2.2, 0.10);
+    // névoa rolling down both flanks: past the dense band the sides are
+    // just mist and then darkness, so a run of soft fog banks hugs each
+    // edge from the forest mouth down to the plaza
+    for (const side of [-1, 1]) {
+      for (const [z, op] of [[-HALF_H + 2, 0.16], [-HALF_H + 8, 0.15], [-1, 0.14], [HALF_H - 5, 0.13], [HALF_H + 3, 0.12]]) {
+        mkFog(side * (HALF_W + 2.5), 1.0, z, 7, 3, op);
+      }
+    }
   }
 
   buildOverlay() {

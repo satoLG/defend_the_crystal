@@ -727,6 +727,10 @@ function frame(t) {
     gs.clearFollow();
   }
 
+  // background music follows the situation: calm at the checkpoint,
+  // the normal loop mid-wave, and heavier beds while a (mini-)boss lives
+  music.setMode(pickMusicMode(freeRoam));
+
   // standing at Tonho's stall in the plaza unlocks buying at the shop
   const canRoam = state.started && !state.over && !state.self.dead &&
     (state.role === 'host' || state.selfInit);
@@ -751,6 +755,27 @@ function selfPose() {
   return state.selfInit
     ? { x: state.self.x, z: state.self.z, yaw: state.self.yaw, moving: state.self.moving }
     : null;
+}
+
+// which background bed the current game situation calls for. Both host
+// and client read it off the buffered snapshot's enemy list (index 8 is
+// the boss rank: 0 normal, 1 mini-boss, 2 checkpoint boss).
+function bossOnField() {
+  const en = state.snaps.latest()?.en;
+  if (!en) return 0;
+  let rank = 0;
+  for (const e of en) {
+    if (e[8] === 2) return 2;
+    if (e[8] === 1) rank = 1;
+  }
+  return rank;
+}
+
+function pickMusicMode(freeRoam) {
+  if (!state.started || state.over) return 'peace';
+  if (freeRoam) return 'peace'; // checkpoint rest / pre-wave-1 stroll
+  const boss = bossOnField();
+  return boss === 2 ? 'boss' : boss === 1 ? 'subboss' : 'wave';
 }
 
 // pin a shop's HTML prompt just under its vendor's model. Skips work

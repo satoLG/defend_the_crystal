@@ -507,6 +507,21 @@ export class GameView {
     this._ringGeo = new THREE.RingGeometry(0.85, 1, 40);
     this._discGeo = new THREE.CircleGeometry(1, 32);
 
+    // wall-mode aura resources, built ONCE and shared by every tanker.
+    // A fresh MeshStandardMaterial used to be created on each activation,
+    // and compiling its shader program the first frame it rendered stalled
+    // the scene ("travada"). Sharing keeps allocations at zero and lets us
+    // pre-warm the shader below so the very first activation is smooth too.
+    this._wallSlabGeo = new THREE.BoxGeometry(0.34, 0.52, 0.12);
+    this._wallStoneMat = new THREE.MeshStandardMaterial({
+      color: 0x9aa1ab, roughness: 0.9, flatShading: true,
+      transparent: true, opacity: 0.9,
+    });
+    this._wallRingMat = new THREE.MeshBasicMaterial({
+      color: 0xbfc8d4, transparent: true, opacity: 0.55,
+      depthWrite: false, side: THREE.DoubleSide,
+    });
+
     // XP (green) / point (blue) orbs — two instanced meshes with flat
     // materials keep hundreds of orbs at a single draw call each.
     // Only the local player's own orbs are ever rendered.
@@ -576,6 +591,26 @@ export class GameView {
     this._dotPos = new THREE.Vector3();
     this._dotScale = new THREE.Vector3(1, 1, 1);
     this._identQuat = new THREE.Quaternion();
+
+    this._prewarmShaders();
+  }
+
+  // Compile the shared aura shaders now, during load, so no in-combat
+  // activation ever stalls the frame compiling them. renderer.compile()
+  // builds the GL programs for everything currently in the scene without
+  // drawing; the throwaway aura keeps the wall-mode materials referenced
+  // long enough to be compiled, then we drop it (the materials — and thus
+  // their cached programs — live on for the real auras to reuse).
+  _prewarmShaders() {
+    const r = this.gs?.renderer, cam = this.gs?.camera;
+    if (!r || !cam) return;
+    const warm = new THREE.Group();
+    warm.add(new THREE.Mesh(this._wallSlabGeo, this._wallStoneMat));
+    warm.add(new THREE.Mesh(this._ringGeo, this._wallRingMat));
+    warm.position.set(0, -999, 0);
+    this.scene.add(warm);
+    try { r.compile(this.scene, cam); } catch { /* pre-warm is best-effort */ }
+    this.scene.remove(warm);
   }
 
   // ---------------- actors ----------------
@@ -1598,29 +1633,18 @@ export class GameView {
   // tanker so the no-knockback / double-defense window is unmissable
   addWallAura(a) {
     const g = new THREE.Group();
-    const stone = new THREE.MeshStandardMaterial({
-      color: 0x9aa1ab, roughness: 0.9, flatShading: true,
-      transparent: true, opacity: 0.9,
-    });
-    const slabGeo = new THREE.BoxGeometry(0.34, 0.52, 0.12);
     for (let i = 0; i < 6; i++) {
-      const slab = new THREE.Mesh(slabGeo, stone);
+      const slab = new THREE.Mesh(this._wallSlabGeo, this._wallStoneMat);
       const ang = (i / 6) * Math.PI * 2;
       slab.position.set(Math.cos(ang) * 0.85, 0.55, Math.sin(ang) * 0.85);
       slab.rotation.y = -ang;
       g.add(slab);
     }
-    const ring = new THREE.Mesh(
-      this._ringGeo,
-      new THREE.MeshBasicMaterial({
-        color: 0xbfc8d4, transparent: true, opacity: 0.55,
-        depthWrite: false, side: THREE.DoubleSide,
-      })
-    );
+    const ring = new THREE.Mesh(this._ringGeo, this._wallRingMat);
     ring.rotation.x = -Math.PI / 2;
     ring.position.y = 0.04;
     g.add(ring);
-    g.userData.stone = stone;
+    g.userData.stone = this._wallStoneMat;
     a.group.add(g);
     a.wallFx = g;
   }

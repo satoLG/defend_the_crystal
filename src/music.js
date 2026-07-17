@@ -15,9 +15,6 @@ let timer = null;
 let nextNoteTime = 0;
 let step = 0;
 
-const BPM = 92;
-const STEP = 60 / BPM / 2; // eighth notes
-
 // D dorian degrees as semitone offsets from D4 (62)
 const N = (semi, oct = 0) => 293.66 * Math.pow(2, (semi + oct * 12) / 12);
 // melody phrases (semitone offset | null = rest), 16 steps each
@@ -27,7 +24,63 @@ const PHRASES = [
   [0, null, 3, 5, 7, null, 10, null, 12, null, 10, 7, 5, 3, 0, null],
   [-2, null, 0, null, 3, null, 0, -2, -4, null, -2, null, 0, null, null, null],
 ];
-const ORDER = [0, 1, 0, 2, 0, 1, 3, 3]; // phrase sequence, then loops
+
+// Casual rest-loop phrases — a separate, airy pentatonic (D E G A B, i.e.
+// degrees 0 2 5 7 9 12, no minor third and no leaps that clash) so the
+// checkpoint theme is easy on the ears for a long time instead of leaning
+// on the dorian colour that made it sound off. Still all in D, so it slides
+// smoothly back into the combat loop.
+const REST_PHRASES = [
+  [0, null, 2, null, 5, null, 7, null, 9, null, 7, null, 5, null, 2, null],
+  [7, null, 9, null, 12, null, 9, null, 7, null, 5, null, 7, null, null, null],
+  [9, null, 7, null, 5, null, 2, null, 0, null, null, 2, null, null, 0, null],
+];
+
+// Per-situation beds. They all share the same D-dorian lute / drone /
+// hand-drum palette so the game keeps ONE musical identity — what changes
+// is tempo, which phrases play, the melody's register, how hard the drum
+// drives and how the drone is voiced. That shifts the mood from a calm
+// sanctuary breather to a pounding boss fight without ever sounding like
+// a different soundtrack.
+const MODES = {
+  // checkpoint / sanctuary rest: casual and easy — its own airy pentatonic
+  // (REST_PHRASES), NO sustained drone (that constant hum didn't suit a
+  // breather), just a soft alternating root/fifth bass under a mellow lute.
+  // Made to loop pleasantly for as long as the player wants to hang around.
+  peace: {
+    bpm: 78, phrases: REST_PHRASES, order: [0, 1, 0, 2], octave: 0, playProb: 0.9,
+    droneNotes: [], droneType: 'sine', droneGain: 0, droneLP: 500,
+    drumEvery: 8, drumGain: 0.28, drumAccent: false,
+    pluckVel: 0.6, pluckLP: 1500, subProb: 0, boomEvery: 0,
+    bassEvery: 8, bassVel: 0.5,
+  },
+  // normal wave in progress: the original loop
+  wave: {
+    bpm: 92, order: [0, 1, 0, 2, 0, 1, 3, 3], octave: 0, playProb: 0.94,
+    droneNotes: [[0, -1], [7, -1]], droneType: 'sawtooth', droneGain: 0.05, droneLP: 500,
+    drumEvery: 4, drumGain: 1, drumAccent: true,
+    pluckVel: 0.9, pluckLP: 2100, subProb: 0.22, boomEvery: 0,
+  },
+  // mini-boss on the field: quicker, busier, a minor-third in the drone
+  // adds an uneasy edge
+  subboss: {
+    bpm: 112, order: [1, 2, 1, 2, 3, 1], octave: 0, playProb: 0.95,
+    droneNotes: [[0, -1], [3, -1], [7, -1]], droneType: 'sawtooth', droneGain: 0.06, droneLP: 640,
+    drumEvery: 2, drumGain: 1, drumAccent: true,
+    pluckVel: 1.0, pluckLP: 2500, subProb: 0.3, boomEvery: 0,
+  },
+  // checkpoint boss: driving, intense action with danger — the sub-boss's
+  // clean D-minor drone taken lower and heavier (NO tritone, which turned
+  // into a grating constant horn), a harder-hitting drum, a low melody and
+  // a timpani boom on the downbeat for impact
+  boss: {
+    bpm: 108, order: [1, 2, 1, 2, 3], octave: -1, playProb: 0.95,
+    droneNotes: [[0, -2], [3, -1], [7, -1]], droneType: 'sawtooth', droneGain: 0.055, droneLP: 600,
+    drumEvery: 2, drumGain: 1.2, drumAccent: true,
+    pluckVel: 1.1, pluckLP: 1700, subProb: 0.4, boomEvery: 8,
+  },
+};
+let currentMode = 'wave';
 
 function ensureCtx() {
   if (ctx) return true;
@@ -42,7 +95,7 @@ function ensureCtx() {
   }
 }
 
-function pluck(freq, time, vel = 1) {
+function pluck(freq, time, vel = 1, lpFreq = 2100) {
   const osc = ctx.createOscillator();
   osc.type = 'triangle';
   osc.frequency.value = freq;
@@ -52,7 +105,7 @@ function pluck(freq, time, vel = 1) {
   const gain = ctx.createGain();
   const lp = ctx.createBiquadFilter();
   lp.type = 'lowpass';
-  lp.frequency.value = 2100;
+  lp.frequency.value = lpFreq;
   gain.gain.setValueAtTime(0.001, time);
   gain.gain.linearRampToValueAtTime(0.16 * vel, time + 0.012);
   gain.gain.exponentialRampToValueAtTime(0.001, time + 0.55);
@@ -62,7 +115,7 @@ function pluck(freq, time, vel = 1) {
   osc.stop(time + 0.6); osc2.stop(time + 0.6);
 }
 
-function drum(time, accent = false) {
+function drum(time, accent = false, gainScale = 1) {
   const len = 0.09;
   const buf = ctx.createBuffer(1, ctx.sampleRate * len, ctx.sampleRate);
   const data = buf.getChannelData(0);
@@ -76,7 +129,7 @@ function drum(time, accent = false) {
   bp.frequency.value = accent ? 190 : 150;
   bp.Q.value = 1.2;
   const g = ctx.createGain();
-  g.gain.value = accent ? 0.4 : 0.22;
+  g.gain.value = (accent ? 0.4 : 0.22) * gainScale;
   src.connect(bp); bp.connect(g); g.connect(master);
   src.start(time);
 }
@@ -168,43 +221,80 @@ function readyForSting() {
 }
 
 let droneNodes = null;
-function startDrone() {
+// (re)voice the sustained drone for a mode, crossfading off the old one
+// so switching situations glides instead of clicking
+function setDrone(spec, fade = 0.6) {
+  if (!ctx) return;
+  const now = ctx.currentTime;
+  if (droneNodes) {
+    const old = droneNodes;
+    try {
+      old.g.gain.cancelScheduledValues(now);
+      old.g.gain.setValueAtTime(old.g.gain.value, now);
+      old.g.gain.linearRampToValueAtTime(0.0001, now + fade);
+    } catch { /* ok */ }
+    setTimeout(() => { try { old.oscs.forEach((o) => o.stop()); } catch { /* ok */ } }, (fade + 0.15) * 1000);
+  }
   const g = ctx.createGain();
-  g.gain.value = 0.05;
+  g.gain.value = 0.0001;
   const lp = ctx.createBiquadFilter();
   lp.type = 'lowpass';
-  lp.frequency.value = 500;
-  const oscs = [N(0, -1), N(7, -1)].map((f) => {
+  lp.frequency.value = spec.droneLP;
+  const oscs = spec.droneNotes.map(([semi, oct]) => {
     const o = ctx.createOscillator();
-    o.type = 'sawtooth';
-    o.frequency.value = f;
+    o.type = spec.droneType;
+    o.frequency.value = N(semi, oct);
     o.connect(lp);
     o.start();
     return o;
   });
   lp.connect(g); g.connect(master);
+  g.gain.linearRampToValueAtTime(spec.droneGain, now + fade);
   droneNodes = { g, lp, oscs };
+}
+
+// switch the situation bed; a no-op if already there. Safe to call even
+// when muted/stopped — it just records the mode for the next start().
+function applyMode(mode) {
+  if (!MODES[mode]) mode = 'wave';
+  if (mode === currentMode) return;
+  currentMode = mode;
+  if (playing && ctx) setDrone(MODES[mode], 0.9);
 }
 
 function schedule() {
   if (!playing) return;
+  const m = MODES[currentMode] || MODES.wave;
+  const stepDur = 60 / m.bpm / 2; // eighth notes at the mode's tempo
   // after being backgrounded the clock may be far ahead of the last
   // scheduled note — skip forward instead of burst-playing the backlog
   if (nextNoteTime < ctx.currentTime - 0.05) {
     nextNoteTime = ctx.currentTime + 0.06;
   }
+  const phrases = m.phrases || PHRASES;
   while (nextNoteTime < ctx.currentTime + 0.35) {
     const bar = Math.floor(step / 16);
     const idx = step % 16;
-    const phrase = PHRASES[ORDER[bar % ORDER.length]];
+    const phrase = phrases[m.order[bar % m.order.length]];
     const semi = phrase[idx];
-    if (semi !== null && Math.random() > 0.06) {
+    if (semi !== null && Math.random() < m.playProb) {
       const jitter = (Math.random() - 0.5) * 0.014;
-      pluck(N(semi), nextNoteTime + jitter, 0.8 + Math.random() * 0.35);
-      if (Math.random() < 0.22) pluck(N(semi, -1), nextNoteTime + jitter, 0.35);
+      pluck(N(semi, m.octave), nextNoteTime + jitter, m.pluckVel * (0.8 + Math.random() * 0.35), m.pluckLP);
+      // doubling: a low octave adds weight (default), or an octave-up adds
+      // a bright sparkle where a mode asks for it (subOct: 1)
+      if (Math.random() < m.subProb) pluck(N(semi, m.octave + (m.subOct ?? -1)), nextNoteTime + jitter, m.pluckVel * 0.4, m.pluckLP);
     }
-    if (idx % 4 === 0) drum(nextNoteTime, idx === 0);
-    nextNoteTime += STEP;
+    // soft bass anchor for drone-less modes: alternate root / fifth so the
+    // casual loop still has a warm harmonic floor without a constant hum
+    if (m.bassEvery && idx % m.bassEvery === 0) {
+      const bn = idx % (m.bassEvery * 2) === 0 ? 0 : 7;
+      pluck(N(bn, m.octave - 1), nextNoteTime, m.bassVel ?? 0.5, 900);
+    }
+    if (m.drumEvery && idx % m.drumEvery === 0) {
+      drum(nextNoteTime, m.drumAccent && idx % 4 === 0, m.drumGain);
+    }
+    if (m.boomEvery && idx % m.boomEvery === 0) boom(master, nextNoteTime, 0.6);
+    nextNoteTime += stepDur;
     step += 1;
   }
   timer = setTimeout(schedule, 120);
@@ -218,9 +308,12 @@ export const music = {
     playing = true;
     nextNoteTime = ctx.currentTime + 0.1;
     step = 0;
-    startDrone();
+    setDrone(MODES[currentMode] || MODES.wave, 0.5);
     schedule();
   },
+  // pick the background bed for the current situation:
+  //   'peace' checkpoint rest · 'wave' normal · 'subboss' · 'boss'
+  setMode(mode) { applyMode(mode); },
   stop() {
     playing = false;
     if (timer) clearTimeout(timer);
