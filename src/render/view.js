@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { instantiate } from './assets.js';
+import { instantiate, getTemplate } from './assets.js';
 import { buildTexture, applyTexture } from './customize.js';
 import { iconPaths } from '../icons.js';
 import { CLASSES, TOWERS, JUMP, ENEMIES, BOSSES, PETS, WEAPONS, classStarterWeapons } from '../config.js';
@@ -18,9 +18,85 @@ const EN = { ID: 0, KIND: 1, X: 2, Z: 3, YAW: 4, HP: 5, MHP: 6, SCALE: 7, BOSS: 
 
 // EN.ST status bitmask (mirrors buildSnapshot): slow|burn|poison|stun
 const ST_SLOW = 1, ST_BURN = 2, ST_POISON = 4, ST_STUN = 8;
-// EN.VR visual variants: horde-blue / horde-red zombies, Brutus props
-const VR_BLUE = 1, VR_RED = 2, VR_BRUTUS = 3;
-const VR_TINTS = { [VR_BLUE]: 0x5f8fff, [VR_RED]: 0xff5f4d };
+// EN.VR visual variants: stage-2 / stage-3 power looks, Brutus props
+const VR_T2 = 1, VR_T3 = 2, VR_BRUTUS = 3;
+
+// ---- enemy power-stage looks --------------------------------------
+// Stage-2/3 enemies swap in a recolored atlas where ONLY the matching
+// pixels change (the zombie/orc's green skin, the skeleton's bone, the
+// ghost's bright body) — clothes, eyes and mouths keep their colors,
+// so it reads as a different creature, not a filter.
+const TIER_LOOKS = {
+  zombie: { match: 'green', colors: [0x4a7fd8, 0xd23b2e] },  // blue / red skin
+  orc:    { match: 'green', colors: [0x4a7fd8, 0xd23b2e] },
+  skeleton:   { match: 'bone', colors: [0x878d99, 0x2f333b] }, // grey / near-black
+  skelarcher: { match: 'bone', colors: [0x878d99, 0x2f333b] },
+  ghost:  { match: 'bright', colors: [0x6faaff, 0xe0503a] },  // blue / red body
+  // vampire: no recolor — it only grows with its stage
+};
+const lumOf = (r, g, b) => 0.299 * r + 0.587 * g + 0.114 * b;
+const TIER_MATCHERS = {
+  green: (r, g, b) => g > r + 12 && g > b + 12,
+  bone: (r, g, b) => lumOf(r, g, b) > 115 && Math.abs(r - g) < 30 && Math.abs(g - b) < 36,
+  bright: (r, g, b) => lumOf(r, g, b) > 115,
+};
+
+// one recolored texture per (model, rule, stage) — shared by every
+// enemy wearing that look
+const tierTexCache = new Map();
+function tierTexture(modelKey, kind, stage /* 0 = stage-2, 1 = stage-3 */) {
+  const look = TIER_LOOKS[kind];
+  if (!look) return null;
+  const key = `${modelKey}:${look.match}:${stage}`;
+  if (tierTexCache.has(key)) return tierTexCache.get(key);
+  let src = null;
+  getTemplate(modelKey).group.traverse((o) => {
+    if (!src && (o.isMesh || o.isSkinnedMesh)) {
+      const m = Array.isArray(o.material) ? o.material[0] : o.material;
+      if (m?.map?.image) src = m.map;
+    }
+  });
+  let tex = null;
+  if (src) {
+    const img = src.image;
+    const cv = document.createElement('canvas');
+    cv.width = img.width; cv.height = img.height;
+    const ctx = cv.getContext('2d');
+    ctx.drawImage(img, 0, 0);
+    const imgData = ctx.getImageData(0, 0, cv.width, cv.height);
+    const d = imgData.data;
+    const match = TIER_MATCHERS[look.match];
+    // average luminance of the matched region → per-pixel shading survives
+    let lumSum = 0, n = 0;
+    for (let i = 0; i < d.length; i += 4) {
+      if (d[i + 3] > 8 && match(d[i], d[i + 1], d[i + 2])) {
+        lumSum += lumOf(d[i], d[i + 1], d[i + 2]); n += 1;
+      }
+    }
+    if (n > 0) {
+      const base = Math.max(lumSum / n, 1);
+      const c = new THREE.Color(look.colors[stage]);
+      const tr = c.r * 255, tg = c.g * 255, tb = c.b * 255;
+      const cl = (v) => Math.min(Math.max(Math.round(v), 0), 255);
+      for (let i = 0; i < d.length; i += 4) {
+        if (d[i + 3] > 8 && match(d[i], d[i + 1], d[i + 2])) {
+          const f = lumOf(d[i], d[i + 1], d[i + 2]) / base;
+          d[i] = cl(tr * f); d[i + 1] = cl(tg * f); d[i + 2] = cl(tb * f);
+        }
+      }
+      ctx.putImageData(imgData, 0, 0);
+      tex = new THREE.CanvasTexture(cv);
+      tex.flipY = src.flipY;
+      tex.colorSpace = src.colorSpace;
+      tex.wrapS = src.wrapS; tex.wrapT = src.wrapT;
+      tex.magFilter = src.magFilter; tex.minFilter = src.minFilter;
+      tex.generateMipmaps = src.generateMipmaps;
+      tex.needsUpdate = true;
+    }
+  }
+  tierTexCache.set(key, tex);
+  return tex;
+}
 
 // Hand props live in BONE space: raw Kenney units, grip at the origin.
 // The hand sits ~0.14 units down the arm bone; rot compensates the
@@ -1043,10 +1119,16 @@ export class GameView {
     if (kind === 'vampire' && isBoss) this.attachProps(a, ENEMY_PROPS.coffin);
     const vr = row[EN.VR] || 0;
     if (vr === VR_BRUTUS) this.attachProps(a, ENEMY_PROPS.brutus);
-    // horde zombies come in colors: blue rises twice, red three times
-    if (VR_TINTS[vr]) {
-      const tint = new THREE.Color(VR_TINTS[vr]);
-      for (const m of a.mats) m.color.lerp(tint, 0.55);
+    // stage-2/3 power looks: swap in the recolored hide — only the
+    // matching atlas pixels (skin/bone/body) change, never the whole
+    // model. Materials are per-actor clones, so this stays local.
+    if (vr === VR_T2 || vr === VR_T3) {
+      const tex = tierTexture(def.model || `enemy-${kind}`, kind, vr - 1);
+      if (tex) {
+        for (const m of a.mats) {
+          if ('map' in m && m.map) { m.map = tex; m.needsUpdate = true; }
+        }
+      }
     }
     // a hundred-zombie horde would melt the shadow pass — past a crowd
     // threshold, newcomers stop casting shadows

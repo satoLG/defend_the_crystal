@@ -661,12 +661,37 @@ export const HORDE = {
   hpMult: 0.32, dmgMult: 0.8, speedMult: 1.15,
   WINDOW: 42,      // seconds over which all 100 pour in
   ptsMult: 0.5, xpMult: 0.5, // per-zombie loot halves (×100 zombies!)
+  // blue/red troopers wear the stage-2/3 look; sizes stay a notch under
+  // the regular tiers so a hundred of them still fit the lanes
+  SCALE: { green: 1, blue: 1.45, red: 1.9 },
 };
 
 // sub-bosses rotate through EVERY mob kind, never repeating until the
 // list wraps (waves 5, 15, 25, … — ordered so each kind is already a
 // familiar sight by the time its pumped-up version struts in)
 export const SUBBOSS_ORDER = ['zombie', 'skelarcher', 'orc', 'ghost', 'vampire', 'skeleton'];
+
+// ---------- enemy tiers (visual power stages) ----------
+// As waves march on, regular enemies start showing up in stronger,
+// clearly-marked stages: stage 2 is mid-sized (mini-boss build) with a
+// recolored hide, stage 3 is boss-sized but nowhere near boss HP.
+// The mix grows GRADUALLY: nothing above stage 1 before wave 11, then
+// stage-2 odds ramp up slowly, and stage 3 trickles in hard-capped per
+// wave (1 at first, never more than 2) so a wave is never a wall of
+// giants.
+export const TIERS = {
+  2: { hp: 2.2, dmg: 1.4, pts: 2, xp: 2, scale: 1.7 },
+  3: { hp: 4.2, dmg: 1.8, pts: 4, xp: 4, scale: 2.5, speedMult: 0.92 },
+};
+export const TIER_PLAN = {
+  T2_FROM: 11,        // first wave that can roll stage-2 enemies
+  T2_RAMP: 0.035,     // stage-2 chance grows this much per wave past T2_FROM
+  T2_MAX: 0.45,       // …up to at most this share of a wave
+  T3_FROM: 16,        // first wave that can roll a stage-3 enemy
+  T3_RAMP: 0.012,     // stage-3 chance per enemy past T3_FROM
+  T3_MAX: 0.12,
+  T3_CAP_1: 26,       // waves below this allow 1 stage-3; from here on, 2
+};
 
 // ---------- waves ----------
 export const WAVES = {

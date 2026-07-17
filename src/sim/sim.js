@@ -322,15 +322,6 @@ export class Sim {
       case 'start': if (this.phase === 'build') this.startWave(); return;
       case 'cont': return this.setContinue(id);
       case 'restart': if (this.phase === 'over') this.restart(); return;
-      // TEMP dev shortcut: jump straight to a boss wave to preview it
-      // (buttons in the HUD; remove together with them once tuned)
-      case 'debugwave':
-        if (this.phase === 'build' || this.phase === 'checkpoint') {
-          this.wave = Math.max(1, (act.wave | 0)) - 1;
-          this.contReady.clear();
-          this.startWave();
-        }
-        return;
     }
   }
 
@@ -616,15 +607,16 @@ export class Sim {
 
   // `at` (optional {x,z}) drops the enemy mid-board — used by the
   // gravedigger's tombs; otherwise it walks in from a top spawn pad.
-  // `horde` marks a Zombie Horde trooper color ('green'|'blue'|'red').
-  spawnEnemy(kind, boss, variant = null, at = null, horde = null) {
+  // `horde` marks a Zombie Horde trooper color ('green'|'blue'|'red');
+  // `tier` (2|3) the mid/large power stages of later waves.
+  spawnEnemy(kind, boss, variant = null, at = null, horde = null, tier = 1) {
     const def = ENEMIES[kind];
     const s = GRID.SPAWNS[this.spawnIdx++ % GRID.SPAWNS.length];
     const w = at || cellToWorld(s.c, s.r);
     // walk-in spawns start hidden inside the dark woods north of the
     // board and march down out of the penumbra
     if (!at) w.z = -HALF_H - 2.5 - Math.random() * 2.5;
-    const stats = enemyStats(kind, boss, this.wave, this.waveStartCount, variant, horde);
+    const stats = enemyStats(kind, boss, this.wave, this.waveStartCount, variant, horde, tier);
     const bossDef = boss === 2 ? BOSSES[variant] : null;
 
     const vehicle = new Vehicle();
@@ -664,8 +656,13 @@ export class Sim {
       // toughness & second lives
       armor: stats.armor || 0,
       revives: stats.revives || 0,
-      horde, // 'green' | 'blue' | 'red' | null — view tints by it
+      horde, // 'green' | 'blue' | 'red' | null
       variant: boss === 2 ? variant : null,
+      // visual-variant code for the snapshot: 1 stage-2 look, 2 stage-3
+      // look (recolored hide + size), 3 Brutus (props); 0 plain
+      vr: boss === 2
+        ? (variant === 'brutus' ? 3 : 0)
+        : (stats.tier === 2 ? 1 : stats.tier === 3 ? 2 : 0),
       // special powers
       archer,
       jumper: !!def.jumper && !def.flying,
@@ -1120,7 +1117,7 @@ export class Sim {
         const s = this.spawnQueue.shift();
         // the Zombie Horde announces itself once, on its first spawn
         if (s.announce) this.emit({ t: 'boss', name: s.announce });
-        this.spawnEnemy(s.kind, s.boss, s.variant, null, s.horde || null);
+        this.spawnEnemy(s.kind, s.boss, s.variant, null, s.horde || null, s.tier || 1);
       }
     }
 
@@ -1724,8 +1721,8 @@ export class Sim {
         // status flags bitmask (slow|burn|poison|stun) for client FX
         (e.slowT > 0 ? 1 : 0) | (e.burnT > 0 ? 2 : 0) |
         (e.poisonT > 0 ? 4 : 0) | (e.stunT > 0 ? 8 : 0),
-        // visual variant: horde colors tint the model, brutus gets props
-        e.horde === 'blue' ? 1 : e.horde === 'red' ? 2 : e.variant === 'brutus' ? 3 : 0,
+        // visual variant (stage-2/3 look, Brutus props) — see spawnEnemy
+        e.vr,
       ]),
       tw: this.towers.entities.map((t) => [t.id, t.kind, t.c, t.r, t.lvl, rnd2(t.rot), t.spec || 0]),
       ob: this.obstacles.entities.map((o) => [o.id, o.kind, o.c, o.r]),

@@ -623,13 +623,6 @@ export class UI {
       sfx.click();
       this.cb.onAction({ t: 'start' });
     });
-    // TEMP dev shortcuts: jump straight into a new boss wave to preview
-    for (const b of document.querySelectorAll('[data-dbgwave]')) {
-      b.addEventListener('click', () => {
-        sfx.click();
-        this.cb.onAction({ t: 'debugwave', wave: Number(b.dataset.dbgwave) });
-      });
-    }
     bindTap($('jump-btn'), () => this.cb.onJump?.());
     bindTap($('skill-btn'), () => this.cb.onSkill?.());
     $('room-chip').addEventListener('click', async () => {

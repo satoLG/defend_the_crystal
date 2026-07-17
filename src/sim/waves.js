@@ -1,6 +1,6 @@
 import {
   ENEMIES, ENEMY, WAVES, SUBBOSS, BOSS, BOSSES, BOSS_ORDER, SCALING, scaleFor,
-  SUBBOSS_ORDER, HORDE,
+  SUBBOSS_ORDER, HORDE, TIERS, TIER_PLAN,
 } from '../config.js';
 
 // ============================================================
@@ -45,12 +45,24 @@ export function buildWavePlan(wave, playerCount) {
     WAVES.SPAWN_WINDOW_BASE + wave * WAVES.SPAWN_WINDOW_PER_WAVE
   );
 
+  // stage-2/3 rollout: nothing above stage 1 through wave 10, then the
+  // stage-2 share ramps up slowly; stage 3 trickles in hard-capped per
+  // wave so giants stay rare (see TIER_PLAN)
+  const t2p = wave < TIER_PLAN.T2_FROM ? 0
+    : Math.min((wave - TIER_PLAN.T2_FROM + 1) * TIER_PLAN.T2_RAMP, TIER_PLAN.T2_MAX);
+  const t3p = wave < TIER_PLAN.T3_FROM ? 0
+    : Math.min((wave - TIER_PLAN.T3_FROM + 1) * TIER_PLAN.T3_RAMP, TIER_PLAN.T3_MAX);
+  let t3left = wave < TIER_PLAN.T3_FROM ? 0 : wave < TIER_PLAN.T3_CAP_1 ? 1 : 2;
+
   const plan = [];
   for (let i = 0; i < count; i++) {
+    let tier = 1;
+    if (t3left > 0 && Math.random() < t3p) { tier = 3; t3left -= 1; }
+    else if (Math.random() < t2p) tier = 2;
     plan.push({
       kind: pickWeighted(weights),
       at: 0.5 + (window * i) / count + Math.random() * 0.4,
-      boss: 0,
+      boss: 0, tier,
     });
   }
 
@@ -94,8 +106,9 @@ export function buildWavePlan(wave, playerCount) {
 
 // Concrete stats for one spawned enemy. `horde` marks a Zombie Horde
 // trooper ('green' | 'blue' | 'red'): weaker individually, and the
-// blue/red ones rise again after falling.
-export function enemyStats(kind, boss, wave, playerCount, variant, horde = null) {
+// blue/red ones rise again after falling. `tier` (2|3) marks the
+// mid/large power stages regular enemies grow into on later waves.
+export function enemyStats(kind, boss, wave, playerCount, variant, horde = null, tier = 1) {
   const def = ENEMIES[kind];
   const hpMult = waveHpMult(wave, playerCount);
   const speed = def.speed * (1 + ENEMY.SPEED_PER_WAVE * (wave - 1));
@@ -106,8 +119,9 @@ export function enemyStats(kind, boss, wave, playerCount, variant, horde = null)
       speed: speed * HORDE.speedMult,
       pts: Math.max(1, Math.round(def.pts * HORDE.ptsMult)),
       xp: Math.max(1, Math.round(def.xp * HORDE.xpMult)),
-      scale: 1, breach: 1,
+      scale: HORDE.SCALE[horde] || 1, breach: 1,
       revives: HORDE.REVIVES[horde] || 0,
+      tier: horde === 'blue' ? 2 : horde === 'red' ? 3 : 1,
     };
   }
   if (boss === 2) {
@@ -127,5 +141,15 @@ export function enemyStats(kind, boss, wave, playerCount, variant, horde = null)
       scale: SUBBOSS.scale, breach: SUBBOSS.breach,
     };
   }
-  return { hp: def.hp * hpMult, dmg: def.dmg, speed, pts: def.pts, xp: def.xp, scale: 1, breach: 1 };
+  const t = TIERS[tier];
+  if (t) {
+    return {
+      hp: def.hp * hpMult * t.hp,
+      dmg: def.dmg * t.dmg,
+      speed: speed * (t.speedMult || 1),
+      pts: def.pts * t.pts, xp: def.xp * t.xp,
+      scale: t.scale, breach: 1, tier,
+    };
+  }
+  return { hp: def.hp * hpMult, dmg: def.dmg, speed, pts: def.pts, xp: def.xp, scale: 1, breach: 1, tier: 1 };
 }

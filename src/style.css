@@ -444,14 +444,6 @@ input:focus { border-color: var(--gold); }
 #upg-stats { white-space: pre-line; margin-bottom: 8px; font-size: 0.8rem; }
 .upg-actions { display: flex; gap: 8px; justify-content: center; }
 
-/* TEMP dev shortcuts to preview the new boss waves (remove later) */
-#debug-boss {
-  position: absolute; left: 8px; top: 50%;
-  display: flex; flex-direction: column; gap: 6px;
-  opacity: 0.75;
-}
-#debug-boss .btn { font-size: 0.68rem; padding: 5px 8px; }
-
 /* tower special effects (bonus upgrades) inside the upgrade panel */
 #upg-specials { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
 .spec-btn {
