@@ -32,12 +32,27 @@ export class GameScene {
 
     this.camera = new THREE.PerspectiveCamera(50, 1, 0.5, 200);
     this.lookTarget = new THREE.Vector3(0, 0, 2.2);
-    this.camDir = new THREE.Vector3(0, Math.sin(0.98), Math.cos(0.98)).normalize();
+
+    // Two tunable camera modes, editable live from the camera overlay:
+    //   partida    – the fixed board framing held during a wave
+    //   checkpoint – the up-close follow-cam tracking the local hero
+    //                while strolling the sanctuary between waves
+    // pitch/yaw are radians; zoom scales the distance (higher = closer):
+    // partida.zoom on the auto-fit board distance, checkpoint.zoom on the
+    // follow distance. Defaults mirror the original hard-coded framing.
+    this.CHK_BASE_DIST = 15; // follow-cam distance at zoom 1
+    this.camCfg = {
+      partida:    { pitch: 0.98, yaw: 0, zoom: 1 },
+      checkpoint: { pitch: 0.98, yaw: 0, zoom: 1 },
+    };
+    this._recalcCamDirs();
+
     this.shake = 0;
     // checkpoint stroll: camera leaves the board framing to track the player
     this.followGoal = null;
     this.followPos = new THREE.Vector3();
     this.followBlend = 0;
+    this.followPreview = null; // overlay preview override: 'checkpoint' | 'partida' | null
     this._camPos = new THREE.Vector3();
     this._camLook = new THREE.Vector3();
     this._followCam = new THREE.Vector3();
@@ -865,14 +880,61 @@ export class GameScene {
       if (fits) hi = mid; else lo = mid;
     }
     this.placeCamera(hi);
-    this.baseCamPos = this.camera.position.clone();
+    this.fitDist = hi;
+    this._applyBoardZoom();
+  }
+
+  // the board framing sits at the fitted distance divided by the zoom
+  // multiplier (higher zoom = closer), along the partida view direction
+  _applyBoardZoom() {
+    const d = (this.fitDist || 30) / (this.camCfg.partida.zoom || 1);
+    this.baseCamPos = this.lookTarget.clone().addScaledVector(this.boardDir, d);
   }
 
   placeCamera(dist) {
-    this.camera.position.copy(this.lookTarget).addScaledVector(this.camDir, dist);
+    this.camera.position.copy(this.lookTarget).addScaledVector(this.boardDir, dist);
     this.camera.lookAt(this.lookTarget);
     this.camera.updateMatrixWorld();
     this.camera.updateProjectionMatrix();
+  }
+
+  // view directions (unit vectors from look target toward the camera)
+  // derived from each mode's pitch (tilt above the board) and yaw
+  // (swing left/right around the target)
+  _camDir(pitch, yaw) {
+    const cp = Math.cos(pitch), sp = Math.sin(pitch);
+    return new THREE.Vector3(Math.sin(yaw) * cp, sp, Math.cos(yaw) * cp).normalize();
+  }
+
+  _recalcCamDirs() {
+    this.boardDir = this._camDir(this.camCfg.partida.pitch, this.camCfg.partida.yaw);
+    this.followDir = this._camDir(this.camCfg.checkpoint.pitch, this.camCfg.checkpoint.yaw);
+  }
+
+  // ---- camera-tuning overlay API ----
+  getCamCfg() {
+    return {
+      partida: { ...this.camCfg.partida },
+      checkpoint: { ...this.camCfg.checkpoint },
+    };
+  }
+
+  // apply a whole {partida, checkpoint} config (e.g. restored from storage)
+  applyCamCfg(cfg) {
+    for (const mode of ['partida', 'checkpoint']) {
+      if (cfg && cfg[mode]) Object.assign(this.camCfg[mode], cfg[mode]);
+    }
+    this._recalcCamDirs();
+    this.fitCamera();
+  }
+
+  // live-edit one field of one mode from the overlay sliders
+  setCamCfg(mode, key, value) {
+    if (!this.camCfg[mode] || !(key in this.camCfg[mode])) return;
+    this.camCfg[mode][key] = value;
+    this._recalcCamDirs();
+    // partida framing is baked into baseCamPos; checkpoint applies live in update()
+    this.fitCamera();
   }
 
   addShake(amount) {
@@ -931,7 +993,8 @@ export class GameScene {
       if (this.followGoal) this.followPos.lerp(this.followGoal, Math.min(dt * 6, 1));
       const b = this.followBlend;
       const k = b * b * (3 - 2 * b); // smoothstep for a gentle glide
-      this._followCam.copy(this.followPos).addScaledVector(this.camDir, 15);
+      const fd = this.CHK_BASE_DIST / (this.camCfg.checkpoint.zoom || 1);
+      this._followCam.copy(this.followPos).addScaledVector(this.followDir, fd);
       this._camPos.lerp(this._followCam, k);
       this._camLook.lerp(this.followPos, k);
     }
