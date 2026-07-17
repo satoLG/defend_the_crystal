@@ -17,20 +17,24 @@
     <div id="loading" class="screen">
       <div class="panel center-panel start-panel">
         <div class="title-crest"><i data-icon="crystal"></i></div>
-        <h1 class="title">Defend<br/>the Crystal</h1>
+        <h1 class="title" data-i18n-html="brand.title">Defend<br/>the Crystal</h1>
         <div id="load-area">
           <div class="load-bar"><div id="load-fill"></div></div>
-          <div id="load-label" class="muted">Summoning models…</div>
+          <div id="load-label" class="muted" data-i18n="start.summoning">Summoning models…</div>
         </div>
         <div id="start-area" class="hidden">
           <div id="room-invite" class="room-invite hidden">
             <i data-icon="link"></i>
             <div class="ri-text">
-              You're joining a specific match<br/>
-              <span>Room <b id="ri-code">·····</b></span>
+              <span data-i18n="invite.joiningMatch">You're joining a specific match</span><br/>
+              <span><span data-i18n="invite.room">Room</span> <b id="ri-code">·····</b></span>
             </div>
           </div>
-          <button id="start-btn-main" class="btn primary big"><i data-icon="play"></i> Play</button>
+          <button id="start-btn-main" class="btn primary big"><i data-icon="play"></i> <span data-i18n="start.play">Play</span></button>
+          <div class="lang-switch" data-lang-switch>
+            <button class="lang-btn" data-lang="pt"><span class="flag">🇧🇷</span> <span data-i18n="lang.pt">Português</span></button>
+            <button class="lang-btn" data-lang="en"><span class="flag">🇺🇸</span> <span data-i18n="lang.en">English</span></button>
+          </div>
         </div>
       </div>
     </div>
@@ -38,15 +42,15 @@
     <!-- ============ CHARACTER CREATION ============ -->
     <div id="character" class="screen hidden">
       <div class="panel char-panel">
-        <button id="char-back" class="btn small corner-btn corner-left hidden" title="Back"><i data-icon="x"></i></button>
-        <button id="char-settings" class="btn small corner-btn" title="Settings"><i data-icon="gear"></i></button>
-        <h2>Your hero</h2>
+        <button id="char-back" class="btn small corner-btn corner-left hidden" data-i18n-title="common.back" title="Back"><i data-icon="x"></i></button>
+        <button id="char-settings" class="btn small corner-btn" data-i18n-title="common.settings" title="Settings"><i data-icon="gear"></i></button>
+        <h2 data-i18n="char.yourHero">Your hero</h2>
 
         <div id="char-class-grid" class="char-class-grid">
-          <button class="cc-card selected" data-cls="berserker"><i data-icon="cls-berserker"></i><span>Berserker</span></button>
-          <button class="cc-card" data-cls="tanker"><i data-icon="cls-tanker"></i><span>Tanker</span></button>
-          <button class="cc-card" data-cls="archer"><i data-icon="cls-archer"></i><span>Archer</span></button>
-          <button class="cc-card" data-cls="mage"><i data-icon="cls-mage"></i><span>Mage</span></button>
+          <button class="cc-card selected" data-cls="berserker"><i data-icon="cls-berserker"></i><span data-i18n="entity.class.berserker.name">Berserker</span></button>
+          <button class="cc-card" data-cls="tanker"><i data-icon="cls-tanker"></i><span data-i18n="entity.class.tanker.name">Tanker</span></button>
+          <button class="cc-card" data-cls="archer"><i data-icon="cls-archer"></i><span data-i18n="entity.class.archer.name">Archer</span></button>
+          <button class="cc-card" data-cls="mage"><i data-icon="cls-mage"></i><span data-i18n="entity.class.mage.name">Mage</span></button>
         </div>
 
         <div class="char-stage-row">
@@ -62,15 +66,15 @@
 
         <div class="char-info">
           <div class="ci-head"><span class="ci-name" id="ci-name">Berserker</span></div>
-          <div class="ci-line"><span class="ci-key">Weapon</span><span id="ci-weapon"></span></div>
-          <div class="ci-line"><span class="ci-key">Special</span><span id="ci-power"></span></div>
+          <div class="ci-line"><span class="ci-key" data-i18n="char.weapon">Weapon</span><span id="ci-weapon"></span></div>
+          <div class="ci-line"><span class="ci-key" data-i18n="char.special">Special</span><span id="ci-power"></span></div>
           <p class="ci-blurb muted" id="ci-blurb"></p>
           <div class="ci-stats" id="ci-stats"></div>
         </div>
 
         <div class="char-foot">
-          <input id="char-name" maxlength="10" autocomplete="off" placeholder="Hero name" />
-          <button id="char-save" class="btn primary big">Save &amp; continue</button>
+          <input id="char-name" maxlength="10" autocomplete="off" data-i18n-ph="char.heroNamePh" placeholder="Hero name" />
+          <button id="char-save" class="btn primary big" data-i18n="char.saveContinue">Save &amp; continue</button>
         </div>
       </div>
     </div>
@@ -78,17 +82,17 @@
     <!-- ============ PET PICKER (creation step 2 / legacy normalize) ============ -->
     <div id="pet-picker" class="screen hidden">
       <div class="panel char-panel pp-panel">
-        <button id="pp-back" class="btn small corner-btn corner-left hidden" title="Back"><i data-icon="x"></i></button>
-        <h2><i data-icon="paw"></i> Your first pet</h2>
-        <p id="pp-intro" class="muted pp-intro">Every hero brings one companion along.<br/>Pick a starter and give it a name — it levels up permanently and follows you into battle.</p>
+        <button id="pp-back" class="btn small corner-btn corner-left hidden" data-i18n-title="common.back" title="Back"><i data-icon="x"></i></button>
+        <h2><i data-icon="paw"></i> <span data-i18n="pp.firstPet">Your first pet</span></h2>
+        <p id="pp-intro" class="muted pp-intro" data-i18n-html="pp.intro">Every hero brings one companion along.<br/>Pick a starter and give it a name — it levels up permanently and follows you into battle.</p>
         <div id="pp-grid" class="pp-grid"></div>
         <div class="pp-detail">
           <div id="pp-detail-name" class="pp-detail-name"></div>
           <div id="pp-blurb" class="muted pp-blurb"></div>
         </div>
         <div class="char-foot">
-          <input id="pp-name" maxlength="10" autocomplete="off" placeholder="Pet name" />
-          <button id="pp-confirm" class="btn primary big">Save &amp; continue</button>
+          <input id="pp-name" maxlength="10" autocomplete="off" data-i18n-ph="pp.petNamePh" placeholder="Pet name" />
+          <button id="pp-confirm" class="btn primary big" data-i18n="pp.confirmPet">Save &amp; continue</button>
         </div>
       </div>
     </div>
@@ -96,27 +100,27 @@
     <!-- ============ MAIN MENU ============ -->
     <div id="menu" class="screen hidden">
       <div class="panel menu-panel">
-        <button id="menu-settings" class="btn small corner-btn" title="Settings"><i data-icon="gear"></i></button>
-        <h1 class="title">Defend<br/>the Crystal</h1>
+        <button id="menu-settings" class="btn small corner-btn" data-i18n-title="common.settings" title="Settings"><i data-icon="gear"></i></button>
+        <h1 class="title" data-i18n-html="brand.title">Defend<br/>the Crystal</h1>
         <div id="best-wave" class="muted"></div>
 
         <div id="menu-linked" class="room-invite hidden">
           <i data-icon="link"></i>
           <div class="ri-text">
-            You opened a link to a specific match<br/>
-            <span>Room <b id="menu-linked-code">·····</b> — pick a hero and join</span>
+            <span data-i18n="invite.openedLink">You opened a link to a specific match</span><br/>
+            <span><span data-i18n="invite.room">Room</span> <b id="menu-linked-code">·····</b> <span data-i18n="invite.pickHeroJoin">— pick a hero and join</span></span>
           </div>
         </div>
 
-        <div class="field-label">Your heroes</div>
+        <div class="field-label" data-i18n="menu.yourHeroes">Your heroes</div>
         <div id="hero-roster" class="hero-roster"></div>
 
         <div class="menu-actions">
-          <button id="host-btn" class="btn primary big"><i data-icon="swords"></i> Host a match</button>
+          <button id="host-btn" class="btn primary big"><i data-icon="swords"></i> <span data-i18n="menu.hostMatch">Host a match</span></button>
           <div id="join-block">
-            <div id="join-label" class="join-label">Have a friend's room code?</div>
-            <input id="join-code" maxlength="5" placeholder="ENTER CODE" autocomplete="off" />
-            <button id="join-btn" class="btn big"><i data-icon="link"></i> Join match</button>
+            <div id="join-label" class="join-label" data-i18n="menu.friendCode">Have a friend's room code?</div>
+            <input id="join-code" maxlength="5" placeholder="ENTER CODE" data-i18n-ph="menu.enterCode" autocomplete="off" />
+            <button id="join-btn" class="btn big"><i data-icon="link"></i> <span data-i18n="menu.joinMatch">Join match</span></button>
           </div>
         </div>
         <div id="menu-error" class="error-label"></div>
@@ -126,19 +130,19 @@
     <!-- ============ LOBBY ============ -->
     <div id="lobby" class="screen hidden">
       <div class="panel center-panel">
-        <h2>War camp</h2>
-        <div class="muted">Share this code with your allies</div>
+        <h2 data-i18n="lobby.warCamp">War camp</h2>
+        <div class="muted" data-i18n="lobby.shareCode">Share this code with your allies</div>
         <div class="code-row">
           <div id="room-code" class="room-code">·····</div>
-          <button id="copy-code" class="btn small" title="Copy code"><i data-icon="copy"></i></button>
-          <button id="share-code" class="btn small" title="Share link"><i data-icon="share"></i></button>
+          <button id="copy-code" class="btn small" data-i18n-title="tip.copyCode" title="Copy code"><i data-icon="copy"></i></button>
+          <button id="share-code" class="btn small" data-i18n-title="tip.shareLink" title="Share link"><i data-icon="share"></i></button>
         </div>
         <div id="lobby-status" class="muted"></div>
         <ul id="player-list"></ul>
         <div class="menu-actions">
-          <button id="start-btn" class="btn primary big hidden">Start the defense</button>
+          <button id="start-btn" class="btn primary big hidden" data-i18n="lobby.startDefense">Start the defense</button>
           <div id="lobby-hint" class="muted"></div>
-          <button id="leave-btn" class="btn subtle">Leave</button>
+          <button id="leave-btn" class="btn subtle" data-i18n="lobby.leave">Leave</button>
         </div>
       </div>
     </div>
@@ -147,19 +151,19 @@
     <div id="hud" class="hidden">
       <div id="hud-top">
         <div class="hud-chip" id="wave-chip"><i data-icon="wave"></i> <span id="wave-label">–</span></div>
-        <div class="hud-chip crystal" id="points-chip" title="Crystal points — fragments from slain foes, spent on towers"><i data-icon="gem"></i> <span id="points-label">0</span></div>
-        <div class="hud-chip life" id="crystal-chip" title="Crystal health"><i data-icon="heart"></i> <span id="crystal-hp">10</span></div>
-        <div class="hud-chip subtle" id="room-chip" title="Room code — allies can join mid-match"><i data-icon="link"></i> <span id="room-label"></span></div>
-        <button class="hud-chip subtle" id="hud-settings" title="Settings"><i data-icon="gear"></i></button>
+        <div class="hud-chip crystal" id="points-chip" data-i18n-title="tip.points" title="Crystal points — fragments from slain foes, spent on towers"><i data-icon="gem"></i> <span id="points-label">0</span></div>
+        <div class="hud-chip life" id="crystal-chip" data-i18n-title="tip.crystalHp" title="Crystal health"><i data-icon="heart"></i> <span id="crystal-hp">10</span></div>
+        <div class="hud-chip subtle" id="room-chip" data-i18n-title="tip.room" title="Room code — allies can join mid-match"><i data-icon="link"></i> <span id="room-label"></span></div>
+        <button class="hud-chip subtle" id="hud-settings" data-i18n-title="tip.settings" title="Settings"><i data-icon="gear"></i></button>
       </div>
 
       <div id="player-bar">
         <div class="pb-row">
-          <span id="pb-class" title="View character stats"><i data-icon="cls-berserker"></i></span>
+          <span id="pb-class" data-i18n-title="tip.stats" title="View character stats"><i data-icon="cls-berserker"></i></span>
           <div class="pb-bars">
             <div class="pb-name-row">
               <div id="pb-name" class="pb-name"></div>
-              <div class="pb-gold" title="Gold coins — spend them at the sanctuary pet vendor"><i data-icon="goldcoin"></i><span id="gold-label">0</span></div>
+              <div class="pb-gold" data-i18n-title="tip.gold" title="Gold coins — spend them at the sanctuary pet vendor"><i data-icon="goldcoin"></i><span id="gold-label">0</span></div>
             </div>
             <div class="bar hp"><div id="pb-hp"></div><span id="pb-hp-text"></span></div>
             <div class="bar xp"><div id="pb-xp"></div></div>
@@ -167,7 +171,7 @@
           <span id="pb-level" class="pb-lvl">1</span>
         </div>
         <div class="pb-row pb-pet-row hidden" id="pet-row">
-          <button id="pet-icon" class="pb-pet-icon" title="Pet details"></button>
+          <button id="pet-icon" class="pb-pet-icon" data-i18n-title="tip.petDetails" title="Pet details"></button>
           <div class="pb-bars">
             <div id="pb-pet-name" class="pb-name pb-pet-name"></div>
             <div class="bar xp pet"><div id="pb-pet-xp"></div></div>
@@ -178,42 +182,50 @@
 
       <button id="build-hint" class="hidden"></button>
 
-      <button id="jump-btn" disabled title="Jump over the block ahead (J / Space)">
+      <!-- top-right action slot, mirrored across from the health bar:
+           holds the wave-advance action (Start wave during the build
+           phase, Keep going during a checkpoint) so it never crowds the
+           tower row along the bottom -->
+      <div id="hud-action">
+        <button id="startwave-btn" class="btn primary hidden">
+          <span id="startwave-label">Start<br/>wave</span>
+        </button>
+        <button id="cont-btn" class="btn primary hidden" data-i18n="hud.keepGoing">Keep going ➜</button>
+      </div>
+
+      <button id="jump-btn" disabled data-i18n-title="tip.jump" title="Jump over the block ahead (J / Space)">
         <i data-icon="jump"></i>
       </button>
 
-      <button id="skill-btn" disabled title="Class special attack (K)">
+      <button id="skill-btn" disabled data-i18n-title="tip.skill" title="Class special attack (K)">
         <span id="skill-icon"><i data-icon="sparkle"></i></span>
         <span id="skill-cd" class="hidden"></span>
       </button>
 
       <div id="hud-bottom">
         <button class="build-card" data-item="obstacle">
-          <span class="bc-icon"><img class="entity-img" src="./img/block.png" alt=""></span><span class="bc-name">Block</span>
+          <span class="bc-icon"><img class="entity-img" src="./img/block.png" alt=""></span><span class="bc-name" data-i18n="card.obstacle">Block</span>
           <span class="bc-cost" id="obst-stock">×0</span>
         </button>
         <button class="build-card" data-item="ballista">
-          <span class="bc-icon"><img class="entity-img" src="./img/tower-ballista.png" alt=""></span><span class="bc-name">Ballista</span>
+          <span class="bc-icon"><img class="entity-img" src="./img/tower-ballista.png" alt=""></span><span class="bc-name" data-i18n="card.ballista">Ballista</span>
           <span class="bc-cost"><i data-icon="gem"></i><span data-cost="ballista"></span></span>
         </button>
         <button class="build-card" data-item="catapult">
-          <span class="bc-icon"><img class="entity-img" src="./img/tower-catapult.png" alt=""></span><span class="bc-name">Catapult</span>
+          <span class="bc-icon"><img class="entity-img" src="./img/tower-catapult.png" alt=""></span><span class="bc-name" data-i18n="card.catapult">Catapult</span>
           <span class="bc-cost"><i data-icon="gem"></i><span data-cost="catapult"></span></span>
         </button>
         <button class="build-card" data-item="cannon">
-          <span class="bc-icon"><img class="entity-img" src="./img/tower-cannon.png" alt=""></span><span class="bc-name">Cannon</span>
+          <span class="bc-icon"><img class="entity-img" src="./img/tower-cannon.png" alt=""></span><span class="bc-name" data-i18n="card.cannon">Cannon</span>
           <span class="bc-cost"><i data-icon="gem"></i><span data-cost="cannon"></span></span>
         </button>
         <button class="build-card" data-item="crystal">
-          <span class="bc-icon"><img class="entity-img" src="./img/tower-crystal.png" alt=""></span><span class="bc-name">Crystal</span>
+          <span class="bc-icon"><img class="entity-img" src="./img/tower-crystal.png" alt=""></span><span class="bc-name" data-i18n="card.crystal">Crystal</span>
           <span class="bc-cost"><i data-icon="gem"></i><span data-cost="crystal"></span></span>
         </button>
         <button class="build-card" data-item="flame">
-          <span class="bc-icon"><img class="entity-img" src="./img/tower-flame.png" alt=""></span><span class="bc-name">Flamer</span>
+          <span class="bc-icon"><img class="entity-img" src="./img/tower-flame.png" alt=""></span><span class="bc-name" data-i18n="card.flame">Flamer</span>
           <span class="bc-cost"><i data-icon="gem"></i><span data-cost="flame"></span></span>
-        </button>
-        <button id="startwave-btn" class="btn primary">
-          <span id="startwave-label">Start<br/>wave</span>
         </button>
       </div>
 
@@ -229,7 +241,7 @@
       </div>
 
       <div id="respawn-overlay" class="hidden">
-        <div class="resp-title"><i data-icon="skull"></i> You fell…</div>
+        <div class="resp-title"><i data-icon="skull"></i> <span data-i18n="respawn.youFell">You fell…</span></div>
         <div id="respawn-timer"></div>
       </div>
 
@@ -243,46 +255,57 @@
         <div id="bb-flavor"></div>
       </div>
 
-      <button id="petshop-prompt" class="hidden"><i data-icon="paw"></i> Pet Shop</button>
-      <button id="weaponshop-prompt" class="hidden"><i data-icon="swords"></i> Weapon Smith</button>
+      <button id="petshop-prompt" class="hidden"><i data-icon="paw"></i> <span data-i18n="hud.petShop">Pet Shop</span></button>
+      <button id="weaponshop-prompt" class="hidden"><i data-icon="swords"></i> <span data-i18n="hud.weaponSmith">Weapon Smith</span></button>
 
+      <!-- centered announcements (wave banners) -->
       <div id="toasts"></div>
+      <!-- small warnings / feedback tucked in the bottom-left, above the
+           tower row, so they never cover the action mid-wave -->
+      <div id="log-toasts"></div>
     </div>
 
     <!-- ============ SETTINGS ============ -->
     <div id="settings-panel" class="screen overlay hidden">
       <div class="panel center-panel">
-        <h2><i data-icon="gear"></i> Settings</h2>
+        <h2><i data-icon="gear"></i> <span data-i18n="common.settings">Settings</span></h2>
         <div class="setting-row">
-          <label for="set-music"><i data-icon="music"></i> Music</label>
+          <label for="set-music"><i data-icon="music"></i> <span data-i18n="settings.music">Music</span></label>
           <input type="range" id="set-music" min="0" max="100" />
-          <button id="mute-music" class="btn small mute-btn" title="Mute music"></button>
+          <button id="mute-music" class="btn small mute-btn" data-i18n-title="tip.muteMusic" title="Mute music"></button>
         </div>
         <div class="setting-row">
-          <label for="set-sfx"><i data-icon="speaker"></i> Sound effects</label>
+          <label for="set-sfx"><i data-icon="speaker"></i> <span data-i18n="settings.sfx">Sound effects</span></label>
           <input type="range" id="set-sfx" min="0" max="100" />
-          <button id="mute-sfx" class="btn small mute-btn" title="Mute sound effects"></button>
+          <button id="mute-sfx" class="btn small mute-btn" data-i18n-title="tip.muteSfx" title="Mute sound effects"></button>
         </div>
         <div class="setting-row toggle">
-          <label for="set-shake">Camera shake</label>
+          <label for="set-shake" data-i18n="settings.cameraShake">Camera shake</label>
           <input type="checkbox" id="set-shake" />
         </div>
         <div class="setting-row toggle">
-          <label for="set-shadows">Shadows</label>
+          <label for="set-shadows" data-i18n="settings.shadows">Shadows</label>
           <input type="checkbox" id="set-shadows" />
         </div>
-        <button id="settings-close" class="btn primary big">Done</button>
+        <div class="setting-row lang-row">
+          <label data-i18n="lang.label">Language</label>
+          <div class="lang-switch" data-lang-switch>
+            <button class="lang-btn" data-lang="pt"><span class="flag">🇧🇷</span> <span data-i18n="lang.pt">Português</span></button>
+            <button class="lang-btn" data-lang="en"><span class="flag">🇺🇸</span> <span data-i18n="lang.en">English</span></button>
+          </div>
+        </div>
+        <button id="settings-close" class="btn primary big" data-i18n="common.done">Done</button>
       </div>
     </div>
 
     <!-- ============ CHARACTER STATS SHEET ============ -->
     <div id="stats-panel" class="screen overlay hidden">
       <div class="panel center-panel stats-modal">
-        <button id="stats-close" class="btn small corner-btn" title="Close"><i data-icon="x"></i></button>
+        <button id="stats-close" class="btn small corner-btn" data-i18n-title="common.close" title="Close"><i data-icon="x"></i></button>
         <div class="stats-head">
           <span id="stats-icon" class="stats-icon"></span>
           <div class="stats-headmeta">
-            <span id="stats-title">Hero</span>
+            <span id="stats-title" data-i18n="common.hero">Hero</span>
             <span id="stats-sub" class="muted"></span>
           </div>
         </div>
@@ -293,7 +316,7 @@
     <!-- ============ PET DETAIL (read-only, from the HUD pet row) ============ -->
     <div id="pet-detail" class="screen overlay hidden">
       <div class="panel center-panel pet-detail-modal">
-        <button id="pd-close" class="btn small corner-btn" title="Close"><i data-icon="x"></i></button>
+        <button id="pd-close" class="btn small corner-btn" data-i18n-title="common.close" title="Close"><i data-icon="x"></i></button>
         <div class="pd-head">
           <img id="pd-img" class="pd-img" alt="">
           <div class="pd-headmeta">
@@ -304,21 +327,21 @@
         <div id="pd-effect" class="pd-effect"></div>
         <div class="pd-xp"><div id="pd-xpfill" class="pd-xpfill"></div></div>
         <div id="pd-xptext" class="muted pd-xptext"></div>
-        <div class="pd-hint muted">Visit Tonho's stall in the sanctuary to switch or buy pets.</div>
+        <div class="pd-hint muted" data-i18n="petd.hint">Visit Tonho's stall in the sanctuary to switch or buy pets.</div>
       </div>
     </div>
 
     <!-- ============ PET PANEL (manage companions + Tonho's shop) ============ -->
     <div id="pet-panel" class="screen overlay hidden">
       <div class="panel center-panel pet-modal">
-        <button id="pet-close" class="btn small corner-btn" title="Close"><i data-icon="x"></i></button>
-        <h2><i data-icon="paw"></i> Pets</h2>
-        <div class="pet-gold"><i data-icon="goldcoin"></i> <span id="pet-gold-label">0</span> gold coins</div>
+        <button id="pet-close" class="btn small corner-btn" data-i18n-title="common.close" title="Close"><i data-icon="x"></i></button>
+        <h2><i data-icon="paw"></i> <span data-i18n="petp.pets">Pets</span></h2>
+        <div class="pet-gold"><i data-icon="goldcoin"></i> <span id="pet-gold-label">0</span> <span data-i18n="petp.goldCoins">gold coins</span></div>
         <div class="pet-tabs">
-          <button id="pet-tab-mine" class="pet-tab active">My pets</button>
-          <button id="pet-tab-shop" class="pet-tab">Shop</button>
+          <button id="pet-tab-mine" class="pet-tab active" data-i18n="petp.myPets">My pets</button>
+          <button id="pet-tab-shop" class="pet-tab" data-i18n="petp.shop">Shop</button>
         </div>
-        <div id="pet-shop-hint" class="muted pet-shop-hint hidden">
+        <div id="pet-shop-hint" class="muted pet-shop-hint hidden" data-i18n-html="petp.shopHint">
           Gold coins drop from mini-bosses and bosses.<br/>Visit Tonho's stall in the sanctuary plaza to buy.
         </div>
         <div id="pet-list" class="pet-list"></div>
@@ -328,14 +351,14 @@
     <!-- ============ WEAPON PANEL (arsenal + Baru's smithy) ============ -->
     <div id="weapon-panel" class="screen overlay hidden">
       <div class="panel center-panel pet-modal">
-        <button id="weapon-close" class="btn small corner-btn" title="Close"><i data-icon="x"></i></button>
-        <h2><i data-icon="swords"></i> Weapons</h2>
-        <div class="pet-gold"><i data-icon="goldcoin"></i> <span id="weapon-gold-label">0</span> gold coins</div>
+        <button id="weapon-close" class="btn small corner-btn" data-i18n-title="common.close" title="Close"><i data-icon="x"></i></button>
+        <h2><i data-icon="swords"></i> <span data-i18n="wpnp.weapons">Weapons</span></h2>
+        <div class="pet-gold"><i data-icon="goldcoin"></i> <span id="weapon-gold-label">0</span> <span data-i18n="petp.goldCoins">gold coins</span></div>
         <div class="pet-tabs">
-          <button id="weapon-tab-mine" class="pet-tab active">My arsenal</button>
-          <button id="weapon-tab-shop" class="pet-tab">Shop</button>
+          <button id="weapon-tab-mine" class="pet-tab active" data-i18n="wpnp.myArsenal">My arsenal</button>
+          <button id="weapon-tab-shop" class="pet-tab" data-i18n="petp.shop">Shop</button>
         </div>
-        <div id="weapon-shop-hint" class="muted pet-shop-hint hidden">
+        <div id="weapon-shop-hint" class="muted pet-shop-hint hidden" data-i18n-html="wpnp.shopHint">
           Gold coins drop from mini-bosses and bosses.<br/>Visit Baru's smithy in the sanctuary plaza to buy &amp; upgrade.
         </div>
         <div id="weapon-list" class="pet-list"></div>
@@ -346,22 +369,21 @@
          wander the sanctuary behind the crystal) ============ -->
     <div id="checkpoint" class="cp-banner hidden">
       <div class="cp-inner">
-        <h2><i data-icon="tent"></i> Checkpoint</h2>
-        <p>Wave <span id="cp-wave"></span> cleared — everyone is healed.<br/>Stroll the sanctuary behind the crystal, then push on.</p>
+        <h2><i data-icon="tent"></i> <span data-i18n="cp.checkpoint">Checkpoint</span></h2>
+        <p><span data-i18n="cp.wavePrefix">Wave</span> <span id="cp-wave"></span> <span data-i18n="cp.waveSuffix">cleared — everyone is healed.</span><br/><span data-i18n="cp.stroll">Stroll the sanctuary behind the crystal, then push on.</span></p>
         <div id="cp-status" class="muted"></div>
-        <button id="cont-btn" class="btn primary">Keep going ➜</button>
       </div>
     </div>
 
     <!-- ============ GAME OVER ============ -->
     <div id="gameover" class="screen overlay hidden">
       <div class="panel center-panel">
-        <h2><i data-icon="gemcrack"></i> The crystal shattered</h2>
+        <h2><i data-icon="gemcrack"></i> <span data-i18n="over.crystalShattered">The crystal shattered</span></h2>
         <div id="go-stats"></div>
         <div class="menu-actions">
-          <button id="restart-btn" class="btn primary big hidden">Try again</button>
-          <div id="go-hint" class="muted hidden">Waiting for the host to restart…</div>
-          <button id="exit-btn" class="btn subtle">Back to menu</button>
+          <button id="restart-btn" class="btn primary big hidden" data-i18n="over.tryAgain">Try again</button>
+          <div id="go-hint" class="muted hidden" data-i18n="over.waitingHostRestart">Waiting for the host to restart…</div>
+          <button id="exit-btn" class="btn subtle" data-i18n="over.backToMenu">Back to menu</button>
         </div>
       </div>
     </div>
@@ -369,9 +391,9 @@
     <!-- ============ HOST LOST ============ -->
     <div id="host-lost" class="screen overlay hidden">
       <div class="panel center-panel">
-        <h2>Connection lost</h2>
-        <p class="muted">The host has left the realm.</p>
-        <button id="hl-exit" class="btn primary big">Back to menu</button>
+        <h2 data-i18n="hostlost.connectionLost">Connection lost</h2>
+        <p class="muted" data-i18n="hostlost.hostLeft">The host has left the realm.</p>
+        <button id="hl-exit" class="btn primary big" data-i18n="over.backToMenu">Back to menu</button>
       </div>
     </div>
   </div>

@@ -110,7 +110,9 @@ export function loadoutOf(c) {
 export function grantPetXp(c, amount) {
   const pet = c?.activePet && c.pets?.[c.activePet];
   if (!pet || amount <= 0 || pet.lvl >= PET.LEVEL_CAP) return 0;
-  pet.xp += amount;
+  // pets level up slowly on purpose — they only bank a fraction of the
+  // XP their owner scoops up (halved by default, see PET.XP_GAIN)
+  pet.xp += amount * (PET.XP_GAIN ?? 1);
   let gained = 0;
   while (pet.lvl < PET.LEVEL_CAP && pet.xp >= petXpNext(pet.lvl)) {
     pet.xp -= petXpNext(pet.lvl);

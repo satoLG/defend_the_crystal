@@ -19,6 +19,7 @@ import { petRefOf, loadoutOf } from './character.js';
 import { makeRoomCode, lerp, dist2d } from './utils.js';
 import { settings } from './settings.js';
 import { music } from './music.js';
+import { t, getLang, onLangChange, bossName, bossFlavor, enemyName } from './i18n.js';
 
 // ============================================================
 // Bootstraps everything and runs the two game loops:
@@ -86,6 +87,10 @@ const effectiveVolumes = () => ({
 });
 
 async function boot() {
+  // reflect the active language on <html lang> and keep it in sync
+  document.documentElement.lang = getLang() === 'pt' ? 'pt-BR' : 'en';
+  onLangChange((l) => { document.documentElement.lang = l === 'pt' ? 'pt-BR' : 'en'; });
+
   // every user gesture (re)applies volumes and unlocks/resumes the
   // audio contexts — required on iOS, harmless elsewhere
   armAudioOnFirstGesture(() => {
@@ -193,7 +198,7 @@ function joinGame(code, character) {
   state.role = 'client';
   state.net = new Net(code);
   ui.showLobby(code, false);
-  $status('Looking for the host…');
+  $status(t('lobby.lookingForHost'));
 
   const hello = () => state.net.send('hello', {
     name: character.name, cls: character.cls, colors: character.colors,
@@ -226,7 +231,7 @@ function joinGame(code, character) {
   // if we never hear from a host, tell the player
   setTimeout(() => {
     if (!state.hostId && !state.started) {
-      $status('Nobody here yet — check the code, or keep waiting.');
+      $status(t('lobby.nobodyHere'));
     }
   }, 12000);
 }
@@ -430,31 +435,31 @@ function doSkill() {
 // events from the sim (host: direct, client: over the wire)
 // ---------------------------------------------------------
 
-// sensationalist one-liners for the checkpoint bosses
-const BOSS_FLAVOR = {
-  'Coveiro': 'He digs your graves in advance!',
-  'Tiro Cego': 'Nobody escapes the volley — NOBODY!',
-  'Zé do Caixão': 'Walls mean NOTHING to him!',
-  'Abobrado': 'Take cover — pumpkins incoming!',
-};
-
 function handleEvent(ev) {
   view.handleEvent(ev);
   switch (ev.t) {
     case 'toast':
-      if (!ev.to || ev.to === selfId) ui.toast(ev.msg, ev.kind || '');
+      // sim toasts carry a translation key (ev.k) + params (ev.pr); the
+      // key is translated into the local player's language client-side so
+      // the host's language never leaks to other players
+      if (!ev.to || ev.to === selfId) ui.toast(ev.k ? t(ev.k, ev.pr) : (ev.msg || ''), ev.kind || '');
       break;
     case 'wave':
-      ui.toast(`Wave ${ev.n}!`, 'gold');
+      // the wave banner is the one message allowed dead-center on screen
+      ui.announce(t('hud.waveBang', { n: ev.n }), 'gold');
       sfx.wave();
       break;
     case 'boss':
-      ui.showBossBanner(ev.name, BOSS_FLAVOR[ev.name] || 'The ground trembles…');
+      ui.showBossBanner(
+        ev.variant ? bossName(ev.variant) : (ev.name || ''),
+        bossFlavor(ev.variant));
       music.bossJingle();
       gs.addShake(0.55);
       break;
     case 'subboss':
-      ui.showBossBanner(ev.name, 'A monstrous champion joins the wave!', true);
+      ui.showBossBanner(
+        ev.kind ? enemyName(ev.kind) : (ev.name || ''),
+        t('boss.subbossFlavor'), true);
       music.miniJingle();
       break;
     case 'ejump': sfx.jump(); break;
@@ -468,7 +473,7 @@ function handleEvent(ev) {
       if (ev.ph === 'build' && ev.n > 1) sfx.waveClear();
       break;
     case 'heal':
-      ui.toast(`Checkpoint! +${ev.bonus} crystals, everyone healed`, 'gold');
+      ui.toast(t('toast.checkpointHeal', { bonus: ev.bonus }), 'gold');
       sfx.levelUp();
       break;
     case 'shoot': sfx.shoot(); break;
@@ -477,9 +482,9 @@ function handleEvent(ev) {
     case 'die':
       if (ev.player) {
         if (ev.id === selfId) { sfx.hurt(); state.self.dead = true; }
-        ui.toast('A defender has fallen!', 'error');
+        ui.toast(t('toast.defenderFallen'), 'error');
       } else if (ev.boss) {
-        ui.toast('Boss defeated!', 'gold');
+        ui.toast(t('toast.bossDefeated'), 'gold');
         sfx.success();
       }
       break;
@@ -494,7 +499,7 @@ function handleEvent(ev) {
       if (ev.id === selfId) { state.self.kbx += ev.dx; state.self.kbz += ev.dz; }
       break;
     case 'lvl':
-      if (ev.id === selfId) { ui.toast(`Level ${ev.lvl}!`, 'gold'); sfx.levelUp(); }
+      if (ev.id === selfId) { ui.toast(t('toast.levelUp', { n: ev.lvl }), 'gold'); sfx.levelUp(); }
       break;
     case 'pickup':
       if (ev.id === selfId) {
@@ -525,7 +530,7 @@ function handleEvent(ev) {
       break;
     case 'breach':
       sfx.breach();
-      ui.toast('The crystal was hit!', 'error');
+      ui.toast(t('toast.crystalHit'), 'error');
       break;
     case 'place':
       if (ev.item === 'obstacle') sfx.place();
@@ -544,7 +549,7 @@ function handleEvent(ev) {
       ui.hideGameOver();
       view.reset();
       syncSelfFromSim();
-      ui.toast('New defense begins!', 'gold');
+      ui.toast(t('toast.newDefense'), 'gold');
       break;
   }
 }
