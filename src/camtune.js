@@ -24,9 +24,9 @@ const COMMON_FIELDS = [
 ];
 // partida only: shift the point the board camera orbits/looks at
 const PAN_FIELDS = [
-  ['panX', 'Pan X', -8, 8, 0.25, 'num'],
-  ['panY', 'Pan Y', -8, 8, 0.25, 'num'],
-  ['panZ', 'Pan Z', -8, 8, 0.25, 'num'],
+  ['panX', 'Pan X', -20, 20, 0.25, 'num'],
+  ['panY', 'Pan Y', -20, 20, 0.25, 'num'],
+  ['panZ', 'Pan Z', -20, 20, 0.25, 'num'],
 ];
 const FIELDS_BY_MODE = {
   partida: [...COMMON_FIELDS, ...PAN_FIELDS],

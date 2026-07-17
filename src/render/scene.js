@@ -864,9 +864,13 @@ export class GameScene {
     return this.lookTarget.clone().add(new THREE.Vector3(c.panX || 0, c.panY || 0, c.panZ || 0));
   }
 
-  // binary-search the camera distance so the whole board fits
+  // binary-search the camera distance so the whole board fits. Always
+  // measured from the fixed board center (this.lookTarget), NEVER the
+  // panned target — otherwise panning would feed back into this search
+  // and silently override the pan with whatever distance keeps the
+  // board on screen (the "camera sobe" bug). Pan is applied afterward,
+  // as a pure translation, in _applyBoardZoom.
   fitCamera() {
-    const target = this._boardTarget();
     const corners = [
       new THREE.Vector3(-HALF_W - 0.8, 0, -HALF_H - 1.2),
       new THREE.Vector3(HALF_W + 0.8, 0, -HALF_H - 1.2),
@@ -880,7 +884,7 @@ export class GameScene {
     let lo = 8, hi = 130;
     for (let it = 0; it < 22; it++) {
       const mid = (lo + hi) / 2;
-      this.placeCamera(mid, target);
+      this.placeCamera(mid, this.lookTarget);
       let fits = true;
       for (const c of corners) {
         const p = c.clone().project(this.camera);
@@ -888,9 +892,9 @@ export class GameScene {
       }
       if (fits) hi = mid; else lo = mid;
     }
-    this.placeCamera(hi, target);
+    this.placeCamera(hi, this.lookTarget);
     this.fitDist = hi;
-    this._applyBoardZoom(target);
+    this._applyBoardZoom();
   }
 
   // the board framing sits at the fitted distance divided by the zoom
