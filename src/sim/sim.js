@@ -6,9 +6,10 @@ import {
   CRYSTAL_BREACH_LIMIT, GRID, JUMP, DROPS, SUMMON, BOSSES, SKILLS, NAME_MAX,
   PET, GOLD, petEffects, sanitizePetRef, jumpDurFor,
   WEAPONS, STUN, ORB, weaponEffects, sanitizeWeaponRef, classStarterWeapons,
+  TOWER_SPECIALS, STATUS,
 } from '../config.js';
 import {
-  Grid, cellToWorld, worldToCell, canJumpFrom, enemyJumpShortcut, idx,
+  Grid, cellToWorld, worldToCell, canJumpFrom, enemyJumpShortcut, idx, inBounds,
   computeDashEnd, CRYSTAL_POS, HALF_W, HALF_H,
 } from './grid.js';
 import { buildWavePlan, enemyStats } from './waves.js';
@@ -40,9 +41,10 @@ export class Sim {
     this.breaches = 0;
     this.buildT = 0;
     this.buildTimerOn = false;
-    this.spawnQueue = [];   // [{kind, at(abs time), boss, variant}]
+    this.spawnQueue = [];   // [{kind, at(abs time), boss, variant, horde}]
     this.spawnIdx = 0;
     this.graves = [];       // tombs raised by the gravedigger, still spawning
+    this.fires = [];        // burning ground patches (cannon napalm special)
     this.drops = [];        // XP/point orbs on the ground, per-player
     this.pending = [];      // scheduled callbacks [{at, fn}]
     this.events = [];
@@ -233,6 +235,7 @@ export class Sim {
     this.breaches = 0;
     this.spawnQueue = [];
     this.graves = [];
+    this.fires = [];
     this.pending = [];
     this.drops = [];
     this.contReady.clear();
@@ -310,6 +313,7 @@ export class Sim {
       case 'place': return this.tryPlace(p, act);
       case 'remove': return this.tryRemove(p, act);
       case 'upg': return this.tryUpgrade(p, act);
+      case 'spec': return this.trySpecial(p, act);
       case 'sell': return this.trySell(p, act);
       case 'jump': return this.tryJump(p, act);
       case 'skill': return this.trySkill(p, act);
@@ -366,7 +370,7 @@ export class Sim {
       this.points -= towerDef.cost;
       this.world.add({
         tower: true, id: nextId(), kind: item, c, r, lvl: 1,
-        rot: Math.PI, cd: 0.5, invested: towerDef.cost,
+        rot: Math.PI, cd: 0.5, invested: towerDef.cost, spec: null,
       });
     }
     this.emit({ t: 'place', c, r, item, by: p.id });
@@ -392,6 +396,22 @@ export class Sim {
     t.lvl += 1;
     t.invested += cost;
     this.emit({ t: 'upgrade', c, r, lvl: t.lvl });
+  }
+
+  // buy a tower's special effect (bonus upgrade). One per tower, ever —
+  // where a tower offers two paths, picking one locks the other out.
+  trySpecial(p, { c, r, spec }) {
+    const found = this.cellContents(c, r);
+    if (!found?.tower) return;
+    const t = found.tower;
+    const def = TOWER_SPECIALS[t.kind]?.[spec];
+    if (!def) return;
+    if (t.spec) return this.deny(p, 'This tower already has its special');
+    if (this.points < def.cost) return this.deny(p, 'Not enough crystals');
+    this.points -= def.cost;
+    t.spec = spec;
+    t.invested += def.cost;
+    this.emit({ t: 'spec', c, r, spec });
   }
 
   trySell(p, { c, r }) {
@@ -569,27 +589,34 @@ export class Sim {
   towerStats(t) {
     const def = TOWERS[t.kind];
     const m = t.lvl - 1;
+    // the crystal's pulse radius grows with every level (aoeGrow);
+    // its range is always the same as the pulse so "in range" == "hit"
+    const aoe = def.aoe + (def.aoeGrow || 0) * m;
     return {
       dmg: def.dmg * Math.pow(TOWER_UPGRADE.dmgMult, m),
-      range: def.range + TOWER_UPGRADE.rangeAdd * m,
+      range: def.pulse ? aoe : def.range + TOWER_UPGRADE.rangeAdd * m,
       rate: def.rate * Math.pow(TOWER_UPGRADE.rateMult, m),
-      aoe: def.aoe, minRange: def.minRange || 0, projSpeed: def.projSpeed, lob: def.lob,
-      ammo: def.ammo,
+      aoe, minRange: def.minRange || 0, projSpeed: def.projSpeed, lob: def.lob,
+      ammo: def.ammo, pulse: def.pulse, jet: def.jet,
+      burnDps: def.burnDps ? def.burnDps * Math.pow(TOWER_UPGRADE.dmgMult, m) : 0,
+      burnDur: def.burnDur || 0,
     };
   }
 
   // ---------------- enemies ----------------
 
   // `at` (optional {x,z}) drops the enemy mid-board — used by the
-  // gravedigger's tombs; otherwise it walks in from a top spawn pad
-  spawnEnemy(kind, boss, variant = null, at = null) {
+  // gravedigger's tombs; otherwise it walks in from a top spawn pad.
+  // `horde` marks a Zombie Horde trooper color ('green'|'blue'|'red');
+  // `tier` (2|3) the mid/large power stages of later waves.
+  spawnEnemy(kind, boss, variant = null, at = null, horde = null, tier = 1) {
     const def = ENEMIES[kind];
     const s = GRID.SPAWNS[this.spawnIdx++ % GRID.SPAWNS.length];
     const w = at || cellToWorld(s.c, s.r);
     // walk-in spawns start hidden inside the dark woods north of the
     // board and march down out of the penumbra
     if (!at) w.z = -HALF_H - 2.5 - Math.random() * 2.5;
-    const stats = enemyStats(kind, boss, this.wave, this.waveStartCount, variant);
+    const stats = enemyStats(kind, boss, this.wave, this.waveStartCount, variant, horde, tier);
     const bossDef = boss === 2 ? BOSSES[variant] : null;
 
     const vehicle = new Vehicle();
@@ -622,6 +649,20 @@ export class Sim {
       pts: stats.pts, xp: stats.xp, scale: stats.scale, breach: stats.breach,
       boss, flying: !!def.flying, state: 'path', targetId: null,
       atkCd: 0, kbx: 0, kbz: 0, yaw: 0, stunT: 0,
+      aggroCd: 0, chaseBestD: 0, dragT: 0,
+      // status effects (towers): chill slow, fire / poison DoTs
+      slowT: 0, slowF: 1, burnT: 0, burnDps: 0, poisonT: 0, poisonDps: 0,
+      dotTick: 0,
+      // toughness & second lives
+      armor: stats.armor || 0,
+      revives: stats.revives || 0,
+      horde, // 'green' | 'blue' | 'red' | null
+      variant: boss === 2 ? variant : null,
+      // visual-variant code for the snapshot: 1 stage-2 look, 2 stage-3
+      // look (recolored hide + size), 3 Brutus (props); 0 plain
+      vr: boss === 2
+        ? (variant === 'brutus' ? 3 : 0)
+        : (stats.tier === 2 ? 1 : stats.tier === 3 ? 2 : 0),
       // special powers
       archer,
       jumper: !!def.jumper && !def.flying,
@@ -658,6 +699,8 @@ export class Sim {
       const pos = e.vehicle.position;
       this.emit({ t: 'crit', x: rnd2(pos.x), z: rnd2(pos.z) });
     }
+    // heavy armor (Brutus): flat reduction on every hit, any source
+    if (e.armor > 0) dmg *= 1 - e.armor;
     e.hp -= dmg;
     // knockback always throws enemies BACKWARD (away from the crystal),
     // never toward it — only the magnitude of the hit matters
@@ -670,6 +713,15 @@ export class Sim {
       e.kbz += (dz / d) * mag;
     }
     this.emit({ t: 'hit', id: e.id });
+    // getting shot/blasted pulls aggro — but only under the same rules
+    // as proximity: clear line to the attacker and crystal not closer
+    if (e.hp > 0 && killer && !killer.dead && e.state !== 'chase') {
+      const pos = e.vehicle.position;
+      const d = dist2d(pos.x, pos.z, killer.x, killer.z);
+      if (d <= ENEMY.LEASH_RADIUS && this.canAggro(e, killer, d)) {
+        this.startChase(e, killer);
+      }
+    }
     // war hammer bonus: chance to stun (bosses shrug most of it off)
     if (e.hp > 0 && killer && killer.stunCh > 0 && Math.random() < killer.stunCh) {
       const dur = e.boss ? STUN.DUR * STUN.BOSS_MULT : STUN.DUR;
@@ -679,6 +731,17 @@ export class Sim {
     }
     if (e.hp <= 0) {
       const pos = e.vehicle.position;
+      // blue/red horde zombies claw back up instead of dying — no drops
+      // until the LAST life goes; status effects are washed off
+      if (e.revives > 0) {
+        e.revives -= 1;
+        e.hp = e.maxHp;
+        e.kbx = 0; e.kbz = 0;
+        e.burnT = 0; e.poisonT = 0; e.slowT = 0;
+        e.stunT = Math.max(e.stunT, 0.9); // a beat on the ground before rising
+        this.emit({ t: 'revive', id: e.id, x: rnd2(pos.x), z: rnd2(pos.z) });
+        return;
+      }
       this.emit({ t: 'die', id: e.id, kind: e.kind, x: rnd2(pos.x), z: rnd2(pos.z), boss: e.boss });
       if (killer) killer.kills += 1;
       // nothing is granted on the kill itself — the enemy drops XP and
@@ -686,6 +749,90 @@ export class Sim {
       this.spawnDrops(e);
       this.removeEnemy(e);
       this.checkWaveCleared();
+    }
+  }
+
+  // ---------------- aggro rules ----------------
+
+  // clear straight path over the grid between two world points: no
+  // tower/obstacle cell may sit between them. Cells outside the board
+  // (the spawn woods) never block. Flying enemies skip this entirely.
+  hasLos(x1, z1, x2, z2) {
+    const steps = Math.ceil(dist2d(x1, z1, x2, z2) / (GRID.CELL * 0.35));
+    for (let i = 1; i < steps; i++) {
+      const k = i / steps;
+      const { c, r } = worldToCell(x1 + (x2 - x1) * k, z1 + (z2 - z1) * k);
+      if (inBounds(c, r) && this.grid.blocked[idx(c, r)] === 1) return false;
+    }
+    return true;
+  }
+
+  // may enemy `e` take the bait `p` standing `d` away? The crystal
+  // always outranks the character when it's the closer of the two.
+  canAggro(e, p, d) {
+    if ((e.aggroCd || 0) > 0) return false;
+    const pos = e.vehicle.position;
+    if (dist2d(pos.x, pos.z, CRYSTAL_POS.x, CRYSTAL_POS.z) <= d) return false;
+    return e.flying || this.hasLos(pos.x, pos.z, p.x, p.z);
+  }
+
+  startChase(e, p) {
+    const pos = e.vehicle.position;
+    e.state = 'chase';
+    e.targetId = p.id;
+    // closest-yet approach to the crystal — the anti-kiting reference
+    e.chaseBestD = dist2d(pos.x, pos.z, CRYSTAL_POS.x, CRYSTAL_POS.z);
+    e.dragT = 0;
+  }
+
+  // ---------------- status effects (tower specials) ----------------
+
+  applySlow(e, factor, dur) {
+    e.slowF = Math.min(factor, e.boss === 2 ? 0.75 : factor); // bosses resist chill
+    e.slowT = Math.max(e.slowT, dur);
+  }
+
+  applyDot(e, kind, dps, dur) {
+    // fire and poison are separate channels; re-applying refreshes the
+    // stronger of the two rather than stacking endlessly
+    if (kind === STATUS.POISON_KIND) {
+      e.poisonDps = Math.max(e.poisonDps * (e.poisonT > 0 ? 1 : 0), dps);
+      e.poisonT = Math.max(e.poisonT, dur);
+    } else {
+      e.burnDps = Math.max(e.burnDps * (e.burnT > 0 ? 1 : 0), dps);
+      e.burnT = Math.max(e.burnT, dur);
+    }
+  }
+
+  // burn/poison tick on a shared clock per enemy so the 'hit' flash
+  // doesn't spam every single frame
+  stepStatus(e, dt) {
+    if (e.slowT > 0) e.slowT = Math.max(e.slowT - dt, 0);
+    const burning = e.burnT > 0, poisoned = e.poisonT > 0;
+    if (!burning && !poisoned) return;
+    if (burning) e.burnT = Math.max(e.burnT - dt, 0);
+    if (poisoned) e.poisonT = Math.max(e.poisonT - dt, 0);
+    e.dotTick -= dt;
+    if (e.dotTick <= 0) {
+      e.dotTick = STATUS.DOT_TICK;
+      const dps = (burning ? e.burnDps : 0) + (poisoned ? e.poisonDps : 0);
+      if (dps > 0) this.damageEnemy(e, dps * STATUS.DOT_TICK, 0, 0, null);
+    }
+  }
+
+  // ---------------- burning ground (cannon napalm) ----------------
+
+  stepFires(dt) {
+    if (!this.fires.length) return;
+    this.fires = this.fires.filter((f) => f.until > this.time);
+    for (const f of this.fires) {
+      for (const e of this.enemies) {
+        if (e.flying) continue; // ghosts drift above the flames
+        const ep = e.vehicle.position;
+        if (dist2d(f.x, f.z, ep.x, ep.z) <= f.r + ENEMY.RADIUS) {
+          this.applyDot(e, STATUS.FIRE_KIND, f.dps, 1.0);
+        }
+      }
     }
   }
 
@@ -968,13 +1115,16 @@ export class Sim {
     if (this.phase === 'combat' && this.spawnQueue.length) {
       while (this.spawnQueue.length && this.spawnQueue[0].at <= this.time) {
         const s = this.spawnQueue.shift();
-        this.spawnEnemy(s.kind, s.boss, s.variant);
+        // the Zombie Horde announces itself once, on its first spawn
+        if (s.announce) this.emit({ t: 'boss', name: s.announce });
+        this.spawnEnemy(s.kind, s.boss, s.variant, null, s.horde || null, s.tier || 1);
       }
     }
 
     this.stepPlayers(dt);
     this.stepDrops(dt);
     this.stepGraves();
+    this.stepFires(dt);
     this.stepEnemies(dt);
     this.stepTowers(dt);
 
@@ -1087,6 +1237,12 @@ export class Sim {
     for (const e of this.enemies) {
       const pos = e.vehicle.position;
 
+      // status effects: burn/poison ticks + the chill slow, which
+      // throttles the vehicle's own top speed while it lasts
+      this.stepStatus(e, dt);
+      e.vehicle.maxSpeed = e.slowT > 0 ? e.speed * e.slowF : e.speed;
+      if (e.hp <= 0) continue; // a DoT tick just finished it off
+
       // mid-hop: sail along the arc over the vaulted cell, ignore
       // everything else (knockback keeps accumulating for the landing)
       if (e.jump) {
@@ -1163,24 +1319,47 @@ export class Sim {
         continue;
       }
 
-      // acquire / drop aggro
+      // aggro refractory period ticks down while marching
+      if (e.aggroCd > 0) e.aggroCd = Math.max(e.aggroCd - dt, 0);
+
+      // acquire aggro: nearest character in radius that passes the
+      // rules — clear straight path, and the crystal not closer
       if (e.state === 'path' && alive.length) {
         let best = null, bestD = Infinity;
         for (const p of alive) {
           const d = dist2d(pos.x, pos.z, p.x, p.z);
-          if (d < bestD) { bestD = d; best = p; }
+          if (d < bestD && d < ENEMY.AGGRO_RADIUS && this.canAggro(e, p, d)) {
+            bestD = d; best = p;
+          }
         }
-        if (best && bestD < ENEMY.AGGRO_RADIUS) {
-          e.state = 'chase';
-          e.targetId = best.id;
-        }
+        if (best) this.startChase(e, best);
       }
 
       let target = null;
       if (e.state === 'chase') {
         target = this.getPlayer(e.targetId);
-        if (!target || target.dead ||
-            dist2d(pos.x, pos.z, target.x, target.z) > ENEMY.LEASH_RADIUS) {
+        const td = target && !target.dead
+          ? dist2d(pos.x, pos.z, target.x, target.z) : Infinity;
+        // drop the chase when: target gone/dead, out of leash, or a
+        // wall/tower got between us (ghosts fly over, so they keep it)
+        let drop = !target || target.dead || td > ENEMY.LEASH_RADIUS ||
+          (!e.flying && !this.hasLos(pos.x, pos.z, target.x, target.z));
+        // anti-kiting: being walked back away from the crystal charges
+        // the drag timer; hold long enough and the enemy shrugs it off
+        if (!drop && target) {
+          const cd = dist2d(pos.x, pos.z, CRYSTAL_POS.x, CRYSTAL_POS.z);
+          if (cd < e.chaseBestD) e.chaseBestD = cd;
+          if (cd > e.chaseBestD + ENEMY.DRAG_SLACK) {
+            e.dragT = (e.dragT || 0) + dt;
+            if (e.dragT >= ENEMY.DRAG_TIME) {
+              drop = true;
+              e.aggroCd = ENEMY.AGGRO_REFRACT; // commit to the path a while
+            }
+          } else if (e.dragT > 0) {
+            e.dragT = Math.max(e.dragT - dt * 0.6, 0);
+          }
+        }
+        if (drop) {
           e.state = 'path';
           e.targetId = null;
           target = null;
@@ -1291,42 +1470,83 @@ export class Sim {
       const w = cellToWorld(t.c, t.r);
       // target the enemy closest to the crystal that is inside range
       let best = null, bestScore = Infinity, bestD = 0;
+      const inRange = []; // reused by the multi-target specials
       for (const e of this.enemies) {
         const ep = e.vehicle.position;
         const d = dist2d(w.x, w.z, ep.x, ep.z);
-        if (d > st.range || d < st.minRange) continue;
+        if (d > st.range + (st.pulse ? ENEMY.RADIUS : 0) || d < st.minRange) continue;
+        inRange.push({ e, d });
         const score = dist2d(ep.x, ep.z, CRYSTAL_POS.x, CRYSTAL_POS.z);
         if (score < bestScore) { bestScore = score; best = e; bestD = d; }
       }
       if (!best) continue;
+
+      // ---- crystal: pulse a blast centred on the tower itself ----
+      if (st.pulse) {
+        if (t.cd > 0) continue;
+        t.cd = 1 / st.rate;
+        this.crystalPulse(t, st, w, inRange);
+        continue;
+      }
+
       const bp = best.vehicle.position;
       t.rot = Math.atan2(bp.x - w.x, bp.z - w.z);
       if (t.cd > 0) continue;
       t.cd = 1 / st.rate;
+
+      // ---- flamethrower: instant jet + burning/poison DoT ----
+      if (st.jet) {
+        this.flameJet(t, st, w, best, bestD);
+        continue;
+      }
+
+      // ---- ballista specials ----
+      if (t.kind === 'ballista' && t.spec === 'triple') {
+        // 3 arrows at up to 3 different targets (closest to the crystal)
+        inRange.sort((a, b) =>
+          dist2d(a.e.vehicle.position.x, a.e.vehicle.position.z, CRYSTAL_POS.x, CRYSTAL_POS.z) -
+          dist2d(b.e.vehicle.position.x, b.e.vehicle.position.z, CRYSTAL_POS.x, CRYSTAL_POS.z));
+        for (let i = 0; i < 3; i++) {
+          const f = inRange[i % inRange.length];
+          this.shootBolt(t, st, w, f.e, f.d);
+        }
+        continue;
+      }
+      if (t.kind === 'ballista' && t.spec === 'pierce') {
+        this.shootPiercing(t, st, w, best, bestD);
+        continue;
+      }
 
       const ft = bestD / st.projSpeed;
       // lead the target a bit so slow shells still connect
       const bv = best.vehicle.velocity;
       const tx = bp.x + bv.x * ft * 0.7;
       const tz = bp.z + bv.z * ft * 0.7;
+
+      // ---- catapult scatter: 5 spreading metal balls ----
+      if (t.kind === 'catapult' && t.spec === 'scatter') {
+        const S = TOWER_SPECIALS.catapult.scatter;
+        for (let i = 0; i < S.balls; i++) {
+          const ang = Math.random() * Math.PI * 2;
+          const rad = i === 0 ? 0 : Math.random() * S.spread;
+          const ix = tx + Math.cos(ang) * rad, iz = tz + Math.sin(ang) * rad;
+          const fti = ft * (0.9 + Math.random() * 0.25);
+          this.emit({
+            t: 'shoot', k: 'cannonball', lob: 1, small: 1,
+            f: [rnd2(w.x), 1.1, rnd2(w.z)], to: [rnd2(ix), 0.4, rnd2(iz)], ft: rnd2(fti),
+          });
+          this.aoeAt(ix, iz, st.aoe * 0.75, st.dmg * S.dmgMult, 'cannonball', fti, t);
+        }
+        continue;
+      }
+
       this.emit({
         t: 'shoot', k: st.ammo, lob: st.lob ? 1 : 0,
         f: [rnd2(w.x), 1.1, rnd2(w.z)], to: [rnd2(tx), 0.4, rnd2(tz)], ft: rnd2(ft),
       });
 
       if (st.aoe > 0) {
-        const cx = tx, cz = tz, dmg = st.dmg, r = st.aoe, kind = st.ammo;
-        this.pending.push({ at: this.time + ft, fn: () => {
-          this.emit({ t: 'aoe', x: rnd2(cx), z: rnd2(cz), r, k: kind, ft: 0 });
-          for (const e of [...this.enemies.entities]) {
-            const ep = e.vehicle.position;
-            const d = dist2d(cx, cz, ep.x, ep.z);
-            if (d <= r + ENEMY.RADIUS) {
-              const n = Math.max(d, 0.2);
-              this.damageEnemy(e, dmg, ((ep.x - cx) / n) * 1.2, ((ep.z - cz) / n) * 1.2, null);
-            }
-          }
-        }});
+        this.aoeAt(tx, tz, st.aoe, st.dmg, st.ammo, ft, t);
       } else {
         const id = best.id, dmg = st.dmg;
         this.pending.push({ at: this.time + ft, fn: () => {
@@ -1334,6 +1554,137 @@ export class Sim {
           if (e) this.damageEnemy(e, dmg, 0, 0, null);
         }});
       }
+    }
+  }
+
+  // area blast at a point after `ft` seconds; cannon napalm leaves the
+  // ground burning where the shell lands
+  aoeAt(cx, cz, r, dmg, kind, ft, t) {
+    const napalm = t.kind === 'cannon' && t.spec === 'napalm'
+      ? TOWER_SPECIALS.cannon.napalm : null;
+    this.pending.push({ at: this.time + ft, fn: () => {
+      this.emit({ t: 'aoe', x: rnd2(cx), z: rnd2(cz), r, k: kind, ft: 0 });
+      for (const e of [...this.enemies.entities]) {
+        const ep = e.vehicle.position;
+        const d = dist2d(cx, cz, ep.x, ep.z);
+        if (d <= r + ENEMY.RADIUS) {
+          const n = Math.max(d, 0.2);
+          this.damageEnemy(e, dmg, ((ep.x - cx) / n) * 1.2, ((ep.z - cz) / n) * 1.2, null);
+        }
+      }
+      if (napalm) {
+        this.fires.push({ x: cx, z: cz, r: r * 0.85, dps: napalm.dps, until: this.time + napalm.dur });
+        this.emit({ t: 'gfire', x: rnd2(cx), z: rnd2(cz), r: rnd2(r * 0.85), dur: napalm.dur });
+      }
+    }});
+  }
+
+  // single ballista bolt (also each arrow of the triple volley)
+  shootBolt(t, st, w, target, dist) {
+    const ft = dist / st.projSpeed;
+    const tp = target.vehicle.position;
+    const tv = target.vehicle.velocity;
+    const tx = tp.x + tv.x * ft * 0.7, tz = tp.z + tv.z * ft * 0.7;
+    this.emit({
+      t: 'shoot', k: st.ammo, lob: 0,
+      f: [rnd2(w.x), 1.1, rnd2(w.z)], to: [rnd2(tx), 0.4, rnd2(tz)], ft: rnd2(ft),
+    });
+    const id = target.id, dmg = st.dmg;
+    this.pending.push({ at: this.time + ft, fn: () => {
+      const e = this.enemies.entities.find((n) => n.id === id);
+      if (e) this.damageEnemy(e, dmg, 0, 0, null);
+    }});
+  }
+
+  // piercing bolt: flies the full range along the target's direction,
+  // damaging EVERY enemy near that line
+  shootPiercing(t, st, w, target, dist) {
+    const tp = target.vehicle.position;
+    const n = Math.max(dist, 0.2);
+    const dx = (tp.x - w.x) / n, dz = (tp.z - w.z) / n;
+    const ex = w.x + dx * st.range, ez = w.z + dz * st.range;
+    const ft = st.range / st.projSpeed;
+    this.emit({
+      t: 'shoot', k: st.ammo, lob: 0, pierce: 1,
+      f: [rnd2(w.x), 1.1, rnd2(w.z)], to: [rnd2(ex), 0.6, rnd2(ez)], ft: rnd2(ft),
+    });
+    const dmg = st.dmg;
+    // each enemy near the line is hit when the bolt reaches its distance
+    for (const e of this.enemies) {
+      const ep = e.vehicle.position;
+      const along = (ep.x - w.x) * dx + (ep.z - w.z) * dz;
+      if (along < 0 || along > st.range) continue;
+      const off = Math.hypot(ep.x - (w.x + dx * along), ep.z - (w.z + dz * along));
+      if (off > ENEMY.RADIUS + 0.35) continue;
+      const id = e.id;
+      this.pending.push({ at: this.time + (along / st.range) * ft, fn: () => {
+        const hit = this.enemies.entities.find((q) => q.id === id);
+        if (hit) this.damageEnemy(hit, dmg, 0, 0, null);
+      }});
+    }
+  }
+
+  // crystal tower pulse: mage-style blast centred on the tower. Ice
+  // spec chills everything hit; storm spec arcs damage between enemies
+  // that are bunched close together.
+  crystalPulse(t, st, w, inRange) {
+    const spec = t.spec ? TOWER_SPECIALS.crystal[t.spec] : null;
+    const kind = t.spec === 'ice' ? 'ice' : t.spec === 'storm' ? 'storm' : 'crystal';
+    this.emit({ t: 'aoe', x: rnd2(w.x), z: rnd2(w.z), r: rnd2(st.aoe), k: kind, ft: 0 });
+    const hitIds = new Set();
+    for (const { e, d } of inRange) {
+      const ep = e.vehicle.position;
+      const n = Math.max(d, 0.4);
+      this.damageEnemy(e, st.dmg, ((ep.x - w.x) / n) * 0.8, ((ep.z - w.z) / n) * 0.8, null);
+      hitIds.add(e.id);
+      if (t.spec === 'ice') {
+        this.applySlow(e, spec.slowF, spec.slowDur);
+      }
+    }
+    if (t.spec === 'storm') {
+      // arcs: every enemy OUTSIDE the pulse that hugs someone inside it
+      // takes a share of the damage (one arc each, no chain reactions)
+      for (const { e } of inRange) {
+        if (e.hp <= 0) continue;
+        const ep = e.vehicle.position;
+        for (const o of [...this.enemies.entities]) {
+          if (hitIds.has(o.id) || o.hp <= 0) continue;
+          const op = o.vehicle.position;
+          if (dist2d(ep.x, ep.z, op.x, op.z) <= spec.chainR) {
+            hitIds.add(o.id);
+            this.emit({
+              t: 'zap', x1: rnd2(ep.x), z1: rnd2(ep.z), x2: rnd2(op.x), z2: rnd2(op.z),
+            });
+            this.damageEnemy(o, st.dmg * spec.chainMult, 0, 0, null);
+          }
+        }
+      }
+    }
+  }
+
+  // flamethrower jet: cone toward the target — impact damage plus a
+  // fire (or venom) DoT on everything the spray washes over
+  flameJet(t, st, w, target, dist) {
+    const venom = t.spec === 'venom' ? TOWER_SPECIALS.flame.venom : null;
+    const tp = target.vehicle.position;
+    const n = Math.max(dist, 0.2);
+    const dx = (tp.x - w.x) / n, dz = (tp.z - w.z) / n;
+    const reach = st.range, halfW = st.aoe * (venom ? venom.aoeMult : 1) * 0.5;
+    const dur = st.burnDur * (venom ? venom.durMult : 1);
+    const dps = st.burnDps * (venom ? venom.dpsMult : 1);
+    this.emit({
+      t: 'flame', x: rnd2(w.x), z: rnd2(w.z),
+      tx: rnd2(w.x + dx * reach), tz: rnd2(w.z + dz * reach),
+      v: venom ? 1 : 0,
+    });
+    for (const e of this.enemies) {
+      const ep = e.vehicle.position;
+      const along = (ep.x - w.x) * dx + (ep.z - w.z) * dz;
+      if (along < 0 || along > reach + ENEMY.RADIUS) continue;
+      const off = Math.hypot(ep.x - (w.x + dx * along), ep.z - (w.z + dz * along));
+      if (off > halfW + ENEMY.RADIUS) continue;
+      this.damageEnemy(e, st.dmg, 0, 0, null);
+      if (e.hp > 0) this.applyDot(e, venom ? STATUS.POISON_KIND : STATUS.FIRE_KIND, dps, dur);
     }
   }
 
@@ -1367,8 +1718,13 @@ export class Sim {
         e.id, e.kind, rnd2(e.vehicle.position.x), rnd2(e.vehicle.position.z),
         rnd2(e.yaw), Math.ceil(e.hp), Math.ceil(e.maxHp), e.scale, e.boss,
         e.movingFlag ? 1 : 0,
+        // status flags bitmask (slow|burn|poison|stun) for client FX
+        (e.slowT > 0 ? 1 : 0) | (e.burnT > 0 ? 2 : 0) |
+        (e.poisonT > 0 ? 4 : 0) | (e.stunT > 0 ? 8 : 0),
+        // visual variant (stage-2/3 look, Brutus props) — see spawnEnemy
+        e.vr,
       ]),
-      tw: this.towers.entities.map((t) => [t.id, t.kind, t.c, t.r, t.lvl, rnd2(t.rot)]),
+      tw: this.towers.entities.map((t) => [t.id, t.kind, t.c, t.r, t.lvl, rnd2(t.rot), t.spec || 0]),
       ob: this.obstacles.entities.map((o) => [o.id, o.kind, o.c, o.r]),
       gr: this.graves.map((g) => [g.id, rnd2(g.x), rnd2(g.z)]),
       dr: this.drops.map((d) => [

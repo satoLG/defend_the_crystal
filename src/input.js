@@ -24,6 +24,7 @@ export class Input {
       this.keys.add(e.code);
       const map = {
         KeyB: 'build', Digit1: 'card0', Digit2: 'card1', Digit3: 'card2', Digit4: 'card3',
+        Digit5: 'card4', Digit6: 'card5',
         Escape: 'cancel', Space: 'startwave', KeyJ: 'jump', KeyK: 'skill',
       };
       if (map[e.code]) {
