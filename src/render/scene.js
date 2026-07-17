@@ -39,11 +39,12 @@ export class GameScene {
     //                while strolling the sanctuary between waves
     // pitch/yaw are radians; zoom scales the distance (higher = closer):
     // partida.zoom on the auto-fit board distance, checkpoint.zoom on the
-    // follow distance. Defaults mirror the original hard-coded framing.
+    // follow distance. panX/panY/panZ (partida only) shift the point the
+    // board camera orbits and looks at, world units off this.lookTarget.
     this.CHK_BASE_DIST = 15; // follow-cam distance at zoom 1
     this.camCfg = {
-      partida:    { pitch: 0.98, yaw: 0, zoom: 1 },
-      checkpoint: { pitch: 0.98, yaw: 0, zoom: 1 },
+      partida:    { pitch: 0.98, yaw: 0, zoom: 1, panX: 0, panY: 0, panZ: 0 },
+      checkpoint: { pitch: 35 * Math.PI / 180, yaw: 0, zoom: 1 },
     };
     this._recalcCamDirs();
 
@@ -856,8 +857,16 @@ export class GameScene {
     this.fitCamera();
   }
 
+  // the point the partida (board) camera orbits and looks at — the base
+  // look target shifted by the pan controls
+  _boardTarget() {
+    const c = this.camCfg.partida;
+    return this.lookTarget.clone().add(new THREE.Vector3(c.panX || 0, c.panY || 0, c.panZ || 0));
+  }
+
   // binary-search the camera distance so the whole board fits
   fitCamera() {
+    const target = this._boardTarget();
     const corners = [
       new THREE.Vector3(-HALF_W - 0.8, 0, -HALF_H - 1.2),
       new THREE.Vector3(HALF_W + 0.8, 0, -HALF_H - 1.2),
@@ -871,7 +880,7 @@ export class GameScene {
     let lo = 8, hi = 130;
     for (let it = 0; it < 22; it++) {
       const mid = (lo + hi) / 2;
-      this.placeCamera(mid);
+      this.placeCamera(mid, target);
       let fits = true;
       for (const c of corners) {
         const p = c.clone().project(this.camera);
@@ -879,21 +888,22 @@ export class GameScene {
       }
       if (fits) hi = mid; else lo = mid;
     }
-    this.placeCamera(hi);
+    this.placeCamera(hi, target);
     this.fitDist = hi;
-    this._applyBoardZoom();
+    this._applyBoardZoom(target);
   }
 
   // the board framing sits at the fitted distance divided by the zoom
   // multiplier (higher zoom = closer), along the partida view direction
-  _applyBoardZoom() {
+  _applyBoardZoom(target = this._boardTarget()) {
     const d = (this.fitDist || 30) / (this.camCfg.partida.zoom || 1);
-    this.baseCamPos = this.lookTarget.clone().addScaledVector(this.boardDir, d);
+    this.baseCamPos = target.clone().addScaledVector(this.boardDir, d);
+    this.baseCamLook = target;
   }
 
-  placeCamera(dist) {
-    this.camera.position.copy(this.lookTarget).addScaledVector(this.boardDir, dist);
-    this.camera.lookAt(this.lookTarget);
+  placeCamera(dist, target = this.lookTarget) {
+    this.camera.position.copy(target).addScaledVector(this.boardDir, dist);
+    this.camera.lookAt(target);
     this.camera.updateMatrixWorld();
     this.camera.updateProjectionMatrix();
   }
@@ -988,7 +998,7 @@ export class GameScene {
     // follow-cam, then layer shake on top
     this.followBlend += ((this.followGoal ? 1 : 0) - this.followBlend) * Math.min(dt * 2, 1);
     this._camPos.copy(this.baseCamPos || this.camera.position);
-    this._camLook.copy(this.lookTarget);
+    this._camLook.copy(this.baseCamLook || this.lookTarget);
     if (this.followBlend > 0.003) {
       if (this.followGoal) this.followPos.lerp(this.followGoal, Math.min(dt * 6, 1));
       const b = this.followBlend;

@@ -13,12 +13,28 @@ const KEY = 'dtc-cam';
 const DEG = 180 / Math.PI; // radians → degrees
 const RAD = Math.PI / 180; // degrees → radians
 
-// key, label, min, max, step, kind ('deg' sliders store radians, 'mult' raw)
-const FIELDS = [
+// key, label, min, max, step, kind:
+//   'deg'  slider shows degrees, stored as radians
+//   'mult' slider + stored value are the same multiplier
+//   'num'  slider + stored value are the same raw world units (pan)
+const COMMON_FIELDS = [
   ['pitch', 'Ângulo',   25,   85,   1,    'deg'],
   ['yaw',   'Rotação', -60,   60,   1,    'deg'],
   ['zoom',  'Zoom',     0.5,  2.0,  0.05, 'mult'],
 ];
+// partida only: shift the point the board camera orbits/looks at
+const PAN_FIELDS = [
+  ['panX', 'Pan X', -8, 8, 0.25, 'num'],
+  ['panY', 'Pan Y', -8, 8, 0.25, 'num'],
+  ['panZ', 'Pan Z', -8, 8, 0.25, 'num'],
+];
+const FIELDS_BY_MODE = {
+  partida: [...COMMON_FIELDS, ...PAN_FIELDS],
+  checkpoint: COMMON_FIELDS,
+};
+const KIND_OF = Object.fromEntries(
+  [...COMMON_FIELDS, ...PAN_FIELDS].map(([key, , , , , kind]) => [key, kind])
+);
 
 const load = () => {
   try { return JSON.parse(localStorage.getItem(KEY)) || null; } catch { return null; }
@@ -27,11 +43,16 @@ const save = (cfg) => {
   try { localStorage.setItem(KEY, JSON.stringify(cfg)); } catch { /* ok */ }
 };
 
-const fmt = (key, raw) => (key === 'zoom' ? `${raw.toFixed(2)}×` : `${Math.round(raw)}°`);
-// slider value (deg / multiplier) → stored config value (rad / multiplier)
-const toStored = (key, raw) => (key === 'zoom' ? raw : raw * RAD);
+const fmt = (key, raw) => {
+  const kind = KIND_OF[key];
+  if (kind === 'deg') return `${Math.round(raw)}°`;
+  if (kind === 'mult') return `${raw.toFixed(2)}×`;
+  return raw.toFixed(2); // num (world units)
+};
+// slider value (deg / multiplier / world units) → stored config value
+const toStored = (key, raw) => (KIND_OF[key] === 'deg' ? raw * RAD : raw);
 // stored config value → slider value
-const toSlider = (key, val) => (key === 'zoom' ? val : val * DEG);
+const toSlider = (key, val) => (KIND_OF[key] === 'deg' ? val * DEG : val);
 
 export function initCamTune(gs) {
   // capture the scene's original framing BEFORE restoring any saved one,
@@ -74,38 +95,44 @@ export function initCamTune(gs) {
   const rowsBox = panel.querySelector('#camtune-rows');
   const hintEl = panel.querySelector('#camtune-hint');
 
-  // build the three sliders once; remember each input + readout node
-  const rows = {};
-  for (const [key, label, min, max, step] of FIELDS) {
-    const row = document.createElement('div');
-    row.className = 'setting-row';
-    row.innerHTML =
-      `<label>${label}</label>` +
-      `<input type="range" min="${min}" max="${max}" step="${step}" />` +
-      `<span class="camtune-val muted"></span>`;
-    const input = row.querySelector('input');
-    const val = row.querySelector('.camtune-val');
-    input.addEventListener('input', () => {
-      const raw = Number(input.value);
-      gs.setCamCfg(mode, key, toStored(key, raw));
-      val.textContent = fmt(key, raw);
-      save(gs.getCamCfg());
-    });
-    rowsBox.appendChild(row);
-    rows[key] = { input, val };
+  // fields differ per mode (partida also gets pan X/Y/Z), so the slider
+  // rows are rebuilt whenever the active mode changes
+  let rows = {};
+  function buildRows() {
+    rowsBox.innerHTML = '';
+    rows = {};
+    for (const [key, label, min, max, step] of FIELDS_BY_MODE[mode]) {
+      const row = document.createElement('div');
+      row.className = 'setting-row';
+      row.innerHTML =
+        `<label>${label}</label>` +
+        `<input type="range" min="${min}" max="${max}" step="${step}" />` +
+        `<span class="camtune-val muted"></span>`;
+      const input = row.querySelector('input');
+      const val = row.querySelector('.camtune-val');
+      input.addEventListener('input', () => {
+        const raw = Number(input.value);
+        gs.setCamCfg(mode, key, toStored(key, raw));
+        val.textContent = fmt(key, raw);
+        save(gs.getCamCfg());
+      });
+      rowsBox.appendChild(row);
+      rows[key] = { input, val };
+    }
   }
 
   // reflect the active mode's config onto the sliders + tabs + hint
   function paint() {
+    buildRows();
     const cfg = gs.getCamCfg()[mode];
-    for (const [key] of FIELDS) {
+    for (const [key] of FIELDS_BY_MODE[mode]) {
       const raw = toSlider(key, cfg[key]);
       rows[key].input.value = raw;
       rows[key].val.textContent = fmt(key, raw);
     }
     hintEl.textContent = mode === 'checkpoint'
       ? 'Segue o herói entre as waves — ângulo, rotação e zoom próprios.'
-      : 'Enquadramento fixo do tabuleiro durante a wave.';
+      : 'Enquadramento fixo do tabuleiro durante a wave — Pan X/Y/Z desloca o ponto observado.';
     for (const t of panel.querySelectorAll('.pet-tab'))
       t.classList.toggle('active', t.dataset.mode === mode);
   }
