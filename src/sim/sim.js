@@ -93,7 +93,7 @@ export class Sim {
     if (this.phase !== 'lobby') {
       // late joiner: give them the starting obstacle stock
       p.obst = scaleFor(SCALING.startObstacles, this.playerCount());
-      this.emit({ t: 'toast', msg: `${p.name} joined the defense!` });
+      this.emit({ t: 'toast', k: 'toast.joined', pr: { name: p.name } });
     }
     return p;
   }
@@ -103,7 +103,7 @@ export class Sim {
     if (!p) return;
     this.world.remove(p);
     this.contReady.delete(id);
-    if (this.phase !== 'lobby') this.emit({ t: 'toast', msg: `${p.name} left.` });
+    if (this.phase !== 'lobby') this.emit({ t: 'toast', k: 'toast.left', pr: { name: p.name } });
     this.checkContinue();
   }
 
@@ -325,7 +325,9 @@ export class Sim {
     }
   }
 
-  deny(p, msg) { this.emit({ t: 'toast', msg, to: p.id, kind: 'error' }); }
+  // `key` is an i18n toast key; clients translate it into their own
+  // language so the host's language never leaks across the wire
+  deny(p, key) { this.emit({ t: 'toast', k: key, to: p.id, kind: 'error' }); }
 
   cellContents(c, r) {
     for (const t of this.towers) if (t.c === c && t.r === r) return { tower: t };
@@ -343,20 +345,20 @@ export class Sim {
     if (this.phase === 'over' || this.phase === 'lobby') return;
     const isObstacle = item === 'obstacle';
     if (!isObstacle && !TOWERS[item]) return;
-    if (isObstacle && p.obst < 1) return this.deny(p, 'No blocks left — earn more each wave');
+    if (isObstacle && p.obst < 1) return this.deny(p, 'toast.noBlocks');
     const towerDef = TOWERS[item];
-    if (towerDef && this.points < towerDef.cost) return this.deny(p, 'Not enough crystals');
-    if (this.cellContents(c, r)) return this.deny(p, 'That spot is taken');
-    if (!this.grid.isBuildable(c, r)) return this.deny(p, "Can't build there");
+    if (towerDef && this.points < towerDef.cost) return this.deny(p, 'toast.notEnoughCrystals');
+    if (this.cellContents(c, r)) return this.deny(p, 'toast.spotTaken');
+    if (!this.grid.isBuildable(c, r)) return this.deny(p, 'toast.cantBuildThere');
     if (!this.grid.canPlaceAt(c, r, this.enemyCells())) {
-      return this.deny(p, "You can't fully block the path!");
+      return this.deny(p, 'toast.cantBlockPath');
     }
     // don't build on top of a character
     for (const q of this.players) {
       if (!q.dead) {
         const w = cellToWorld(c, r);
         if (Math.abs(q.x - w.x) < 1 + PLAYER.RADIUS && Math.abs(q.z - w.z) < 1 + PLAYER.RADIUS) {
-          return this.deny(p, 'Someone is standing there');
+          return this.deny(p, 'toast.someoneStanding');
         }
       }
     }
@@ -389,9 +391,9 @@ export class Sim {
     const found = this.cellContents(c, r);
     if (!found?.tower) return;
     const t = found.tower;
-    if (t.lvl >= TOWER_LEVEL_MAX) return this.deny(p, 'Already at max level');
+    if (t.lvl >= TOWER_LEVEL_MAX) return this.deny(p, 'toast.alreadyMaxLevel');
     const cost = Math.round(TOWERS[t.kind].cost * TOWER_UPGRADE.costMult[t.lvl]);
-    if (this.points < cost) return this.deny(p, 'Not enough crystals');
+    if (this.points < cost) return this.deny(p, 'toast.notEnoughCrystals');
     this.points -= cost;
     t.lvl += 1;
     t.invested += cost;
@@ -406,8 +408,8 @@ export class Sim {
     const t = found.tower;
     const def = TOWER_SPECIALS[t.kind]?.[spec];
     if (!def) return;
-    if (t.spec) return this.deny(p, 'This tower already has its special');
-    if (this.points < def.cost) return this.deny(p, 'Not enough crystals');
+    if (t.spec) return this.deny(p, 'toast.towerHasSpecial');
+    if (this.points < def.cost) return this.deny(p, 'toast.notEnoughCrystals');
     this.points -= def.cost;
     t.spec = spec;
     t.invested += def.cost;
@@ -517,7 +519,7 @@ export class Sim {
       if (d <= range + ENEMY.RADIUS) foes.push({ e, d });
     }
     if (!foes.length) {
-      if (p.skillCd <= 0) this.deny(p, 'No enemies in range');
+      if (p.skillCd <= 0) this.deny(p, 'toast.noEnemiesInRange');
       return false;
     }
     foes.sort((a, b) => a.d - b.d);
@@ -553,7 +555,7 @@ export class Sim {
       if (d < bestD) { bestD = d; best = e; }
     }
     if (!best || bestD > p.range * S.rangeMult + ENEMY.RADIUS) {
-      this.deny(p, 'No enemies in range');
+      this.deny(p, 'toast.noEnemiesInRange');
       return false;
     }
     const tp = best.vehicle.position;
@@ -676,8 +678,10 @@ export class Sim {
     const ev = { t: 'spawn', id: e.id, kind, boss };
     if (at) { ev.g = 1; ev.x = rnd2(w.x); ev.z = rnd2(w.z); } // rose from a tomb
     this.emit(ev);
-    if (boss === 2) this.emit({ t: 'boss', name: bossDef?.name || def.name || kind });
-    else if (boss === 1) this.emit({ t: 'subboss', name: def.name || kind });
+    // carry the boss VARIANT / enemy KIND so clients localize the name &
+    // flavor themselves (name kept as a fallback for older clients)
+    if (boss === 2) this.emit({ t: 'boss', variant, kind, name: bossDef?.name || def.name || kind });
+    else if (boss === 1) this.emit({ t: 'subboss', kind, name: def.name || kind });
     return e;
   }
 
@@ -1116,7 +1120,7 @@ export class Sim {
       while (this.spawnQueue.length && this.spawnQueue[0].at <= this.time) {
         const s = this.spawnQueue.shift();
         // the Zombie Horde announces itself once, on its first spawn
-        if (s.announce) this.emit({ t: 'boss', name: s.announce });
+        if (s.announce) this.emit({ t: 'boss', variant: s.announce });
         this.spawnEnemy(s.kind, s.boss, s.variant, null, s.horde || null, s.tier || 1);
       }
     }

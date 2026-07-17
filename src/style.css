@@ -199,7 +199,16 @@ input:focus { border-color: var(--gold); }
   width: calc(80% * var(--v)); border-radius: 3px; background: var(--gold);
 }
 
-.menu-actions { margin-top: 14px; }
+/* stack action buttons with real breathing room — previously the
+   Try again / Back to menu pair (and others) sat flush against each
+   other. The flex gap owns the spacing, so zero the big buttons' own
+   top margin here to avoid doubling it up. */
+.menu-actions {
+  margin-top: 16px;
+  display: flex; flex-direction: column; gap: 12px;
+}
+.menu-actions > .btn.big { margin-top: 0; }
+.menu-actions > #join-block { margin-top: 4px; }
 .menu-panel { position: relative; }
 
 /* ---------- start screen ---------- */
@@ -327,12 +336,17 @@ input:focus { border-color: var(--gold); }
 }
 
 #hud-bottom {
-  position: absolute; bottom: max(10px, env(safe-area-inset-bottom)); left: 50%;
-  transform: translateX(-50%);
+  position: absolute; bottom: max(10px, env(safe-area-inset-bottom));
+  left: 0; right: 0;
   display: flex; gap: 7px; align-items: stretch;
+  /* centered when the row fits, but `safe` keeps the leftmost cards
+     reachable once it overflows and has to scroll sideways */
+  justify-content: safe center;
   padding: 0 8px;
-  /* six build cards now — allow a sideways scroll on narrow phones */
-  max-width: 100vw; overflow-x: auto; scrollbar-width: none;
+  /* six build cards — scroll sideways on narrow phones (the wave-advance
+     button no longer lives here, it moved to the top-right action slot) */
+  overflow-x: auto; overflow-y: hidden; scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
 }
 #hud-bottom::-webkit-scrollbar { display: none; }
 .build-card {
@@ -352,7 +366,25 @@ input:focus { border-color: var(--gold); }
 .bc-name { font-size: 0.62rem; text-transform: uppercase; letter-spacing: 0.5px; }
 .bc-cost { font-size: 0.68rem; color: var(--gold); font-weight: 700; }
 
-#startwave-btn { min-width: 74px; border-radius: 12px; line-height: 1.15; font-size: 0.85rem; }
+/* top-right action slot — mirrors the health bar on the left, sitting at
+   the same height but on the right edge, clear of the top chip row and
+   the tower row along the bottom. Holds whichever wave-advance action is
+   live: Start wave (build phase) or Keep going (checkpoint). */
+#hud-action {
+  position: absolute;
+  top: calc(max(8px, env(safe-area-inset-top)) + 44px);
+  right: 10px;
+  display: flex; flex-direction: column; align-items: flex-end; gap: 6px;
+  z-index: 11;
+}
+#hud-action .btn {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+  text-align: center;
+}
+#startwave-btn {
+  min-width: 96px; border-radius: 12px; line-height: 1.15; font-size: 0.9rem;
+}
+#cont-btn { min-width: 96px; white-space: nowrap; }
 
 #build-hint {
   position: absolute; bottom: calc(max(10px, env(safe-area-inset-bottom)) + 92px);
@@ -459,10 +491,22 @@ input:focus { border-color: var(--gold); }
 .spec-owned .muted { font-weight: 400; }
 
 /* ---------- toasts ---------- */
+/* centered announcements — only the wave banner rides here so it never
+   collides with the small feedback log tucked into the corner */
 #toasts {
   position: absolute; top: 26%; left: 50%; transform: translateX(-50%);
   display: flex; flex-direction: column; gap: 6px; align-items: center;
   pointer-events: none !important; width: 100%;
+}
+/* small warnings / feedback ("no enemies in range", "pet leveled up", …)
+   stack in the bottom-left corner just above the tower row, newest at the
+   bottom, so they stay out of the way during a wave */
+#log-toasts {
+  position: absolute; left: 8px;
+  bottom: calc(max(10px, env(safe-area-inset-bottom)) + 100px);
+  display: flex; flex-direction: column; gap: 5px; align-items: flex-start;
+  pointer-events: none !important; max-width: min(64vw, 320px);
+  z-index: 11;
 }
 .toast {
   background: rgba(15, 10, 28, 0.92); border: 1px solid var(--panel-border);
@@ -473,8 +517,35 @@ input:focus { border-color: var(--gold); }
 }
 .toast.error { border-color: var(--danger); color: #ffb0a8; }
 .toast.gold { color: var(--gold); }
+#log-toasts .toast {
+  align-self: flex-start; text-align: left;
+  font-size: 0.82rem; padding: 6px 13px; border-radius: 14px;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.5);
+  animation: logtoast-in 0.2s ease-out, toast-out 0.4s ease-in 2.2s forwards;
+}
 @keyframes toast-in { from { opacity: 0; transform: translateY(-12px) scale(0.9); } }
 @keyframes toast-out { to { opacity: 0; transform: translateY(-10px); } }
+@keyframes logtoast-in { from { opacity: 0; transform: translateX(-14px); } }
+
+/* ---------- language switcher (start screen + settings) ---------- */
+.lang-switch { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
+.start-panel .lang-switch { margin-top: 2px; }
+.lang-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 8px 14px; border-radius: 10px; cursor: pointer;
+  border: 2px solid rgba(240, 233, 216, 0.2); background: rgba(0, 0, 0, 0.3);
+  color: var(--text); font-family: inherit; font-weight: 700; font-size: 0.85rem;
+  touch-action: none; transition: border-color 0.12s, background 0.12s;
+}
+.lang-btn:hover { border-color: var(--gold); }
+.lang-btn.active {
+  border-color: var(--gold); background: rgba(232, 184, 75, 0.14);
+  color: var(--gold); box-shadow: 0 0 12px rgba(232, 184, 75, 0.25);
+}
+.lang-btn .flag { font-size: 1.15rem; line-height: 1; }
+.lang-row { flex-wrap: wrap; }
+.lang-row > label { flex: 0 0 auto; }
+.lang-row .lang-switch { margin-left: auto; }
 
 /* ---------- boss banner ---------- */
 #boss-banner {
@@ -553,7 +624,7 @@ input:focus { border-color: var(--gold); }
 @media (max-width: 420px) {
   .panel { padding: 16px 14px; }
   .build-card { min-width: 56px; padding: 6px 6px; }
-  #startwave-btn { min-width: 64px; font-size: 0.78rem; }
+  #hud-action .btn { min-width: 82px; font-size: 0.8rem; padding: 8px 10px; }
   .hud-chip { font-size: 0.82rem; padding: 4px 9px; }
 }
 

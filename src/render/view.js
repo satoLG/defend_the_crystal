@@ -3,6 +3,7 @@ import { instantiate, getTemplate } from './assets.js';
 import { buildTexture, applyTexture } from './customize.js';
 import { iconPaths } from '../icons.js';
 import { CLASSES, TOWERS, JUMP, ENEMIES, BOSSES, PETS, WEAPONS, classStarterWeapons } from '../config.js';
+import { t, bossNameByKind } from '../i18n.js';
 import { cellToWorld, CRYSTAL_POS, HALF_H, PLAZA } from '../sim/grid.js';
 import { lerp, angleLerp } from '../utils.js';
 import { sfx } from '../audio.js';
@@ -1148,8 +1149,8 @@ export class GameView {
     }
     if (isBoss) {
       // the boss announces itself: name floating over its head
-      const bossName = BOSS_BY_KIND[kind]?.name || def.name || kind;
-      const label = this.makeTextSprite(bossName.toUpperCase(), 0xffd24a, 2.1);
+      const bossLabel = bossNameByKind(kind);
+      const label = this.makeTextSprite(bossLabel.toUpperCase(), 0xffd24a, 2.1);
       label.position.y = (top + 0.62) / scale;
       a.group.add(label);
     }
@@ -1280,7 +1281,7 @@ export class GameView {
     const label = this.makeTextSprite(d.name, 0xffe9b8, 2.2);
     label.position.y = 2.0;
     a.group.add(label);
-    const bubble = this.makeTextSprite(d.bubble || 'Oi!', 0xffffff, 1.5);
+    const bubble = this.makeTextSprite(d.bubble || t('npc.greeting'), 0xffffff, 1.5);
     bubble.position.y = 2.5;
     bubble.visible = false;
     a.group.add(bubble);

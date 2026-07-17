@@ -81,6 +81,10 @@ export const PET = {
   // roughly twice the XP a player level does.
   XP_BASE: 50,
   XP_POW: 1.3,
+  // fraction of the owner's collected XP that feeds the companion. Pets
+  // are a long-haul progression, so by default they crawl up at half the
+  // rate the XP orbs would otherwise grant.
+  XP_GAIN: 0.5,
   NAME_MAX: 10,  // pet names render on overhead labels, keep them short
   CRIT_MULT: 2,  // tiger crits deal double damage
   DEF_CAP: 0.85, // total defense can never absorb more than this
@@ -189,27 +193,7 @@ export function petXpNext(lvl) {
   return Math.round(PET.XP_BASE * Math.pow(clampLvl(lvl), PET.XP_POW));
 }
 
-// short human line for the pet's CURRENT effect, shown in the pet panel
-export function petEffectText(petId, lvl) {
-  const fx = petEffects(petId, lvl);
-  const pc = (v) => `${Math.round((v - 1) * 100)}%`;
-  switch (petId) {
-    case 'dog': return `+${pc(fx.hp)} all base stats`;
-    case 'cat': return `+${pc(fx.spd)} move speed`;
-    case 'pig': return `+${pc(fx.pts)} points earned`;
-    case 'crab': return `+${Math.round(fx.def * 100)}% damage absorbed`;
-    case 'bunny': return `${Math.round(fx.luck * 100)}% chance to double gold`;
-    case 'fox': return `+${pc(fx.rate)} attack speed`;
-    case 'lion': return `+${pc(fx.atk)} damage`;
-    case 'tiger': return `${Math.round(fx.crit * 100)}% crit chance (×${PET.CRIT_MULT} damage)`;
-    case 'giraffe': return `+${fx.collect} collect radius (cells)`;
-    case 'elephant': return `-${Math.round(fx.kbResist * 100)}% knockback taken`;
-    case 'hog': return `attacks knock back (+${Math.round(fx.kbDealt * 100)}%)`;
-    case 'monkey': return `jump over ${fx.jump} blocks`;
-    case 'panda': return `+${pc(fx.regen)} health regen`;
-    default: return '';
-  }
-}
+// (petEffectText moved to i18n.js so its wording can be localized)
 
 // validate a {id, lvl, name} pet reference coming over the wire or from
 // storage; returns null when it isn't a real pet
@@ -389,27 +373,7 @@ export function weaponUpgradeCost(id, tier) {
   return Math.max(2, Math.round(def.price * (clampTier(tier) === 0 ? 1 : 1.6)));
 }
 
-// short human stat lines for the shop cards & the character sheet
-export function weaponStatText(id, tier) {
-  const def = WEAPONS[id];
-  if (!def) return '';
-  const fx = weaponEffects(id, tier);
-  const pc = (v) => `${v > 1 ? '+' : ''}${Math.round((v - 1) * 100)}%`;
-  const parts = [];
-  if (def.slot === 'shield') {
-    if (fx.def) parts.push(`+${Math.round(fx.def * 100)}% defense`);
-    parts.push(`${Math.round(fx.block * 100)}% block`);
-  } else {
-    if (fx.atk !== 1) parts.push(`${pc(fx.atk)} ${def.kind === 'magic' ? 'magic power' : 'damage'}`);
-    if (fx.rate !== 1) parts.push(`${pc(fx.rate)} atk speed`);
-    if (fx.crit) parts.push(`${Math.round(fx.crit * 100)}% crit`);
-    if (fx.range) parts.push(`+${fx.range.toFixed(1)} range`);
-    if (def.kind === 'magic' && !def.bolts && fx.aoe !== 1) parts.push(`${pc(fx.aoe)} blast area`);
-  }
-  if (fx.move !== 1) parts.push(`${pc(fx.move)} move speed`);
-  if (def.bonusText) parts.push(def.bonusText(def.stun ? fx.stun : fx.bolts));
-  return parts.join(' · ');
-}
+// (weaponStatText moved to i18n.js so its wording can be localized)
 
 // validate a {id, tier} weapon reference (wire / storage); `slot`
 // restricts to weapon-or-shield, `cls` to that class's arsenal

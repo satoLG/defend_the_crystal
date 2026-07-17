@@ -94,7 +94,7 @@ export function buildWavePlan(wave, playerCount) {
         at: 1 + (HORDE.WINDOW * i) / troops.length + Math.random() * 0.3,
       }));
       hordePlan.sort((a, b) => a.at - b.at);
-      hordePlan[0].announce = BOSSES[variant].name; // banner on first spawn
+      hordePlan[0].announce = variant; // banner on first spawn (localized client-side)
       return hordePlan;
     }
     plan.push({ kind: BOSSES[variant].kind, at: window * 0.7, boss: 2, variant });

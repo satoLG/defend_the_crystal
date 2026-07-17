@@ -1,10 +1,16 @@
 import {
   CLASSES, TOWERS, TOWER_LEVEL_MAX, TOWER_UPGRADE, TOWER_SPECIALS,
-  CRYSTAL_BREACH_LIMIT, SKILLS, NAME_MAX,
-  PETS, PET, petEffectText, petXpNext, petEffects,
-  WEAPONS, WEAPON_TIER_NAMES, WEAPON_TIER_MAX, CLASS_WEAPONS,
-  weaponEffects, weaponStatText, weaponUpgradeCost,
+  CRYSTAL_BREACH_LIMIT, NAME_MAX,
+  PETS, PET, petXpNext, petEffects,
+  WEAPONS, WEAPON_TIER_MAX, CLASS_WEAPONS,
+  weaponEffects, weaponUpgradeCost,
 } from './config.js';
+import {
+  t, applyStaticI18n, getLang, setLang, onLangChange,
+  className, classBlurb, classWeaponName, powerName, powerDesc,
+  petName, petBlurb, petEffectText, weaponName, weaponBlurb, weaponStatText,
+  tierName, towerName, towerSpecName, towerSpecDesc,
+} from './i18n.js';
 import { sfx, setSfxVolume } from './audio.js';
 import { normalizeRoomCode } from './utils.js';
 import { icon, mountIcons } from './icons.js';
@@ -19,19 +25,13 @@ const CLASS_COLORS = {
   berserker: '#ff6a4d', tanker: '#6a9cff', archer: '#7de87d', mage: '#c07dff',
 };
 
-// per-class stat bars + one-line special-power blurbs for the
-// character screen (kept here so the DOM layer owns its own copy)
+// per-class stat bars for the character screen (labels are localized keys
+// under statbar.*; kept here so the DOM layer owns its own copy)
 const STAT_BARS = {
-  berserker: [['ATK', 0.95], ['DEF', 0.55], ['RNG', 0.2], ['SPD', 0.6]],
-  tanker: [['ATK', 0.5], ['DEF', 0.95], ['RNG', 0.2], ['SPD', 0.4]],
-  archer: [['ATK', 0.5], ['DEF', 0.25], ['RNG', 0.8], ['SPD', 0.95]],
-  mage: [['ATK', 0.5], ['DEF', 0.5], ['RNG', 1], ['SPD', 0.6]],
-};
-const POWER_DESC = {
-  berserker: 'Rampage Dash — charge through the horde, hurling enemies aside.',
-  tanker: 'Wall Mode — become immovable with doubled defense for a while.',
-  archer: 'Arrow Storm — unleash rapid volleys at the nearest foes.',
-  mage: 'Arcane Orb — a giant blast dealing massive area damage.',
+  berserker: [['atk', 0.95], ['def', 0.55], ['rng', 0.2], ['spd', 0.6]],
+  tanker: [['atk', 0.5], ['def', 0.95], ['rng', 0.2], ['spd', 0.4]],
+  archer: [['atk', 0.5], ['def', 0.25], ['rng', 0.8], ['spd', 0.95]],
+  mage: [['atk', 0.5], ['def', 0.5], ['rng', 1], ['spd', 0.6]],
 };
 
 function randomHex() {
@@ -80,7 +80,7 @@ const weaponImgSrc = (weaponId, tier = 0) =>
 
 // tier badge chip (Normal / Gold / Crystal)
 const tierBadge = (tier) =>
-  `<span class="wpn-tier t${tier}">${WEAPON_TIER_NAMES[tier] || 'Normal'}</span>`;
+  `<span class="wpn-tier t${tier}">${tierName(tier)}</span>`;
 
 // ============================================================
 // All DOM: screens, HUD, build cards, panels, toasts.
@@ -113,6 +113,7 @@ export class UI {
     this.weaponPanelOpen = false;
 
     mountIcons();
+    applyStaticI18n();       // paint every [data-i18n*] node in the current language
     this.bindStart();
     this.bindMenu();
     this.bindCharacter();
@@ -123,6 +124,52 @@ export class UI {
     this.bindWeapons();
     this.bindOverlays();
     this.bindSettings();
+    this.bindLang();
+    // a language change re-paints the static chrome and re-renders every
+    // dynamic bit currently on screen, so the whole UI stays one language
+    onLangChange(() => this.retranslate());
+  }
+
+  // wire both language switchers (start screen + settings) and reflect
+  // the active language on their flag buttons
+  bindLang() {
+    for (const btn of document.querySelectorAll('[data-lang-switch] .lang-btn')) {
+      btn.addEventListener('click', () => {
+        sfx.click();
+        setLang(btn.dataset.lang); // explicit pick — overrides auto-detect
+      });
+    }
+    this.refreshLangButtons();
+  }
+
+  refreshLangButtons() {
+    const lang = getLang();
+    for (const btn of document.querySelectorAll('[data-lang-switch] .lang-btn')) {
+      btn.classList.toggle('active', btn.dataset.lang === lang);
+    }
+  }
+
+  // re-apply translations everywhere without a reload, so switching the
+  // language never leaves a half-translated screen behind
+  retranslate() {
+    applyStaticI18n();
+    this.refreshLangButtons();
+    this.renderRoster();
+    // re-render whatever dynamic panels are live
+    if (this.charDraft) { this.renderCharInfo(); }
+    if (this.petPanelOpen) this.renderPetPanel();
+    if (this.weaponPanelOpen) this.renderWeaponPanel();
+    if (this.petDetailOpen) this.renderPetDetail();
+    if (this.statsOpen && this._lastMe) { this._statsKey = null; this.renderStats(this._lastMe); }
+    if (this.selectedItem) this.renderBuildHint(); // rebuild the build-hint text
+    // one-shot texts set outside the static pass
+    this._goldShown = null; this._pbName = null; this._petHudKey = null;
+    if (this.lobbyPlayersCache) this.updateLobby(this.lobbyPlayersCache, this.selfIdCache);
+    if (this.roomCode) {
+      $('lobby-hint').textContent = this.isHost ? t('lobby.alliesMidBattle') : t('lobby.waitingHostStart');
+    }
+    const best = localStorage.getItem('dtc-best-wave');
+    if (best) $('best-wave').textContent = t('menu.bestRun', { n: best });
   }
 
   // the live 3D preview is created once assets are ready (main.js)
@@ -172,14 +219,14 @@ export class UI {
         `<span class="hero-thumb" style="color:${color}">${icon('cls-' + c.cls)}</span>
          <span class="hero-meta">
            <span class="hero-name"></span>
-           <span class="hero-cls">${CLASSES[c.cls]?.name || ''}</span>
+           <span class="hero-cls">${className(c.cls)}</span>
          </span>
          <span class="hero-actions">
-           <span class="hc-btn" data-act="edit" title="Edit">${icon('gear')}</span>
-           ${canDelete ? `<span class="hc-btn hc-del" data-act="del" title="Delete">${icon('x')}</span>` : ''}
+           <span class="hc-btn" data-act="edit" title="${t('tip.settings')}">${icon('gear')}</span>
+           ${canDelete ? `<span class="hc-btn hc-del" data-act="del" title="${t('common.close')}">${icon('x')}</span>` : ''}
          </span>`;
       // names are user input — set as text, never as HTML
-      card.querySelector('.hero-name').textContent = c.name.trim() || 'Hero';
+      card.querySelector('.hero-name').textContent = c.name.trim() || t('common.hero');
       host.appendChild(card);
     }
     const add = document.createElement('button');
@@ -188,26 +235,38 @@ export class UI {
     add.innerHTML =
       `<span class="hero-thumb add-thumb">${icon('sparkle')}</span>
        <span class="hero-meta">
-         <span class="hero-name">New hero</span>
-         <span class="hero-cls muted">Create a character</span>
+         <span class="hero-name">${t('menu.newHero')}</span>
+         <span class="hero-cls muted">${t('menu.createCharacter')}</span>
        </span>`;
     host.appendChild(add);
   }
 
+  // small warnings / feedback — tucked into the bottom-left corner log so
+  // they never cover the field mid-wave (newest sits at the bottom)
   toast(msg, kind = '') {
+    const el = document.createElement('div');
+    el.className = `toast ${kind}`;
+    el.textContent = msg;
+    $('log-toasts').appendChild(el);
+    setTimeout(() => el.remove(), 2800);
+    if (kind === 'error') sfx.error();
+  }
+
+  // centered announcement (only the wave banner uses this) — the one
+  // message that's allowed to sit in the middle of the screen
+  announce(msg, kind = '') {
     const el = document.createElement('div');
     el.className = `toast ${kind}`;
     el.textContent = msg;
     $('toasts').appendChild(el);
     setTimeout(() => el.remove(), 2800);
-    if (kind === 'error') sfx.error();
   }
 
   // huge dramatic splash when a (mini-)boss stomps onto the field
   showBossBanner(name, flavor, mini = false) {
     const b = $('boss-banner');
     clearTimeout(this._bannerT);
-    $('bb-tag').textContent = mini ? '⚠ MINI-BOSS ⚠' : '☠ BOSS INCOMING ☠';
+    $('bb-tag').textContent = mini ? t('hud.miniBoss') : t('hud.bossIncoming');
     $('bb-name').textContent = name;
     $('bb-flavor').textContent = flavor || '';
     b.classList.remove('hidden', 'boss', 'mini');
@@ -220,7 +279,7 @@ export class UI {
 
   loadProgress(frac) {
     $('load-fill').style.width = `${Math.round(frac * 100)}%`;
-    if (frac >= 1) $('load-label').textContent = 'Ready!';
+    if (frac >= 1) $('load-label').textContent = t('start.ready');
   }
 
   // ---------------- start screen ----------------
@@ -262,7 +321,7 @@ export class UI {
   // ---------------- menu ----------------
 
   bindMenu() {
-    const heroName = () => this.character.name.trim() || 'Hero';
+    const heroName = () => this.character.name.trim() || t('common.hero');
 
     // roster: tap a card to make it active, its gear to edit, its × to
     // delete, or the "new hero" card to create another character
@@ -285,7 +344,7 @@ export class UI {
     $('join-btn').addEventListener('click', () => {
       sfx.click();
       const code = normalizeRoomCode($('join-code').value);
-      if (code.length < 5) return this.menuError('Enter the 5-letter room code');
+      if (code.length < 5) return this.menuError(t('menu.enterRoomCode'));
       this.ensurePetThen(() => this.cb.onJoin(code, { ...this.character, name: heroName() }));
     });
     $('join-code').addEventListener('input', (e) => {
@@ -293,7 +352,7 @@ export class UI {
     });
 
     const best = localStorage.getItem('dtc-best-wave');
-    if (best) $('best-wave').textContent = `Best run: wave ${best}`;
+    if (best) $('best-wave').textContent = t('menu.bestRun', { n: best });
 
     // joining via shared link (?room=CODE): make it crystal clear the
     // player is entering one specific match — hide hosting, lock the code
@@ -305,7 +364,7 @@ export class UI {
       $('menu-linked').classList.remove('hidden');
       $('menu-linked-code').textContent = room;
       $('join-label').classList.add('hidden');
-      $('join-btn').innerHTML = `${icon('link')} Join this match`;
+      $('join-btn').innerHTML = `${icon('link')} ${t('menu.joinThisMatch')}`;
     }
   }
 
@@ -351,7 +410,7 @@ export class UI {
     });
 
     $('char-save').addEventListener('click', () => {
-      this.charDraft.name = ($('char-name').value.trim() || 'Hero').slice(0, NAME_MAX);
+      this.charDraft.name = ($('char-name').value.trim() || t('common.hero')).slice(0, NAME_MAX);
       // a hero with no pet yet (brand new, or one saved before pets
       // existed) goes to step 2 — the pet picker — to choose & name its
       // free starter; anyone who already has pets saves straight away
@@ -412,7 +471,7 @@ export class UI {
       const ctx = this.petPickerCtx;
       if (!ctx) return; // already handled — a stray second click
       const id = PETS[this.ppPick] ? this.ppPick : 'dog';
-      const name = (this.ppName.trim() || PETS[id].name).slice(0, PET.NAME_MAX);
+      const name = (this.ppName.trim() || petName(id)).slice(0, PET.NAME_MAX);
       this.petPickerCtx = null;
       this.hide('pet-picker');
       ctx.onConfirm?.(id, name);
@@ -428,8 +487,8 @@ export class UI {
     this.hide('loading'); this.hide('menu'); this.hide('character'); this.hide('lobby');
     this.hide('hud'); this.hide('checkpoint'); this.hide('gameover'); this.hide('host-lost');
     $('pp-back').classList.toggle('hidden', !ctx.allowBack);
-    if (ctx.intro) $('pp-intro').innerHTML = ctx.intro;
-    $('pp-confirm').textContent = ctx.confirmLabel || 'Save & continue';
+    $('pp-intro').innerHTML = ctx.intro || t('pp.intro');
+    $('pp-confirm').textContent = ctx.confirmLabel || t('char.saveContinue');
     $('pp-name').value = '';
     this.renderPetPicker();
     this.show('pet-picker');
@@ -443,13 +502,13 @@ export class UI {
       const card = document.createElement('button');
       card.className = 'pp-pet' + (this.ppPick === id ? ' selected' : '');
       card.dataset.pet = id;
-      card.innerHTML = `<img src="${petImgSrc(id)}" alt=""><span>${def.name}</span>`;
+      card.innerHTML = `<img src="${petImgSrc(id)}" alt=""><span>${petName(id)}</span>`;
       grid.appendChild(card);
     }
-    const def = PETS[this.ppPick] || PETS.dog;
-    $('pp-detail-name').textContent = def.name;
-    $('pp-blurb').textContent = `${def.blurb} (${petEffectText(this.ppPick, 1)})`;
-    $('pp-name').placeholder = `Name your ${def.name.toLowerCase()}`;
+    const pick = PETS[this.ppPick] ? this.ppPick : 'dog';
+    $('pp-detail-name').textContent = petName(pick);
+    $('pp-blurb').textContent = `${petBlurb(pick)} (${petEffectText(pick, 1)})`;
+    $('pp-name').placeholder = t('pp.nameYour', { name: petName(pick).toLowerCase() });
   }
 
   // legacy heroes saved before pets existed have none; make them pick &
@@ -459,8 +518,8 @@ export class UI {
     if (c.activePet && c.pets?.[c.activePet]) return proceed();
     this.openPetPicker({
       allowBack: false,
-      confirmLabel: 'Confirm pet',
-      intro: `${(c.name || '').trim() || 'Your hero'} needs a companion!<br/>Pick a starter pet and give it a name before you head out — it levels up permanently.`,
+      confirmLabel: t('pp.confirmPet'),
+      intro: t('pp.needsCompanion', { name: (c.name || '').trim() || t('common.yourHero') }),
       onConfirm: (id, name) => {
         const chars = this.roster.chars.map((ch) =>
           ch.id === c.id
@@ -482,13 +541,12 @@ export class UI {
 
   renderCharInfo() {
     const cls = this.charDraft.cls;
-    const def = CLASSES[cls];
-    $('ci-name').textContent = def.name;
-    $('ci-weapon').textContent = def.weapon || '—';
-    $('ci-power').textContent = POWER_DESC[cls] || SKILLS[cls]?.name || '—';
-    $('ci-blurb').textContent = def.blurb || '';
+    $('ci-name').textContent = className(cls);
+    $('ci-weapon').textContent = classWeaponName(cls) || '—';
+    $('ci-power').textContent = powerDesc(cls) || powerName(cls) || '—';
+    $('ci-blurb').textContent = classBlurb(cls);
     $('ci-stats').innerHTML = (STAT_BARS[cls] || [])
-      .map(([k, v]) => `<i style="--v:${v}">${k}</i>`).join('');
+      .map(([k, v]) => `<i style="--v:${v}">${t('statbar.' + k)}</i>`).join('');
   }
 
   // colour circles stacked top-to-bottom, in the model's own head→feet
@@ -559,16 +617,16 @@ export class UI {
       sfx.click();
       try {
         await navigator.clipboard.writeText(this.roomCode);
-        this.toast('Code copied!', 'gold');
+        this.toast(t('lobby.codeCopied'), 'gold');
       } catch { this.toast(this.roomCode, 'gold'); }
     });
     $('share-code').addEventListener('click', async () => {
       sfx.click();
       const url = `${location.origin}${location.pathname}?room=${this.roomCode}`;
       if (navigator.share) {
-        navigator.share({ title: 'Defend the Crystal', text: `Join my defense! Code: ${this.roomCode}`, url }).catch(() => {});
+        navigator.share({ title: 'Defend the Crystal', text: t('lobby.shareText', { code: this.roomCode }), url }).catch(() => {});
       } else {
-        try { await navigator.clipboard.writeText(url); this.toast('Invite link copied!', 'gold'); }
+        try { await navigator.clipboard.writeText(url); this.toast(t('lobby.inviteCopied'), 'gold'); }
         catch { this.toast(url, 'gold'); }
       }
     });
@@ -585,24 +643,25 @@ export class UI {
     $('room-code').textContent = code;
     $('start-btn').classList.toggle('hidden', !isHost);
     $('lobby-hint').textContent = isHost
-      ? 'Allies can also drop in mid-battle with this code.'
-      : 'Waiting for the host to start…';
+      ? t('lobby.alliesMidBattle')
+      : t('lobby.waitingHostStart');
   }
 
   updateLobby(players, selfId) {
+    this.lobbyPlayersCache = players;   // kept so a language switch can re-render
+    this.selfIdCache = selfId;
     const list = $('player-list');
     list.innerHTML = '';
     for (const p of players) {
       const li = document.createElement('li');
-      const cls = CLASSES[p.cls];
       const color = CLASS_COLORS[p.cls] || 'var(--gold)';
       li.innerHTML = `<span class="pl-cls" style="color:${color}">${icon('cls-' + p.cls)}</span>
         <span class="pl-name"></span>
-        <span class="pl-tag">${cls?.name || ''}${p.host ? ' · Host' : ''}${p.id === selfId ? ' · You' : ''}</span>`;
+        <span class="pl-tag">${className(p.cls)}${p.host ? ` · ${t('common.host')}` : ''}${p.id === selfId ? ` · ${t('common.you')}` : ''}</span>`;
       li.querySelector('.pl-name').textContent = p.name;
       list.appendChild(li);
     }
-    $('lobby-status').textContent = `${players.length}/4 defenders — difficulty scales with party size`;
+    $('lobby-status').textContent = t('lobby.defenders', { n: players.length });
   }
 
   // ---------------- HUD ----------------
@@ -626,7 +685,7 @@ export class UI {
     bindTap($('jump-btn'), () => this.cb.onJump?.());
     bindTap($('skill-btn'), () => this.cb.onSkill?.());
     $('room-chip').addEventListener('click', async () => {
-      try { await navigator.clipboard.writeText(this.roomCode); this.toast('Code copied!', 'gold'); } catch { /* ok */ }
+      try { await navigator.clipboard.writeText(this.roomCode); this.toast(t('lobby.codeCopied'), 'gold'); } catch { /* ok */ }
     });
 
     // tap the class badge to open the live character stats sheet
@@ -676,15 +735,18 @@ export class UI {
       card.classList.toggle('selected', card.dataset.item === item);
     }
     this.cb.onBuildMode(!!item);
+    this.renderBuildHint();
+  }
+
+  // the build-mode cancel hint bar (also rebuilt on a language switch)
+  renderBuildHint() {
     const hint = $('build-hint');
-    if (item) {
-      hint.classList.remove('hidden');
-      hint.innerHTML = `<span class="hint-x">${icon('x')}</span>` + (item === 'obstacle'
-        ? 'Place a block — tap here to cancel'
-        : `Place ${TOWERS[item].name} (${icon('gem')}${TOWERS[item].cost}) — tap here to cancel`);
-    } else {
-      hint.classList.add('hidden');
-    }
+    const item = this.selectedItem;
+    if (!item) { hint.classList.add('hidden'); return; }
+    hint.classList.remove('hidden');
+    hint.innerHTML = `<span class="hint-x">${icon('x')}</span>` + (item === 'obstacle'
+      ? t('hud.placeBlockHint')
+      : t('hud.placeTowerHint', { name: towerName(item), cost: `${icon('gem')}${TOWERS[item].cost}` }));
   }
 
   selectCardByIndex(i) {
@@ -699,9 +761,9 @@ export class UI {
     if (info.type === 'tower') {
       this.renderTowerPanel(info.kind, info.lvl, info.spec);
     } else {
-      $('upg-title').innerHTML = `${entityImg('block')} Block`;
-      $('upg-stats').textContent = 'Reclaim it to get a block back in your stock.';
-      $('upg-btn').textContent = 'Remove';
+      $('upg-title').innerHTML = `${entityImg('block')} ${t('upg.block')}`;
+      $('upg-stats').textContent = t('upg.reclaimBlock');
+      $('upg-btn').textContent = t('upg.remove');
       $('upg-btn').disabled = false;
       $('upg-specials').innerHTML = '';
       delete $('upg-specials').dataset.sig;
@@ -722,12 +784,16 @@ export class UI {
       ? (def.aoe + grows * (lvl - 1)).toFixed(1)
       : (def.range + TOWER_UPGRADE.rangeAdd * (lvl - 1)).toFixed(1);
     const spd = (def.rate * Math.pow(TOWER_UPGRADE.rateMult, lvl - 1)).toFixed(2);
-    $('upg-title').innerHTML = `${entityImg(def.img || 'tower-' + kind)} ${def.name} — level ${lvl}`;
+    const dmgLbl = t('upg.damage');
+    const rngLbl = def.pulse ? t('upg.pulseArea') : t('upg.range');
+    const spdLbl = t('upg.speed');
+    $('upg-title').innerHTML =
+      `${entityImg(def.img || 'tower-' + kind)} ${t('upg.towerLevel', { name: towerName(kind), lvl })}`;
     const maxed = lvl >= TOWER_LEVEL_MAX;
-    const areaTxt = def.pulse ? '' : (def.aoe ? `\nArea ${def.aoe}` : '');
+    const areaTxt = def.pulse ? '' : (def.aoe ? `\n${t('upg.area')} ${def.aoe}` : '');
     if (maxed) {
       $('upg-stats').textContent =
-        `Damage ${dmg} · ${def.pulse ? 'Pulse area' : 'Range'} ${rng} · Speed ${spd}/s` +
+        `${dmgLbl} ${dmg} · ${rngLbl} ${rng} · ${spdLbl} ${spd}/s` +
         areaTxt.replace('\n', ' · ');
     } else {
       const nDmg = Math.round(def.dmg * Math.pow(TOWER_UPGRADE.dmgMult, lvl));
@@ -736,15 +802,15 @@ export class UI {
         : (def.range + TOWER_UPGRADE.rangeAdd * lvl).toFixed(1);
       const nSpd = (def.rate * Math.pow(TOWER_UPGRADE.rateMult, lvl)).toFixed(2);
       $('upg-stats').textContent =
-        `Damage ${dmg} ➜ ${nDmg}\n${def.pulse ? 'Pulse area' : 'Range'} ${rng} ➜ ${nRng}` +
-        `\nSpeed ${spd}/s ➜ ${nSpd}/s` + areaTxt;
+        `${dmgLbl} ${dmg} ➜ ${nDmg}\n${rngLbl} ${rng} ➜ ${nRng}` +
+        `\n${spdLbl} ${spd}/s ➜ ${nSpd}/s` + areaTxt;
     }
     const cost = maxed ? 0 : Math.round(def.cost * TOWER_UPGRADE.costMult[lvl]);
-    $('upg-btn').innerHTML = maxed ? 'Max level' : `Upgrade ${icon('gem')}${cost}`;
+    $('upg-btn').innerHTML = maxed ? t('upg.maxLevel') : t('upg.upgradeCost', { cost: `${icon('gem')}${cost}` });
     $('upg-btn').disabled = maxed || (this.lastSnap && this.lastSnap.pts < cost);
     this.renderTowerSpecials(kind, spec);
     $('sell-btn').classList.remove('hidden');
-    $('sell-btn').textContent = 'Sell';
+    $('sell-btn').textContent = t('upg.sell');
   }
 
   // special effects (bonus upgrades): bought once, on top of levels —
@@ -758,14 +824,13 @@ export class UI {
     if (box.dataset.sig === sig) return;
     box.dataset.sig = sig;
     if (spec) {
-      const d = defs[spec];
-      box.innerHTML = `<div class="spec-owned">✦ ${d?.name || spec}<span class="muted"> — ${d?.desc || ''}</span></div>`;
+      box.innerHTML = `<div class="spec-owned">✦ ${towerSpecName(kind, spec)}<span class="muted"> — ${towerSpecDesc(kind, spec)}</span></div>`;
       return;
     }
     box.innerHTML = Object.entries(defs).map(([id, d]) => {
       const afford = !this.lastSnap || this.lastSnap.pts >= d.cost;
       return `<button class="btn small spec-btn" data-spec="${id}" ${afford ? '' : 'disabled'}>
-        <b>${d.name}</b> ${icon('gem')}${d.cost}<span class="spec-desc muted">${d.desc}</span>
+        <b>${towerSpecName(kind, id)}</b> ${icon('gem')}${d.cost}<span class="spec-desc muted">${towerSpecDesc(kind, id)}</span>
       </button>`;
     }).join('');
     for (const b of box.querySelectorAll('.spec-btn')) {
@@ -800,7 +865,7 @@ export class UI {
     this.character.coins += amt;
     this.persistCharacter();
     this._goldShown = null;
-    this.toast(`+${amt} gold coin${amt > 1 ? 's' : ''}!`, 'gold');
+    this.toast(t(amt > 1 ? 'toast.coinsMany' : 'toast.coinsOne', { amt }), 'gold');
     if (this.petPanelOpen) this.renderPetPanel();
     if (this.weaponPanelOpen) this.renderWeaponPanel();
   }
@@ -813,7 +878,7 @@ export class UI {
     if (gained > 0) {
       const pet = this.character.pets[this.character.activePet];
       if (pet) {
-        this.toast(`${pet.name} reached level ${pet.lvl}!`, 'gold');
+        this.toast(t('toast.petLevel', { name: pet.name, lvl: pet.lvl }), 'gold');
         sfx.levelUp();
         this.cb.onPetChange?.(this.activePetInfo());
       }
@@ -825,7 +890,7 @@ export class UI {
   equipPet(id) {
     if (!this.character.pets[id] || this.character.activePet === id) return;
     // swapping companions is only allowed while chatting with the vendor
-    if (!this.shopNear) return this.toast("Only at Tonho's stall can you switch pets", 'error');
+    if (!this.shopNear) return this.toast(t('toast.onlyTonhoSwitch'), 'error');
     this.character.activePet = id;
     this.persistCharacter();
     sfx.success();
@@ -836,7 +901,7 @@ export class UI {
   renamePet(id, name) {
     const pet = this.character.pets[id];
     if (!pet) return;
-    pet.name = (String(name).trim() || PETS[id].name).slice(0, PET.NAME_MAX);
+    pet.name = (String(name).trim() || petName(id)).slice(0, PET.NAME_MAX);
     this.persistCharacter();
     this.renderPetPanel();
     if (this.character.activePet === id) this.cb.onPetChange?.(this.activePetInfo());
@@ -845,16 +910,16 @@ export class UI {
   buyPet(id) {
     const def = PETS[id];
     if (!def || this.character.pets[id]) return;
-    if (!this.shopNear) return this.toast("Visit Tonho's stall in the sanctuary to buy", 'error');
-    if (this.character.coins < def.price) return this.toast('Not enough gold coins', 'error');
+    if (!this.shopNear) return this.toast(t('toast.visitTonhoBuy'), 'error');
+    if (this.character.coins < def.price) return this.toast(t('toast.notEnoughGold'), 'error');
     this.character.coins -= def.price;
-    this.character.pets[id] = { lvl: 1, xp: 0, name: def.name };
+    this.character.pets[id] = { lvl: 1, xp: 0, name: petName(id) };
     const firstPet = !this.character.activePet;
     if (firstPet) this.character.activePet = id;
     this.persistCharacter();
     this._goldShown = null;
     sfx.success();
-    this.toast(`${def.name} joined your team — name it!`, 'gold');
+    this.toast(t('toast.petJoined', { name: petName(id) }), 'gold');
     // jump to My pets and open the name field right away so the new
     // companion never sits with a generic name
     this.petTab = 'mine';
@@ -957,10 +1022,10 @@ export class UI {
     const next = petXpNext(pet.lvl);
     $('pd-img').src = petImgSrc(id);
     $('pd-name').textContent = pet.name;
-    $('pd-sub').textContent = `${PETS[id].name} · Level ${pet.lvl}${maxed ? ' · MAX' : ''}`;
+    $('pd-sub').textContent = `${petName(id)} · ${t('common.level')} ${pet.lvl}${maxed ? ` · ${t('common.max')}` : ''}`;
     $('pd-effect').textContent = petEffectText(id, pet.lvl);
     $('pd-xpfill').style.width = `${maxed ? 100 : Math.min((pet.xp / next) * 100, 100)}%`;
-    $('pd-xptext').textContent = maxed ? 'Maxed out' : `${pet.xp} / ${next} XP to level ${pet.lvl + 1}`;
+    $('pd-xptext').textContent = maxed ? t('petd.maxedOut') : t('petd.xpToLevel', { xp: pet.xp, next, lvl: pet.lvl + 1 });
   }
 
   // swap the pet's name for an inline input; Enter/blur commits
@@ -971,6 +1036,7 @@ export class UI {
     input.maxLength = PET.NAME_MAX;
     input.value = this.character.pets[id]?.name || '';
     input.className = 'pet-rename';
+    input.placeholder = petName(id);
     span.replaceWith(input);
     input.focus();
     input.select();
@@ -996,7 +1062,7 @@ export class UI {
   renderOwnedPets(host) {
     const owned = Object.keys(PETS).filter((id) => this.character.pets[id]);
     if (!owned.length) {
-      host.innerHTML = '<div class="muted pet-empty">No pets yet — buy one at Tonho\'s stall in the sanctuary.</div>';
+      host.innerHTML = `<div class="muted pet-empty">${t('petp.noPetsYet')}</div>`;
       return;
     }
     for (const id of owned) {
@@ -1012,16 +1078,16 @@ export class UI {
          <div class="pet-meta">
            <div class="pet-name-row">
              <span class="pet-pname"></span>
-             <button class="pet-edit" data-act="rename" title="Rename">✎</button>
+             <button class="pet-edit" data-act="rename" title="${t('tip.rename')}">✎</button>
            </div>
-           <div class="pet-kind">${PETS[id].name} · Lv ${pet.lvl}${maxed ? ' <b class="pet-max">MAX</b>' : ''}</div>
+           <div class="pet-kind">${petName(id)} · ${t('common.lvAbbr')} ${pet.lvl}${maxed ? ` <b class="pet-max">${t('common.max')}</b>` : ''}</div>
            <div class="pet-effect">${petEffectText(id, pet.lvl)}</div>
            <div class="pet-xpbar"><div class="pet-xpfill" style="width:${maxed ? 100 : Math.min((pet.xp / next) * 100, 100)}%"></div></div>
          </div>
          <div class="pet-actions">
            ${active
-             ? `<span class="pet-equipped">${icon('paw')} With you</span>`
-             : '<button class="btn small primary" data-act="equip">Equip</button>'}
+             ? `<span class="pet-equipped">${icon('paw')} ${t('petp.withYou')}</span>`
+             : `<button class="btn small primary" data-act="equip">${t('petp.equip')}</button>`}
          </div>`;
       // pet names are user input — set as text, never as HTML
       card.querySelector('.pet-pname').textContent = pet.name;
@@ -1040,13 +1106,13 @@ export class UI {
       card.innerHTML =
         `<img class="pet-img" src="${petImgSrc(id)}" alt="">
          <div class="pet-meta">
-           <div class="pet-kind">${def.name}${def.starter ? ' <b class="pet-starter">STARTER</b>' : ''}</div>
-           <div class="pet-effect">${def.blurb}</div>
-           <div class="pet-effect muted">Lv 1: ${petEffectText(id, 1)} → Lv ${PET.LEVEL_CAP}: ${petEffectText(id, PET.LEVEL_CAP)}</div>
+           <div class="pet-kind">${petName(id)}${def.starter ? ` <b class="pet-starter">${t('petp.starter')}</b>` : ''}</div>
+           <div class="pet-effect">${petBlurb(id)}</div>
+           <div class="pet-effect muted">${t('petp.lvToLv', { a: petEffectText(id, 1), cap: PET.LEVEL_CAP, b: petEffectText(id, PET.LEVEL_CAP) })}</div>
          </div>
          <div class="pet-actions">
            ${owned
-             ? '<span class="pet-equipped">Owned</span>'
+             ? `<span class="pet-equipped">${t('petp.owned')}</span>`
              : `<button class="btn small primary" data-act="buy" ${!this.shopNear || !afford ? 'disabled' : ''}>
                   ${icon('goldcoin')}${def.price}
                 </button>`}
@@ -1112,7 +1178,7 @@ export class UI {
     const c = this.character;
     const def = WEAPONS[id];
     if (!def || !c.weapons[id]) return;
-    if (!this.smithNear) return this.toast("Only at Baru's smithy can you switch weapons", 'error');
+    if (!this.smithNear) return this.toast(t('toast.onlyBaruSwitch'), 'error');
     const slot = def.slot === 'shield' ? 'activeShield' : 'activeWeapon';
     if (c[slot] === id) return;
     c[slot] = id;
@@ -1126,14 +1192,14 @@ export class UI {
     const c = this.character;
     const def = WEAPONS[id];
     if (!def || c.weapons[id] || !def.classes.includes(c.cls)) return;
-    if (!this.smithNear) return this.toast("Visit Baru's smithy in the sanctuary to buy", 'error');
-    if (c.coins < def.price) return this.toast('Not enough gold coins', 'error');
+    if (!this.smithNear) return this.toast(t('toast.visitBaruBuy'), 'error');
+    if (c.coins < def.price) return this.toast(t('toast.notEnoughGold'), 'error');
     c.coins -= def.price;
     c.weapons[id] = { tier: 0 };
     this.persistCharacter();
     this._goldShown = null;
     sfx.success();
-    this.toast(`${def.name} added to your arsenal!`, 'gold');
+    this.toast(t('toast.weaponAdded', { name: weaponName(id) }), 'gold');
     this.weaponTab = 'mine';
     this.renderWeaponPanel();
   }
@@ -1142,15 +1208,15 @@ export class UI {
     const c = this.character;
     const owned = c.weapons[id];
     if (!owned || owned.tier >= WEAPON_TIER_MAX) return;
-    if (!this.smithNear) return this.toast("Visit Baru's smithy in the sanctuary to upgrade", 'error');
+    if (!this.smithNear) return this.toast(t('toast.visitBaruUpgrade'), 'error');
     const cost = weaponUpgradeCost(id, owned.tier);
-    if (c.coins < cost) return this.toast('Not enough gold coins', 'error');
+    if (c.coins < cost) return this.toast(t('toast.notEnoughGold'), 'error');
     c.coins -= cost;
     owned.tier += 1;
     this.persistCharacter();
     this._goldShown = null;
     sfx.levelUp();
-    this.toast(`${WEAPONS[id].name} forged to ${WEAPON_TIER_NAMES[owned.tier]}!`, 'gold');
+    this.toast(t('toast.weaponForged', { name: weaponName(id), tier: tierName(owned.tier) }), 'gold');
     this.renderWeaponPanel();
     // an upgraded equipped weapon changes live stats & looks
     if (c.activeWeapon === id || c.activeShield === id) this.notifyLoadout();
@@ -1183,16 +1249,16 @@ export class UI {
       card.innerHTML =
         `<img class="pet-img" src="${weaponImgSrc(id, owned.tier)}" alt="">
          <div class="pet-meta">
-           <div class="pet-kind">${def.name} ${tierBadge(owned.tier)}</div>
+           <div class="pet-kind">${weaponName(id)} ${tierBadge(owned.tier)}</div>
            <div class="pet-effect">${weaponStatText(id, owned.tier)}</div>
            ${maxed
-             ? '<div class="pet-effect muted">Fully forged — Crystal is the final tier.</div>'
-             : `<div class="pet-effect muted">Next (${WEAPON_TIER_NAMES[owned.tier + 1]}): ${weaponStatText(id, owned.tier + 1)}</div>`}
+             ? `<div class="pet-effect muted">${t('wpnp.fullyForged')}</div>`
+             : `<div class="pet-effect muted">${t('wpnp.next', { tier: tierName(owned.tier + 1), stat: weaponStatText(id, owned.tier + 1) })}</div>`}
          </div>
          <div class="pet-actions">
            ${active
-             ? `<span class="pet-equipped">${icon('swords')} Equipped</span>`
-             : '<button class="btn small primary" data-act="equip">Equip</button>'}
+             ? `<span class="pet-equipped">${icon('swords')} ${t('wpnp.equipped')}</span>`
+             : `<button class="btn small primary" data-act="equip">${t('petp.equip')}</button>`}
            ${maxed
              ? ''
              : `<button class="btn small wpn-upg-btn" data-act="upgrade" ${!this.smithNear || !afford ? 'disabled' : ''}>
@@ -1219,13 +1285,13 @@ export class UI {
       card.innerHTML =
         `<img class="pet-img" src="${weaponImgSrc(id)}" alt="">
          <div class="pet-meta">
-           <div class="pet-kind">${def.name}${starter ? ' <b class="pet-starter">STARTER</b>' : ''}</div>
-           <div class="pet-effect">${def.blurb}</div>
+           <div class="pet-kind">${weaponName(id)}${starter ? ` <b class="pet-starter">${t('petp.starter')}</b>` : ''}</div>
+           <div class="pet-effect">${weaponBlurb(id)}</div>
            <div class="pet-effect muted">${weaponStatText(id, 0)}</div>
          </div>
          <div class="pet-actions">
            ${owned
-             ? '<span class="pet-equipped">Owned</span>'
+             ? `<span class="pet-equipped">${t('petp.owned')}</span>`
              : `<button class="btn small primary" data-act="buy" ${!this.smithNear || !afford ? 'disabled' : ''}>
                   ${icon('goldcoin')}${def.price}
                 </button>`}
@@ -1259,11 +1325,13 @@ export class UI {
     const color = CLASS_COLORS[cls] || 'var(--gold)';
     $('stats-icon').innerHTML = icon('cls-' + cls);
     $('stats-icon').style.color = color;
-    $('stats-title').textContent = (me[15] || 'Hero');
-    $('stats-sub').textContent = `${def.name || ''} · Level ${lvl}`;
+    $('stats-title').textContent = (me[15] || t('common.hero'));
+    $('stats-sub').textContent = t('stat.subLevel', { cls: className(cls), lvl });
 
     // snapshot columns: pet 20/21/22, weapon 23/24, shield 25/26
-    const petId = me[20], petName = me[21], petLvl = me[22];
+    // (petNick is the pet's custom name — kept out of the imported
+    // petName() getter's way)
+    const petId = me[20], petNick = me[21], petLvl = me[22];
     const wpnId = me[23], wpnTier = me[24] || 0, shdId = me[25], shdTier = me[26] || 0;
     const pfx = petEffects(petId, petLvl);
     const wfx = weaponEffects(wpnId, wpnTier);
@@ -1271,26 +1339,26 @@ export class UI {
     const magic = WEAPONS[wpnId]?.kind === 'magic';
 
     const rows = [
-      ['Health', `${hp} / ${mhp}`],
-      [magic ? 'Magic power' : 'Attack', `${Math.round(atk)}`],
-      ['Defense', `${Math.round(Math.min((def.def || 0) + pfx.def + sfx2.def, PET.DEF_CAP) * 100)}%`],
-      ['Range', `${((def.range || 0) + wfx.range).toFixed(1)}`],
-      ['Attack speed', `${((def.rate || 0) * pfx.rate * wfx.rate).toFixed(2)}/s`],
+      [t('stat.health'), `${hp} / ${mhp}`],
+      [magic ? t('stat.magicPower') : t('stat.attack'), `${Math.round(atk)}`],
+      [t('stat.defense'), `${Math.round(Math.min((def.def || 0) + pfx.def + sfx2.def, PET.DEF_CAP) * 100)}%`],
+      [t('stat.range'), `${((def.range || 0) + wfx.range).toFixed(1)}`],
+      [t('stat.atkSpeed'), `${((def.rate || 0) * pfx.rate * wfx.rate).toFixed(2)}/s`],
       // snapshot row 19 carries the live (pet+weapon-adjusted) move speed
-      ['Move speed', `${(typeof me[19] === 'number' && me[19] > 0 ? me[19] : def.speed || 0).toFixed(1)}`],
-      ['Knockback', `${((def.knockback || 0) * pfx.kbMult).toFixed(1)}`],
+      [t('stat.moveSpeed'), `${(typeof me[19] === 'number' && me[19] > 0 ? me[19] : def.speed || 0).toFixed(1)}`],
+      [t('stat.knockback'), `${((def.knockback || 0) * pfx.kbMult).toFixed(1)}`],
     ];
     const crit = pfx.crit + wfx.crit;
-    if (crit > 0) rows.push(['Crit chance', `${Math.round(crit * 100)}% (×${PET.CRIT_MULT} damage)`]);
-    if (sfx2.block > 0) rows.push(['Block chance', `${Math.round(sfx2.block * 100)}%`]);
-    if (wfx.stun > 0) rows.push(['Stun chance', `${Math.round(wfx.stun * 100)}%`]);
+    if (crit > 0) rows.push([t('stat.critChance'), t('stat.critValue', { v: Math.round(crit * 100), m: PET.CRIT_MULT })]);
+    if (sfx2.block > 0) rows.push([t('stat.blockChance'), `${Math.round(sfx2.block * 100)}%`]);
+    if (wfx.stun > 0) rows.push([t('stat.stunChance'), `${Math.round(wfx.stun * 100)}%`]);
     if (def.aoe) {
       rows.push(wfx.bolts > 0
-        ? ['Guided bolts', `${wfx.bolts} per cast`]
-        : ['Blast area', `${(def.aoe * wfx.aoe).toFixed(1)}`]);
+        ? [t('stat.guidedBolts'), t('stat.boltsValue', { v: wfx.bolts })]
+        : [t('stat.blastArea'), `${(def.aoe * wfx.aoe).toFixed(1)}`]);
     }
-    rows.push(['Experience', `${xp} / ${xpn}`]);
-    rows.push(['Kills', `${kills}`]);
+    rows.push([t('stat.experience'), `${xp} / ${xpn}`]);
+    rows.push([t('stat.kills'), `${kills}`]);
 
     // equipped weapon & shield blocks — the gear the stats above
     // already include (managed at Baru's smithy during checkpoints)
@@ -1298,7 +1366,7 @@ export class UI {
       ? `<div class="stat-pet">
            <img class="stat-pet-img" src="${weaponImgSrc(id, tier)}" alt="">
            <div class="stat-pet-meta">
-             <span class="sp-name">${WEAPONS[id].name} ${tierBadge(tier)}</span>
+             <span class="sp-name">${weaponName(id)} ${tierBadge(tier)}</span>
              <span class="sp-desc">${weaponStatText(id, tier)}</span>
            </div>
          </div>`
@@ -1310,7 +1378,7 @@ export class UI {
       ? `<div class="stat-pet">
            <img class="stat-pet-img" src="${petImgSrc(petId)}" alt="">
            <div class="stat-pet-meta">
-             <span class="sp-name">${this.escapeHtml(petName || PETS[petId].name)} · ${PETS[petId].name} Lv ${petLvl}</span>
+             <span class="sp-name">${this.escapeHtml(petNick || petName(petId))} · ${petName(petId)} ${t('common.lvAbbr')} ${petLvl}</span>
              <span class="sp-desc">${petEffectText(petId, petLvl)}</span>
            </div>
          </div>`
@@ -1320,8 +1388,8 @@ export class UI {
       rows.map(([k, v]) => `<div class="stat-line"><span class="sk">${k}</span><span class="sv">${v}</span></div>`).join('') +
       gearBlock(wpnId, wpnTier) + gearBlock(shdId, shdTier) + petBlock +
       `<div class="stat-power">
-         <span class="sp-name">${SKILLS[cls]?.name || 'Special'}</span>
-         <span class="sp-desc">${POWER_DESC[cls] || ''}</span>
+         <span class="sp-name">${powerName(cls)}</span>
+         <span class="sp-desc">${powerDesc(cls)}</span>
        </div>`;
   }
 
@@ -1337,8 +1405,8 @@ export class UI {
 
     const inCombat = snap.ph === 'combat';
     $('wave-label').textContent = inCombat
-      ? `${snap.w} · ${snap.left} left`
-      : snap.ph === 'build' ? `${snap.w + 1} next` : `${snap.w}`;
+      ? t('hud.waveLeft', { w: snap.w, left: snap.left })
+      : snap.ph === 'build' ? t('hud.waveNext', { n: snap.w + 1 }) : `${snap.w}`;
 
     $('points-label').textContent = snap.pts;
     // permanent gold (per character, banked locally)
@@ -1366,15 +1434,15 @@ export class UI {
       }
     }
 
-    // start-wave button
+    // start-wave button (lives in the top-right action slot)
     const btn = $('startwave-btn');
     if (snap.ph === 'build') {
       btn.classList.remove('hidden');
       btn.disabled = !this.isHost;
-      const t = snap.bt >= 0 ? Math.ceil(snap.bt) : null;
+      const secs = snap.bt >= 0 ? Math.ceil(snap.bt) : null;
       $('startwave-label').innerHTML = this.isHost
-        ? (t !== null ? `Start<br/>${t}s` : 'Start<br/>wave')
-        : (t !== null ? `Wave in<br/>${t}s` : 'Waiting<br/>host…');
+        ? (secs !== null ? t('hud.startIn', { t: secs }) : t('hud.startWave'))
+        : (secs !== null ? t('hud.waveIn', { t: secs }) : t('hud.waitingHost'));
     } else {
       btn.classList.add('hidden');
     }
@@ -1397,7 +1465,7 @@ export class UI {
         if (key !== this._statsKey) { this._statsKey = key; this.renderStats(me); }
       }
       // hero name (so the player always sees who they are, top-left)
-      const myName = me[15] || 'Hero';
+      const myName = me[15] || t('common.hero');
       if (this._pbName !== myName) { this._pbName = myName; $('pb-name').textContent = myName; }
       $('pb-hp').style.width = `${(hp / mhp) * 100}%`;
       $('pb-hp-text').textContent = `${hp}/${mhp}`;
@@ -1414,7 +1482,7 @@ export class UI {
       if (this._skCls !== cls) {
         this._skCls = cls;
         $('skill-icon').innerHTML = icon('sk-' + cls);
-        $('skill-btn').title = `${SKILLS[cls]?.name || 'Special attack'} (K)`;
+        $('skill-btn').title = `${powerName(cls)} (K)`;
       }
       const skillCd = me[16] || 0;
       this.skillReady = skillCd <= 0 && dead !== 1;
@@ -1433,16 +1501,21 @@ export class UI {
       }
     }
 
-    // checkpoint overlay
+    // checkpoint overlay + its "keep going" action (shown in the same
+    // top-right slot the start-wave button uses the rest of the time)
+    const cont = $('cont-btn');
     if (snap.ph === 'checkpoint') {
       this.show('checkpoint');
+      cont.classList.remove('hidden');
       $('cp-wave').textContent = snap.w;
       const ready = snap.cont?.length || 0;
-      $('cp-status').textContent = `${ready}/${snap.pl.length} ready`;
-      $('cont-btn').disabled = snap.cont?.includes(selfId);
-      $('cont-btn').textContent = snap.cont?.includes(selfId) ? 'Waiting for allies…' : 'Keep going ➜';
+      $('cp-status').textContent = t('hud.ready', { ready, total: snap.pl.length });
+      const waiting = snap.cont?.includes(selfId);
+      cont.disabled = waiting;
+      cont.textContent = waiting ? t('hud.waitingAllies') : t('hud.keepGoing');
     } else {
       this.hide('checkpoint');
+      cont.classList.add('hidden');
     }
   }
 
@@ -1464,9 +1537,9 @@ export class UI {
   showGameOver(ev, isHost) {
     const best = Number(localStorage.getItem('dtc-best-wave') || 0);
     if (ev.wave > best) localStorage.setItem('dtc-best-wave', String(ev.wave));
-    const lines = [`Survived to wave ${ev.wave}${ev.wave > best ? ' — new best!' : ''}`, ''];
+    const lines = [t('over.survivedToWave', { n: ev.wave }) + (ev.wave > best ? t('over.newBest') : ''), ''];
     for (const s of Object.values(ev.kills || {})) {
-      lines.push(`${s.name} — ${s.kills} kills · level ${s.lvl}`);
+      lines.push(t('over.killsLine', { name: s.name, kills: s.kills, lvl: s.lvl }));
     }
     $('go-stats').textContent = lines.join('\n');
     $('restart-btn').classList.toggle('hidden', !isHost);
