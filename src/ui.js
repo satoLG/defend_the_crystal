@@ -177,8 +177,8 @@ export class UI {
 
   // ---------------- helpers ----------------
 
-  show(id) { $(id).classList.remove('hidden'); }
-  hide(id) { $(id).classList.add('hidden'); }
+  show(id) { $(id)?.classList.remove('hidden'); }
+  hide(id) { $(id)?.classList.add('hidden'); }
 
   // ---------------- character roster ----------------
 
@@ -1501,20 +1501,27 @@ export class UI {
       }
     }
 
-    // checkpoint overlay + its "keep going" action (shown in the same
-    // top-right slot the start-wave button uses the rest of the time)
+    // checkpoint action lives in the same top-right slot the start-wave
+    // button uses the rest of the time — no blocking banner any more, the
+    // whole checkpoint fits on the "keep going" button itself (with a live
+    // tally of who's already ready baked in, so co-op still reads clearly)
     const cont = $('cont-btn');
     if (snap.ph === 'checkpoint') {
-      this.show('checkpoint');
       cont.classList.remove('hidden');
-      $('cp-wave').textContent = snap.w;
       const ready = snap.cont?.length || 0;
-      $('cp-status').textContent = t('hud.ready', { ready, total: snap.pl.length });
+      const total = snap.pl.length;
       const waiting = snap.cont?.includes(selfId);
       cont.disabled = waiting;
-      cont.textContent = waiting ? t('hud.waitingAllies') : t('hud.keepGoing');
+      $('cont-label').textContent = waiting ? t('hud.waitingAllies') : t('hud.keepGoing');
+      const countEl = $('cont-count');
+      // the tally only means something with allies around
+      if (total > 1) {
+        countEl.textContent = t('hud.ready', { ready, total });
+        countEl.classList.remove('hidden');
+      } else {
+        countEl.classList.add('hidden');
+      }
     } else {
-      this.hide('checkpoint');
       cont.classList.add('hidden');
     }
   }

@@ -190,7 +190,10 @@
         <button id="startwave-btn" class="btn primary hidden">
           <span id="startwave-label">Start<br/>wave</span>
         </button>
-        <button id="cont-btn" class="btn primary hidden" data-i18n="hud.keepGoing">Keep going ➜</button>
+        <button id="cont-btn" class="btn primary hidden">
+          <span id="cont-label" data-i18n="hud.keepGoing">Keep going ➜</span>
+          <span id="cont-count" class="cont-count hidden"></span>
+        </button>
       </div>
 
       <button id="jump-btn" disabled data-i18n-title="tip.jump" title="Jump over the block ahead (J / Space)">
@@ -362,16 +365,6 @@
           Gold coins drop from mini-bosses and bosses.<br/>Visit Baru's smithy in the sanctuary plaza to buy &amp; upgrade.
         </div>
         <div id="weapon-list" class="pet-list"></div>
-      </div>
-    </div>
-
-    <!-- ============ CHECKPOINT (non-blocking banner: free time to
-         wander the sanctuary behind the crystal) ============ -->
-    <div id="checkpoint" class="cp-banner hidden">
-      <div class="cp-inner">
-        <h2><i data-icon="tent"></i> <span data-i18n="cp.checkpoint">Checkpoint</span></h2>
-        <p><span data-i18n="cp.wavePrefix">Wave</span> <span id="cp-wave"></span> <span data-i18n="cp.waveSuffix">cleared — everyone is healed.</span><br/><span data-i18n="cp.stroll">Stroll the sanctuary behind the crystal, then push on.</span></p>
-        <div id="cp-status" class="muted"></div>
       </div>
     </div>
 

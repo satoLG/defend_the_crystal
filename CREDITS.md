@@ -28,6 +28,16 @@ hat) are from [game-icons.net](https://game-icons.net) by **Lorc** and
 **Sbed**, licensed **CC BY 3.0**. Class/tower thumbnails in `public/img/`
 are the preview renders that ship with the Kenney packs above (CC0).
 
+The ornate panel/button/slot frames and divider flourishes in
+`src/assets/ui/` are cleaned 9-slice crops of the **Fantasy UI Borders**
+pack by **Kenney** ([www.kenney.nl](https://www.kenney.nl)), **CC0**.
+
+## Fonts
+
+The interface is set in **Wotfard** by
+[Atipo Foundry](https://www.atipofoundry.com), offered under their
+pay-what-you-want licence (weights self-hosted in `src/assets/fonts/`).
+
 ## Libraries
 
 - [three.js](https://github.com/mrdoob/three.js) — 3D rendering
