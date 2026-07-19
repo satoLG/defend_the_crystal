@@ -229,7 +229,7 @@ const STRINGS = {
       waitingAllies: 'Waiting for allies…', ready: '{ready}/{total} ready',
       placeBlockHint: 'Place a block — tap here to cancel',
       placeTowerHint: 'Place {name} ({cost}) — tap here to cancel',
-      miniBoss: '⚠ MINI-BOSS ⚠', bossIncoming: '☠ BOSS INCOMING ☠',
+      miniBoss: '⚠ MINI-BOSS ⚠', bossIncoming: '☠ BOSS ☠',
       petShop: 'Pet Shop', weaponSmith: 'Weapon Smith',
     },
     tip: {
@@ -425,7 +425,7 @@ const STRINGS = {
       waitingAllies: 'Aguardando aliados…', ready: '{ready}/{total} prontos',
       placeBlockHint: 'Coloque um bloco — toque aqui para cancelar',
       placeTowerHint: 'Coloque {name} ({cost}) — toque aqui para cancelar',
-      miniBoss: '⚠ MINICHEFE ⚠', bossIncoming: '☠ CHEFE CHEGANDO ☠',
+      miniBoss: '⚠ MINICHEFE ⚠', bossIncoming: '☠ CHEFE ☠',
       petShop: 'Loja de Pets', weaponSmith: 'Ferreiro',
     },
     tip: {

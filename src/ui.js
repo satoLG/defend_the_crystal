@@ -305,9 +305,20 @@ export class UI {
   showStart() {
     this.hide('menu'); this.hide('character'); this.hide('lobby'); this.hide('hud');
     this.hide('checkpoint'); this.hide('gameover'); this.hide('host-lost');
-    this.hide('load-area');
     this.show('loading');
-    this.show('start-area');
+    // the title stays put; only the strip beneath it swaps — the loading
+    // bar bows out, then the Play/lang actions rise up in its place
+    const load = $('load-area');
+    if (load && !load.classList.contains('hidden')) {
+      load.classList.add('leaving');
+      setTimeout(() => {
+        this.hide('load-area');
+        load.classList.remove('leaving');
+        this.show('start-area');
+      }, 320);
+    } else {
+      this.show('start-area');
+    }
     const room = this.linkedRoom();
     const invite = $('room-invite');
     if (room) {

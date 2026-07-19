@@ -106,7 +106,7 @@ input {
 .cls-icon .ico { width: 1.6rem; height: 1.6rem; color: var(--gold); }
 .bc-icon .ico { width: 1.5rem; height: 1.5rem; }
 .entity-img { width: 2.3rem; height: 2.3rem; object-fit: contain; display: block; }
-.bc-icon .entity-img { width: 2rem; height: 2rem; }
+.bc-icon .entity-img { width: 1.7rem; height: 1.7rem; }
 .pl-cls .entity-img { width: 2.1rem; height: 2.1rem; }
 #pb-class .entity-img { width: 30px; height: 30px; }
 #upg-title { display: flex; align-items: center; justify-content: center; gap: 8px; }
@@ -139,12 +139,16 @@ input {
 }
 
 .title {
-  font-size: clamp(1.9rem, 6vw, 2.6rem);
+  /* the game logo — Ferrum (see @font-face; falls back to a display serif
+     until the woff2 is bundled) */
+  font-family: "Ferrum", "Cinzel", "Trajan Pro", "Georgia", serif;
+  font-weight: 400;
+  font-size: clamp(2.1rem, 6.6vw, 2.9rem);
   line-height: 1.05;
   margin: 4px 0 10px;
   color: var(--gold);
   text-shadow: 0 0 24px rgba(242, 242, 245, 0.32), 0 2px 14px rgba(0, 0, 0, 0.55);
-  letter-spacing: 1px;
+  letter-spacing: 2px;
   text-transform: uppercase;
 }
 
@@ -166,11 +170,14 @@ input:focus { border-color: var(--gold); }
 }
 
 .btn {
-  /* Kenney fantasy-UI button frame (subtle corner ticks) */
+  /* Kenney fantasy-UI button frame (subtle corner ticks). A single flat
+     fill that reaches under the frame — no inner gradient panel, so the
+     button reads as one surface with the ornament sitting on its edge. */
   border: 11px solid transparent;
   border-image: var(--frame-btn) 34 stretch;
   border-radius: 0;
-  background: linear-gradient(180deg, #202024, #131316);
+  background: #17171b;
+  background-clip: border-box;
   color: var(--text);
   padding: 5px 14px; font-size: 1rem; font-weight: 500; letter-spacing: 0.3px;
   cursor: pointer; font-family: inherit;
@@ -178,13 +185,13 @@ input:focus { border-color: var(--gold); }
   touch-action: none;
 }
 .btn:active { transform: scale(0.96); }
-.btn:hover { filter: brightness(1.25); }
+.btn:hover { filter: brightness(1.3); }
 .btn.primary {
-  background: linear-gradient(180deg, #34343b, #1e1e22);
+  background: #2c2d33;
   color: #ffffff; font-weight: 500;
-  box-shadow: 0 0 20px rgba(242, 242, 245, 0.16);
+  box-shadow: 0 0 18px rgba(242, 242, 245, 0.14);
 }
-.btn.danger { background: linear-gradient(180deg, #7a2f29, #4c1a16); color: #ffd9d3; }
+.btn.danger { background: #6a2721; color: #ffd9d3; }
 /* subtle + small buttons stay minimal: a clean hairline, no ornate frame */
 .btn.subtle {
   border: 1.5px solid rgba(236, 236, 239, 0.22); border-image: none; border-radius: 11px;
@@ -247,8 +254,14 @@ input:focus { border-color: var(--gold); }
 .menu-actions > #join-block { margin-top: 4px; }
 .menu-panel { position: relative; }
 
-/* ---------- start screen ---------- */
-.start-panel { display: flex; flex-direction: column; align-items: center; }
+/* ---------- start screen ----------
+   no enclosing panel — the crest, logo and actions float loosely on the
+   darkened board, and animate in like a game's title screen. */
+.start-screen { background: radial-gradient(ellipse at 50% 30%, rgba(30, 30, 36, 0.55), rgba(6, 6, 9, 0.94) 72%); }
+.start-panel {
+  display: flex; flex-direction: column; align-items: center;
+  width: 100%; max-width: 360px; padding: 20px; background: none; border: none;
+}
 .title-crest {
   display: flex; align-items: center; justify-content: center;
   margin: 4px auto -4px;
@@ -258,12 +271,44 @@ input:focus { border-color: var(--gold); }
   color: #eef1f4;
   filter: drop-shadow(0 0 18px rgba(236, 240, 244, 0.65))
           drop-shadow(0 4px 6px rgba(0, 0, 0, 0.5));
-  animation: crest-bob 3.4s ease-in-out infinite;
+  /* drop in once, then settle into the idle bob */
+  animation: crest-in 0.75s cubic-bezier(0.2, 0.9, 0.3, 1.3) both,
+             crest-bob 3.4s ease-in-out 0.8s infinite;
 }
 @keyframes crest-bob {
   50% { transform: translateY(-7px) rotate(-2deg); }
 }
-#start-area { width: 100%; display: flex; flex-direction: column; gap: 10px; margin-top: 6px; }
+@keyframes crest-in {
+  from { opacity: 0; transform: translateY(-22px) scale(0.7); }
+}
+
+/* the logo reveals once, rising out of a soft blur */
+.logo-title {
+  animation: logo-in 0.8s cubic-bezier(0.2, 0.8, 0.3, 1) 0.12s both;
+}
+@keyframes logo-in {
+  from { opacity: 0; transform: translateY(16px); filter: blur(7px); }
+}
+
+/* loading sits below the logo, then bows out to make room for the actions */
+#load-area { width: 100%; animation: soft-rise 0.6s ease 0.45s both; }
+#load-area.leaving { animation: soft-leave 0.32s ease forwards; }
+@keyframes soft-leave { to { opacity: 0; transform: translateY(-8px); } }
+
+#start-area {
+  width: 100%; display: flex; flex-direction: column; gap: 10px; margin-top: 6px;
+}
+#start-area:not(.hidden) { animation: soft-rise 0.5s cubic-bezier(0.2, 0.8, 0.3, 1) both; }
+#start-area:not(.hidden) > * { animation: soft-rise 0.5s ease both; }
+#start-area:not(.hidden) .lang-switch { animation-delay: 0.14s; }
+/* a gentle, non-shouty breathing glow to draw the eye to Play */
+#start-area .btn.primary { animation: soft-rise 0.5s ease 0.05s both, play-pulse 2.8s ease-in-out 0.8s infinite; }
+@keyframes play-pulse {
+  50% { box-shadow: 0 0 26px rgba(242, 242, 245, 0.3); }
+}
+@keyframes soft-rise {
+  from { opacity: 0; transform: translateY(12px); }
+}
 #start-area .btn.big { margin-top: 2px; }
 
 /* ---------- "you're joining a specific match" banner ---------- */
@@ -386,12 +431,13 @@ input:focus { border-color: var(--gold); }
 }
 #hud-bottom::-webkit-scrollbar { display: none; }
 .build-card {
-  display: flex; flex-direction: column; align-items: center; gap: 1px;
+  display: flex; flex-direction: column; align-items: center; gap: 0;
   background: var(--panel);
   /* Kenney slot frame — the same corner-bracket treatment as the
-     reference's inventory tiles */
-  border: 9px solid transparent; border-image: var(--frame-slot) 42 stretch;
-  border-radius: 0; padding: 3px 7px 5px; min-width: 66px;
+     reference's inventory tiles. Kept compact (thin frame, no vertical
+     padding) so the row never crowds the actions/toasts sitting above it. */
+  border: 7px solid transparent; border-image: var(--frame-slot) 42 stretch;
+  border-radius: 0; padding: 0 7px 1px; min-width: 64px;
   color: var(--text); cursor: pointer; font-family: inherit;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
   touch-action: none;
@@ -401,9 +447,9 @@ input:focus { border-color: var(--gold); }
   box-shadow: 0 0 16px rgba(242, 242, 245, 0.5);
 }
 .build-card:disabled { opacity: 0.45; }
-.bc-icon { font-size: 1.35rem; }
-.bc-name { font-size: 0.62rem; text-transform: uppercase; letter-spacing: 0.5px; }
-.bc-cost { font-size: 0.68rem; color: var(--gold); font-weight: 700; }
+.bc-icon { font-size: 1.15rem; line-height: 1; }
+.bc-name { font-size: 0.58rem; text-transform: uppercase; letter-spacing: 0.5px; margin-top: 1px; }
+.bc-cost { font-size: 0.66rem; color: var(--gold); font-weight: 700; line-height: 1.15; }
 
 /* top-right action slot — mirrors the health bar on the left, sitting at
    the same height but on the right edge, clear of the top chip row and
@@ -615,47 +661,59 @@ input:focus { border-color: var(--gold); }
 
 /* ---------- boss banner ---------- */
 #boss-banner {
-  position: absolute; top: 30%; left: 0; right: 0;
-  display: flex; flex-direction: column; align-items: center; gap: 2px;
+  position: absolute; top: 28%; left: 0; right: 0;
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
   text-align: center; pointer-events: none !important; z-index: 30;
+  padding: 0 12px;
+}
+/* soft dark plate so the announcement reads over the busy board, fading
+   out to transparent at the edges (like the reference's title backing) */
+#boss-banner::before {
+  content: ""; position: absolute; inset: -46px -4px; z-index: -1;
+  background: radial-gradient(ellipse 74% 120% at 50% 50%,
+    rgba(0, 0, 0, 0.82), rgba(0, 0, 0, 0.5) 46%, transparent 80%);
 }
 #bb-tag {
-  display: inline-flex; align-items: center; justify-content: center; gap: 14px;
-  font-size: 1rem; font-weight: 600; letter-spacing: 6px; text-transform: uppercase;
+  display: inline-flex; align-items: center; justify-content: center; gap: 12px;
+  max-width: 96vw; white-space: nowrap;
+  font-size: 1rem; font-weight: 600; letter-spacing: 5px; text-transform: uppercase;
   color: #ffb0a8; text-shadow: 0 2px 8px rgba(0, 0, 0, 0.9);
 }
-/* Kenney divider flourishes flanking the boss/mini tag — the kit's
-   "aviso" treatment, echoing the reference "— Location discovered —" */
+/* Kenney divider flourishes flanking the tag — the kit's "aviso" treatment.
+   Short tag text + nowrap keeps them hugging the label instead of flinging
+   out to the screen edges. */
 #bb-tag::before, #bb-tag::after {
-  content: ""; flex: 0 0 auto; width: 60px; height: 20px;
+  content: ""; flex: 0 0 auto; width: 46px; height: 18px;
   background: url("./assets/ui/divider-4.png") center / contain no-repeat;
   filter: drop-shadow(0 1px 3px rgba(0, 0, 0, 0.8));
 }
 #bb-tag::after { transform: scaleX(-1); }
 #bb-name {
-  font-size: clamp(2.4rem, 10vw, 4.2rem); font-weight: 900; letter-spacing: 3px;
-  text-transform: uppercase; color: var(--danger); line-height: 1.05;
+  max-width: 96vw; white-space: nowrap;
+  font-size: clamp(2.2rem, 9.5vw, 4.2rem); font-weight: 900; letter-spacing: 2px;
+  text-transform: uppercase; color: var(--danger); line-height: 1.04;
   text-shadow: 0 0 26px rgba(224, 90, 78, 0.85), 0 4px 0 #3a0d08, 0 0 70px rgba(255, 60, 40, 0.5);
 }
 #bb-flavor {
-  font-size: 0.95rem; font-weight: 700; color: var(--gold);
+  max-width: 92vw;
+  font-size: 0.95rem; font-weight: 500; color: var(--gold);
   text-shadow: 0 2px 6px rgba(0, 0, 0, 0.9);
 }
 #boss-banner.mini #bb-tag { color: #eaeaee; letter-spacing: 4px; }
 #boss-banner.mini #bb-name {
-  font-size: clamp(1.7rem, 7vw, 2.7rem); color: var(--mini);
+  font-size: clamp(1.6rem, 6.5vw, 2.7rem); color: var(--mini);
   text-shadow: 0 0 20px rgba(255, 154, 74, 0.8), 0 3px 0 #3a2408;
 }
 #boss-banner.boss {
-  animation: banner-in 0.45s cubic-bezier(0.2, 1.5, 0.4, 1),
-    banner-shake 0.55s linear 0.45s,
-    banner-out 0.5s ease-in 2.9s forwards;
+  animation: banner-in 0.5s cubic-bezier(0.18, 1.3, 0.4, 1),
+    banner-shake 0.5s linear 0.5s,
+    banner-out 0.6s ease-in 2.9s forwards;
 }
 #boss-banner.mini {
-  animation: banner-in 0.35s cubic-bezier(0.2, 1.5, 0.4, 1),
-    banner-out 0.45s ease-in 1.9s forwards;
+  animation: banner-in 0.4s cubic-bezier(0.18, 1.3, 0.4, 1),
+    banner-out 0.5s ease-in 1.9s forwards;
 }
-@keyframes banner-in { from { opacity: 0; transform: scale(2.6); } }
+@keyframes banner-in { from { opacity: 0; transform: scale(1.9); } }
 @keyframes banner-shake {
   20% { transform: translate(-7px, 2px) rotate(-1deg); }
   40% { transform: translate(6px, -2px) rotate(1deg); }
