@@ -21,6 +21,12 @@
   src: url("./assets/fonts/wotfard-italic.woff2") format("woff2");
   font-weight: 400; font-style: italic; font-display: swap;
 }
+/* Ferrum (Marco Kaschny, CC0) — the game logo display face */
+@font-face {
+  font-family: "Ferrum";
+  src: url("./assets/fonts/ferrum.woff2") format("woff2");
+  font-weight: 400; font-style: normal; font-display: swap;
+}
 
 :root {
   /* ---------- black & white theme ----------
