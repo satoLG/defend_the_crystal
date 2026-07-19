@@ -1494,6 +1494,8 @@ export class UI {
         this._skCls = cls;
         $('skill-icon').innerHTML = icon('sk-' + cls);
         $('skill-btn').title = `${powerName(cls)} (K)`;
+        // paint the skill button in the class's signature colour
+        $('skill-btn').style.setProperty('--skill-color', CLASS_COLORS[cls] || '#e9e9ee');
       }
       const skillCd = me[16] || 0;
       this.skillReady = skillCd <= 0 && dead !== 1;

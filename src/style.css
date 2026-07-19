@@ -377,7 +377,7 @@ input:focus { border-color: var(--gold); }
   box-shadow: 0 3px 10px rgba(0, 0, 0, 0.5);
 }
 .hud-chip.gold { color: var(--gold); }
-.hud-chip.crystal { color: #dce6ec; }
+.hud-chip.crystal { color: #66e0ff; }
 /* crystal-health heart — defined before .warn so the low-health red
    (same specificity, later in source) always wins */
 .hud-chip.life { color: #ff8a9c; }
@@ -408,8 +408,8 @@ input:focus { border-color: var(--gold); }
 }
 .bar.xp { height: 6px; }
 .bar > div { position: absolute; inset: 0; width: 50%; transition: width 0.18s; }
-.bar.hp > div { background: linear-gradient(180deg, #ffffff, #c2c2c8); }
-.bar.xp > div { background: linear-gradient(180deg, #a4a4ac, #5a5a62); }
+.bar.hp > div { background: linear-gradient(180deg, #8fe98f, #3fa53f); }
+.bar.xp > div { background: linear-gradient(180deg, #83ccff, #2c7fc4); }
 .bar span {
   position: absolute; inset: 0; font-size: 9px; font-weight: 800; color: #fff;
   display: flex; align-items: center; justify-content: center;
@@ -533,13 +533,17 @@ input:focus { border-color: var(--gold); }
 }
 
 /* ---------- class special attack button (next to jump) ---------- */
+/* the class special button wears its class's signature colour (set as
+   --skill-color from the roster palette): tinted icon, a faint tint in the
+   dial, and a matching glow/ring when the skill is off cooldown */
 #skill-btn {
   position: absolute; right: 84px;
   bottom: calc(max(10px, env(safe-area-inset-bottom)) + 100px);
   width: 62px; height: 62px; border-radius: 50%;
-  background: linear-gradient(180deg, #222226, #141417);
+  background: radial-gradient(circle at 50% 36%,
+    color-mix(in srgb, var(--skill-color, #6a6a72) 26%, #17171b), #131315);
   border: 2px solid var(--panel-border);
-  color: #eaeaee; cursor: pointer; font-family: inherit;
+  color: var(--skill-color, #eaeaee); cursor: pointer; font-family: inherit;
   display: flex; align-items: center; justify-content: center;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
   touch-action: none;
@@ -547,12 +551,12 @@ input:focus { border-color: var(--gold); }
 #skill-btn .ico { width: 1.9rem; height: 1.9rem; }
 #skill-btn:disabled { opacity: 0.4; cursor: default; }
 #skill-btn:not(:disabled) {
-  border-color: var(--line);
+  border-color: var(--skill-color, var(--line));
   animation: skill-ready 1.2s infinite;
 }
 #skill-btn:not(:disabled):active { transform: scale(0.92); }
 @keyframes skill-ready {
-  50% { box-shadow: 0 0 20px rgba(242, 242, 245, 0.7); }
+  50% { box-shadow: 0 0 20px color-mix(in srgb, var(--skill-color, #f2f2f5) 68%, transparent); }
 }
 #skill-cd {
   position: absolute; inset: 0; border-radius: 50%;
@@ -838,6 +842,11 @@ input:focus { border-color: var(--gold); }
 
 .char-info {
   text-align: left; flex: 0 0 auto;
+  /* locked height so the panel below the viewer never grows/shrinks when
+     switching class (the special/blurb text differs per class) — longer
+     copy scrolls inside instead of resizing the 3D stage above it */
+  height: clamp(128px, 22dvh, 158px);
+  overflow-y: auto;
   background: rgba(0, 0, 0, 0.25); border-radius: 12px;
   border: 1px solid rgba(236, 236, 239, 0.1);
   padding: 8px 11px;
@@ -977,7 +986,7 @@ input:focus { border-color: var(--gold); }
 .pb-pet-icon img { width: 100%; height: 100%; object-fit: contain; display: block; }
 .pb-pet-icon:active { transform: scale(0.92); }
 .pb-pet-name { font-size: 0.72rem; color: #d8d8de; }
-.bar.xp.pet > div { background: linear-gradient(180deg, #c8c8ce, #83838b); }
+.bar.xp.pet > div { background: linear-gradient(180deg, #ffd07a, #d69a35); }
 .pb-lvl.pet {
   width: 22px; height: 22px; font-size: 0.72rem;
   background: #d8b06a; box-shadow: 0 0 6px rgba(216, 176, 106, 0.45);
@@ -997,7 +1006,7 @@ input:focus { border-color: var(--gold); }
   height: 8px; border-radius: 5px; overflow: hidden;
   background: rgba(0, 0, 0, 0.55); border: 1px solid rgba(255, 255, 255, 0.14);
 }
-.pd-xpfill { height: 100%; background: linear-gradient(90deg, #c8c8ce, #83838b); }
+.pd-xpfill { height: 100%; background: linear-gradient(90deg, #ffd07a, #d69a35); }
 .pd-xptext { font-size: 0.75rem; margin-top: 5px; }
 .pd-hint { font-size: 0.72rem; margin-top: 10px; line-height: 1.35; }
 
@@ -1108,7 +1117,7 @@ input:focus { border-color: var(--gold); }
   height: 5px; border-radius: 3px; overflow: hidden; margin-top: 3px;
   background: rgba(0, 0, 0, 0.55); border: 1px solid rgba(255, 255, 255, 0.14);
 }
-.pet-xpfill { height: 100%; background: linear-gradient(90deg, #a4a4ac, #5a5a62); }
+.pet-xpfill { height: 100%; background: linear-gradient(90deg, #83ccff, #2c7fc4); }
 .pet-actions { flex: 0 0 auto; display: flex; flex-direction: column; align-items: center; gap: 4px; }
 .pet-equipped {
   display: flex; align-items: center; gap: 4px;

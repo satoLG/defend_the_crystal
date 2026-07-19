@@ -36,7 +36,9 @@ pack by **Kenney** ([www.kenney.nl](https://www.kenney.nl)), **CC0**.
 
 The interface is set in **Wotfard** by
 [Atipo Foundry](https://www.atipofoundry.com), offered under their
-pay-what-you-want licence (weights self-hosted in `src/assets/fonts/`).
+pay-what-you-want licence. The game logo uses **Ferrum** by
+**Marco Kaschny** (**CC0**). Both are self-hosted as woff2 in
+`src/assets/fonts/`.
 
 ## Libraries
 
