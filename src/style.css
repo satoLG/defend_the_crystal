@@ -262,60 +262,71 @@ input:focus { border-color: var(--gold); }
 
 /* ---------- start screen ----------
    no enclosing panel — the crest, logo and actions float loosely on the
-   darkened board, and animate in like a game's title screen. */
+   darkened board and animate in like a game's title screen. */
 .start-screen { background: radial-gradient(ellipse at 50% 30%, rgba(30, 30, 36, 0.55), rgba(6, 6, 9, 0.94) 72%); }
 .start-panel {
   display: flex; flex-direction: column; align-items: center;
-  width: 100%; max-width: 360px; padding: 20px; background: none; border: none;
+  width: 100%; max-width: 470px; padding: 20px; background: none; border: none;
 }
 .title-crest {
   display: flex; align-items: center; justify-content: center;
-  margin: 4px auto -4px;
+  margin: 2px auto 0;
 }
-.title-crest .ico {
-  width: clamp(74px, 22vw, 104px); height: clamp(74px, 22vw, 104px);
-  color: #eef1f4;
-  filter: drop-shadow(0 0 18px rgba(236, 240, 244, 0.65))
-          drop-shadow(0 4px 6px rgba(0, 0, 0, 0.5));
-  /* drop in once, then settle into the idle bob */
-  animation: crest-in 0.75s cubic-bezier(0.2, 0.9, 0.3, 1.3) both,
-             crest-bob 3.4s ease-in-out 0.8s infinite;
+.title-crest .ico, .title-crest img {
+  width: clamp(104px, 32vw, 168px); height: clamp(104px, 32vw, 168px);
+  object-fit: contain; color: #eef1f4;
+  filter: drop-shadow(0 0 24px rgba(236, 240, 244, 0.45))
+          drop-shadow(0 6px 12px rgba(0, 0, 0, 0.55));
+  /* drop in once, then settle into a gentle idle float */
+  animation: crest-in 0.8s cubic-bezier(0.2, 0.9, 0.3, 1.3) both,
+             crest-bob 4s ease-in-out 0.85s infinite;
 }
-@keyframes crest-bob {
-  50% { transform: translateY(-7px) rotate(-2deg); }
-}
-@keyframes crest-in {
-  from { opacity: 0; transform: translateY(-22px) scale(0.7); }
-}
+@keyframes crest-bob { 50% { transform: translateY(-8px); } }
+@keyframes crest-in { from { opacity: 0; transform: translateY(-26px) scale(0.7); } }
 
-/* the logo reveals once, rising out of a soft blur */
+/* the logo wordmark — deliberately wider than the action block below it.
+   The two groups ("Defend" / "the Crystal") wrap as whole units: one line
+   when it fits, otherwise Defend on top and the Crystal beneath. The
+   article ("the" / "o") is set much smaller than the rest. */
 .logo-title {
+  display: flex; flex-wrap: wrap; justify-content: center; align-items: baseline;
+  gap: 0 0.3em; width: 100%; max-width: min(470px, 94vw);
+  font-size: clamp(2.5rem, 9.5vw, 3.9rem); line-height: 1.02; margin: 8px 0 16px;
   animation: logo-in 0.8s cubic-bezier(0.2, 0.8, 0.3, 1) 0.12s both;
 }
-@keyframes logo-in {
-  from { opacity: 0; transform: translateY(16px); filter: blur(7px); }
+.logo-title .t-grp { white-space: nowrap; }
+.logo-title .t-the {
+  font-size: 0.4em; letter-spacing: 1px; opacity: 0.82; margin-right: 0.1em;
 }
+@keyframes logo-in { from { opacity: 0; transform: translateY(16px); filter: blur(7px); } }
 
-/* loading sits below the logo, then bows out to make room for the actions */
-#load-area { width: 100%; animation: soft-rise 0.6s ease 0.45s both; }
-#load-area.leaving { animation: soft-leave 0.32s ease forwards; }
-@keyframes soft-leave { to { opacity: 0; transform: translateY(-8px); } }
+/* the loading strip and the actions share ONE grid cell, so the cell always
+   reserves the (taller) actions' height. Cross-fading between them never
+   changes layout — the logo above and everything else stay put. */
+.start-swap { display: grid; width: min(300px, 82vw); }
+.start-swap > * { grid-area: 1 / 1; width: 100%; }
 
+/* loading only fades in after the logo has landed, then bows out */
+#load-area { align-self: center; animation: soft-rise 0.55s ease 0.7s both; transition: opacity 0.3s ease; }
+#load-area.leaving { opacity: 0; pointer-events: none; }
+
+/* actions are laid out from the start (reserving the cell height) but stay
+   invisible until revealed — no display:none, so nothing reflows/jumps */
 #start-area {
-  width: 100%; display: flex; flex-direction: column; gap: 10px; margin-top: 6px;
+  align-self: start; display: flex; flex-direction: column; gap: 10px;
+  opacity: 0; visibility: hidden; transform: translateY(8px);
+  transition: opacity 0.55s ease, transform 0.55s ease;
 }
-#start-area:not(.hidden) { animation: soft-rise 0.5s cubic-bezier(0.2, 0.8, 0.3, 1) both; }
-#start-area:not(.hidden) > * { animation: soft-rise 0.5s ease both; }
-#start-area:not(.hidden) .lang-switch { animation-delay: 0.14s; }
+#start-area.revealed { opacity: 1; visibility: visible; transform: none; }
+.start-actions { display: flex; flex-direction: column; gap: 10px; }
+.start-actions .btn.big { margin-top: 0; width: 100%; }
+/* the two language buttons fill the Play button's width → a tidy rectangle */
+.start-actions .lang-switch { display: flex; gap: 10px; margin-top: 0; }
+.start-actions .lang-btn { flex: 1; justify-content: center; }
 /* a gentle, non-shouty breathing glow to draw the eye to Play */
-#start-area .btn.primary { animation: soft-rise 0.5s ease 0.05s both, play-pulse 2.8s ease-in-out 0.8s infinite; }
-@keyframes play-pulse {
-  50% { box-shadow: 0 0 26px rgba(242, 242, 245, 0.3); }
-}
-@keyframes soft-rise {
-  from { opacity: 0; transform: translateY(12px); }
-}
-#start-area .btn.big { margin-top: 2px; }
+#start-area.revealed .btn.primary { animation: play-pulse 2.8s ease-in-out 1s infinite; }
+@keyframes play-pulse { 50% { box-shadow: 0 0 26px rgba(242, 242, 245, 0.3); } }
+@keyframes soft-rise { from { opacity: 0; transform: translateY(12px); } }
 
 /* ---------- "you're joining a specific match" banner ---------- */
 .room-invite {

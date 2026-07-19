@@ -306,19 +306,11 @@ export class UI {
     this.hide('menu'); this.hide('character'); this.hide('lobby'); this.hide('hud');
     this.hide('checkpoint'); this.hide('gameover'); this.hide('host-lost');
     this.show('loading');
-    // the title stays put; only the strip beneath it swaps — the loading
-    // bar bows out, then the Play/lang actions rise up in its place
-    const load = $('load-area');
-    if (load && !load.classList.contains('hidden')) {
-      load.classList.add('leaving');
-      setTimeout(() => {
-        this.hide('load-area');
-        load.classList.remove('leaving');
-        this.show('start-area');
-      }, 320);
-    } else {
-      this.show('start-area');
-    }
+    // the title stays put; loading and actions share one fixed-height cell,
+    // so this is a pure cross-fade — the loading bar bows out and the
+    // Play/lang actions fade in over the exact same spot, nothing shifts
+    $('load-area').classList.add('leaving');
+    $('start-area').classList.add('revealed');
     const room = this.linkedRoom();
     const invite = $('room-invite');
     if (room) {
