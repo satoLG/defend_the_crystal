@@ -194,7 +194,7 @@ const STRINGS = {
     },
     char: {
       yourHero: 'Your hero', weapon: 'Weapon', special: 'Special',
-      heroNamePh: 'Hero name', saveContinue: 'Save & continue',
+      heroNamePh: 'Hero name', saveContinue: 'Save & continue', drag: 'drag',
     },
     pp: {
       firstPet: 'Your first pet',
@@ -321,7 +321,7 @@ const STRINGS = {
       defaultFlavor: 'The ground trembles…',
       subbossFlavor: 'A monstrous champion joins the wave!',
     },
-    npc: { greeting: 'Hi!' },
+    npc: { greeting: 'Hi!', pets: 'Pets!', weapons: 'Weapons!' },
     toast: {
       joined: '{name} joined the defense!', left: '{name} left.',
       noBlocks: 'No blocks left — earn more each wave',
@@ -390,7 +390,7 @@ const STRINGS = {
     },
     char: {
       yourHero: 'Seu herói', weapon: 'Arma', special: 'Especial',
-      heroNamePh: 'Nome do herói', saveContinue: 'Salvar & continuar',
+      heroNamePh: 'Nome do herói', saveContinue: 'Salvar & continuar', drag: 'arraste',
     },
     pp: {
       firstPet: 'Seu primeiro pet',
@@ -518,7 +518,7 @@ const STRINGS = {
       defaultFlavor: 'O chão treme…',
       subbossFlavor: 'Um campeão monstruoso entra na onda!',
     },
-    npc: { greeting: 'Oi!' },
+    npc: { greeting: 'Oi!', pets: 'Pets!', weapons: 'Armas!' },
     toast: {
       joined: '{name} entrou na defesa!', left: '{name} saiu.',
       noBlocks: 'Sem blocos — ganhe mais a cada onda',

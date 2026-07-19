@@ -1330,7 +1330,7 @@ export class GameView {
     // Tonho stands out front, turned to face the camera
     this.mkNpc({
       model: 'char-berserker', name: 'Tonho', tint: 0x9ad86a,
-      x, z, yaw: 0, bubble: 'Pets!',
+      x, z, yaw: 0, bubble: t('npc.pets'),
     });
 
     // his display critters potter about out front (camera side), never
@@ -1435,7 +1435,7 @@ export class GameView {
     // Baru the smith stands out front, turned to face the camera
     this.mkNpc({
       model: 'char-tanker', name: 'Baru', tint: 0xd87a5a,
-      x, z, yaw: 0, bubble: 'Weapons!',
+      x, z, yaw: 0, bubble: t('npc.weapons'),
     });
   }
 
