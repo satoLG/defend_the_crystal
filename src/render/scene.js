@@ -414,18 +414,44 @@ export class GameScene {
   }
 
   buildCrystal() {
-    this.crystal = instantiate('env-crystal').group;
+    // a clean silhouette instead of the old dense cluster: one tall crystal
+    // standing vertical at the centre with three smaller shards orbiting it
+    // (the group's slow spin in update() makes them drift around)
+    const proto = instantiate('prop-crystal').group;
+    proto.updateWorldMatrix(true, true);
+    const pb = new THREE.Box3().setFromObject(proto);
+    const unit = 1 / (pb.max.y - pb.min.y); // scale to 1 unit tall
+    this.crystal = new THREE.Group();
+    this.crystalMats = [];
+    const mk = (scale) => {
+      const g = proto.clone(true);
+      g.traverse((o) => {
+        if (o.isMesh) {
+          o.material = o.material.clone();
+          o.material.emissive = new THREE.Color(0x2299cc);
+          o.material.emissiveIntensity = 0.55;
+          this.crystalMats.push(o.material);
+        }
+      });
+      g.scale.setScalar(unit * scale);
+      const b = new THREE.Box3().setFromObject(g);
+      g.position.y -= b.min.y; // seat base at y = 0
+      return g;
+    };
+    this.crystal.add(mk(2.7)); // big central crystal
+    const orbit = [
+      { a: -Math.PI / 2, r: 0.9, y: 0.5, s: 0.85 },
+      { a: -Math.PI / 2 + (Math.PI * 2) / 3, r: 0.95, y: 1.0, s: 0.62 },
+      { a: -Math.PI / 2 + (Math.PI * 4) / 3, r: 0.9, y: 0.4, s: 0.75 },
+    ];
+    for (const o of orbit) {
+      const c = mk(o.s);
+      c.position.set(Math.cos(o.a) * o.r, o.y, Math.sin(o.a) * o.r);
+      c.rotation.y = o.a;
+      this.crystal.add(c);
+    }
     this.crystal.position.set(CRYSTAL_POS.x, this.crystalBaseY || 0, CRYSTAL_POS.z);
     this.scene.add(this.crystal);
-    this.crystalMats = [];
-    this.crystal.traverse((o) => {
-      if (o.isMesh) {
-        o.material = o.material.clone();
-        o.material.emissive = new THREE.Color(0x2299cc);
-        o.material.emissiveIntensity = 0.55;
-        this.crystalMats.push(o.material);
-      }
-    });
     this.crystalHurt = 0;
   }
 
