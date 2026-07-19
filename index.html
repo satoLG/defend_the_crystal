@@ -14,26 +14,32 @@
     <div id="vignette"></div>
 
     <!-- ============ LOADING / START ============ -->
-    <div id="loading" class="screen">
-      <div class="panel center-panel start-panel">
-        <div class="title-crest"><i data-icon="crystal"></i></div>
-        <h1 class="title" data-i18n-html="brand.title">Defend<br/>the Crystal</h1>
-        <div id="load-area">
-          <div class="load-bar"><div id="load-fill"></div></div>
-          <div id="load-label" class="muted" data-i18n="start.summoning">Summoning models…</div>
-        </div>
-        <div id="start-area" class="hidden">
-          <div id="room-invite" class="room-invite hidden">
-            <i data-icon="link"></i>
-            <div class="ri-text">
-              <span data-i18n="invite.joiningMatch">You're joining a specific match</span><br/>
-              <span><span data-i18n="invite.room">Room</span> <b id="ri-code">·····</b></span>
-            </div>
+    <div id="loading" class="screen start-screen">
+      <div class="start-panel">
+        <div class="title-crest"><img src="./img/crystal-logo.png" alt="" class="crest-img" /></div>
+        <h1 class="title logo-title" data-i18n-html="brand.title">Defend the Crystal</h1>
+        <!-- loading strip and the actions share one fixed-height cell so
+             swapping between them never nudges the logo above -->
+        <div class="start-swap">
+          <div id="load-area">
+            <div class="load-bar"><div id="load-fill"></div></div>
+            <div id="load-label" class="muted" data-i18n="start.summoning">Summoning models…</div>
           </div>
-          <button id="start-btn-main" class="btn primary big"><i data-icon="play"></i> <span data-i18n="start.play">Play</span></button>
-          <div class="lang-switch" data-lang-switch>
-            <button class="lang-btn" data-lang="pt"><span class="flag">🇧🇷</span> <span data-i18n="lang.pt">Português</span></button>
-            <button class="lang-btn" data-lang="en"><span class="flag">🇺🇸</span> <span data-i18n="lang.en">English</span></button>
+          <div id="start-area">
+            <div id="room-invite" class="room-invite hidden">
+              <i data-icon="link"></i>
+              <div class="ri-text">
+                <span data-i18n="invite.joiningMatch">You're joining a specific match</span><br/>
+                <span><span data-i18n="invite.room">Room</span> <b id="ri-code">·····</b></span>
+              </div>
+            </div>
+            <div class="start-actions">
+              <button id="start-btn-main" class="btn primary big"><i data-icon="play"></i> <span data-i18n="start.play">Play</span></button>
+              <div class="lang-switch" data-lang-switch>
+                <button class="lang-btn" data-lang="pt"><span class="flag">🇧🇷</span> <span data-i18n="lang.pt">Português</span></button>
+                <button class="lang-btn" data-lang="en"><span class="flag">🇺🇸</span> <span data-i18n="lang.en">English</span></button>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -56,7 +62,7 @@
         <div class="char-stage-row">
           <div class="char-stage">
             <canvas id="preview-canvas"></canvas>
-            <div class="char-drag-hint muted"><i data-icon="rotate"></i> drag</div>
+            <div class="char-drag-hint muted"><i data-icon="rotate"></i> <span data-i18n="char.drag">drag</span></div>
           </div>
           <div class="char-side">
             <div id="char-colors" class="char-colors"></div>
@@ -190,7 +196,10 @@
         <button id="startwave-btn" class="btn primary hidden">
           <span id="startwave-label">Start<br/>wave</span>
         </button>
-        <button id="cont-btn" class="btn primary hidden" data-i18n="hud.keepGoing">Keep going ➜</button>
+        <button id="cont-btn" class="btn primary hidden">
+          <span id="cont-label" data-i18n="hud.keepGoing">Keep going ➜</span>
+          <span id="cont-count" class="cont-count hidden"></span>
+        </button>
       </div>
 
       <button id="jump-btn" disabled data-i18n-title="tip.jump" title="Jump over the block ahead (J / Space)">
@@ -362,16 +371,6 @@
           Gold coins drop from mini-bosses and bosses.<br/>Visit Baru's smithy in the sanctuary plaza to buy &amp; upgrade.
         </div>
         <div id="weapon-list" class="pet-list"></div>
-      </div>
-    </div>
-
-    <!-- ============ CHECKPOINT (non-blocking banner: free time to
-         wander the sanctuary behind the crystal) ============ -->
-    <div id="checkpoint" class="cp-banner hidden">
-      <div class="cp-inner">
-        <h2><i data-icon="tent"></i> <span data-i18n="cp.checkpoint">Checkpoint</span></h2>
-        <p><span data-i18n="cp.wavePrefix">Wave</span> <span id="cp-wave"></span> <span data-i18n="cp.waveSuffix">cleared — everyone is healed.</span><br/><span data-i18n="cp.stroll">Stroll the sanctuary behind the crystal, then push on.</span></p>
-        <div id="cp-status" class="muted"></div>
       </div>
     </div>
 

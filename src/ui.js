@@ -177,8 +177,8 @@ export class UI {
 
   // ---------------- helpers ----------------
 
-  show(id) { $(id).classList.remove('hidden'); }
-  hide(id) { $(id).classList.add('hidden'); }
+  show(id) { $(id)?.classList.remove('hidden'); }
+  hide(id) { $(id)?.classList.add('hidden'); }
 
   // ---------------- character roster ----------------
 
@@ -305,9 +305,12 @@ export class UI {
   showStart() {
     this.hide('menu'); this.hide('character'); this.hide('lobby'); this.hide('hud');
     this.hide('checkpoint'); this.hide('gameover'); this.hide('host-lost');
-    this.hide('load-area');
     this.show('loading');
-    this.show('start-area');
+    // the title stays put; loading and actions share one fixed-height cell,
+    // so this is a pure cross-fade — the loading bar bows out and the
+    // Play/lang actions fade in over the exact same spot, nothing shifts
+    $('load-area').classList.add('leaving');
+    $('start-area').classList.add('revealed');
     const room = this.linkedRoom();
     const invite = $('room-invite');
     if (room) {
@@ -1483,6 +1486,8 @@ export class UI {
         this._skCls = cls;
         $('skill-icon').innerHTML = icon('sk-' + cls);
         $('skill-btn').title = `${powerName(cls)} (K)`;
+        // paint the skill button in the class's signature colour
+        $('skill-btn').style.setProperty('--skill-color', CLASS_COLORS[cls] || '#e9e9ee');
       }
       const skillCd = me[16] || 0;
       this.skillReady = skillCd <= 0 && dead !== 1;
@@ -1501,20 +1506,27 @@ export class UI {
       }
     }
 
-    // checkpoint overlay + its "keep going" action (shown in the same
-    // top-right slot the start-wave button uses the rest of the time)
+    // checkpoint action lives in the same top-right slot the start-wave
+    // button uses the rest of the time — no blocking banner any more, the
+    // whole checkpoint fits on the "keep going" button itself (with a live
+    // tally of who's already ready baked in, so co-op still reads clearly)
     const cont = $('cont-btn');
     if (snap.ph === 'checkpoint') {
-      this.show('checkpoint');
       cont.classList.remove('hidden');
-      $('cp-wave').textContent = snap.w;
       const ready = snap.cont?.length || 0;
-      $('cp-status').textContent = t('hud.ready', { ready, total: snap.pl.length });
+      const total = snap.pl.length;
       const waiting = snap.cont?.includes(selfId);
       cont.disabled = waiting;
-      cont.textContent = waiting ? t('hud.waitingAllies') : t('hud.keepGoing');
+      $('cont-label').textContent = waiting ? t('hud.waitingAllies') : t('hud.keepGoing');
+      const countEl = $('cont-count');
+      // the tally only means something with allies around
+      if (total > 1) {
+        countEl.textContent = t('hud.ready', { ready, total });
+        countEl.classList.remove('hidden');
+      } else {
+        countEl.classList.add('hidden');
+      }
     } else {
-      this.hide('checkpoint');
       cont.classList.add('hidden');
     }
   }

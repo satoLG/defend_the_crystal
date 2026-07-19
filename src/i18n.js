@@ -182,7 +182,7 @@ const STRINGS = {
       hero: 'Hero', yourHero: 'Your hero', level: 'Level', lvAbbr: 'Lv',
       max: 'MAX', host: 'Host', you: 'You',
     },
-    brand: { title: 'Defend<br/>the Crystal' },
+    brand: { title: '<span class="t-grp">Defend</span><span class="t-grp"><span class="t-the">the</span> Crystal</span>' },
     lang: { label: 'Language', pt: 'Português', en: 'English' },
     start: {
       play: 'Play', summoning: 'Summoning models…', ready: 'Ready!',
@@ -194,7 +194,7 @@ const STRINGS = {
     },
     char: {
       yourHero: 'Your hero', weapon: 'Weapon', special: 'Special',
-      heroNamePh: 'Hero name', saveContinue: 'Save & continue',
+      heroNamePh: 'Hero name', saveContinue: 'Save & continue', drag: 'drag',
     },
     pp: {
       firstPet: 'Your first pet',
@@ -229,7 +229,7 @@ const STRINGS = {
       waitingAllies: 'Waiting for allies…', ready: '{ready}/{total} ready',
       placeBlockHint: 'Place a block — tap here to cancel',
       placeTowerHint: 'Place {name} ({cost}) — tap here to cancel',
-      miniBoss: '⚠ MINI-BOSS ⚠', bossIncoming: '☠ BOSS INCOMING ☠',
+      miniBoss: '⚠ MINI-BOSS ⚠', bossIncoming: '☠ BOSS ☠',
       petShop: 'Pet Shop', weaponSmith: 'Weapon Smith',
     },
     tip: {
@@ -321,7 +321,7 @@ const STRINGS = {
       defaultFlavor: 'The ground trembles…',
       subbossFlavor: 'A monstrous champion joins the wave!',
     },
-    npc: { greeting: 'Hi!' },
+    npc: { greeting: 'Hi!', pets: 'Pets!', weapons: 'Weapons!' },
     toast: {
       joined: '{name} joined the defense!', left: '{name} left.',
       noBlocks: 'No blocks left — earn more each wave',
@@ -378,7 +378,7 @@ const STRINGS = {
       hero: 'Herói', yourHero: 'Seu herói', level: 'Nível', lvAbbr: 'Nv',
       max: 'MÁX', host: 'Anfitrião', you: 'Você',
     },
-    brand: { title: 'Defenda o<br/>Cristal' },
+    brand: { title: '<span class="t-grp">Defenda</span><span class="t-grp"><span class="t-the">o</span> Cristal</span>' },
     lang: { label: 'Idioma', pt: 'Português', en: 'English' },
     start: {
       play: 'Jogar', summoning: 'Invocando modelos…', ready: 'Pronto!',
@@ -390,7 +390,7 @@ const STRINGS = {
     },
     char: {
       yourHero: 'Seu herói', weapon: 'Arma', special: 'Especial',
-      heroNamePh: 'Nome do herói', saveContinue: 'Salvar & continuar',
+      heroNamePh: 'Nome do herói', saveContinue: 'Salvar & continuar', drag: 'arraste',
     },
     pp: {
       firstPet: 'Seu primeiro pet',
@@ -425,7 +425,7 @@ const STRINGS = {
       waitingAllies: 'Aguardando aliados…', ready: '{ready}/{total} prontos',
       placeBlockHint: 'Coloque um bloco — toque aqui para cancelar',
       placeTowerHint: 'Coloque {name} ({cost}) — toque aqui para cancelar',
-      miniBoss: '⚠ MINICHEFE ⚠', bossIncoming: '☠ CHEFE CHEGANDO ☠',
+      miniBoss: '⚠ MINICHEFE ⚠', bossIncoming: '☠ CHEFE ☠',
       petShop: 'Loja de Pets', weaponSmith: 'Ferreiro',
     },
     tip: {
@@ -518,7 +518,7 @@ const STRINGS = {
       defaultFlavor: 'O chão treme…',
       subbossFlavor: 'Um campeão monstruoso entra na onda!',
     },
-    npc: { greeting: 'Oi!' },
+    npc: { greeting: 'Oi!', pets: 'Pets!', weapons: 'Armas!' },
     toast: {
       joined: '{name} entrou na defesa!', left: '{name} saiu.',
       noBlocks: 'Sem blocos — ganhe mais a cada onda',
@@ -547,7 +547,7 @@ const STRINGS = {
       class: {
         berserker: {
           name: 'Berserker', weapon: 'Machado de guerra',
-          blurb: 'Um brigão da linha de frente que troca segurança por golpes corpo a corpo devastadores.',
+          blurb: 'Um brigão da linha de frente que troca defesa por golpes brutais.',
         },
         tanker: {
           name: 'Tanque', weapon: 'Espada e escudo',
@@ -555,11 +555,11 @@ const STRINGS = {
         },
         archer: {
           name: 'Arqueiro', weapon: 'Arco longo',
-          blurb: 'Um atirador ágil que chove flechas rápidas a uma distância segura.',
+          blurb: 'Um atirador ágil que chove flechas a uma distância segura.',
         },
         mage: {
           name: 'Mago', weapon: 'Cajado arcano',
-          blurb: 'Um conjurador à distância que derrete grupos inteiros com explosões em área.',
+          blurb: 'Um conjurador que derrete grupos inteiros com explosões em área.',
         },
       },
       tower: {
@@ -636,10 +636,10 @@ const STRINGS = {
       },
     },
     power: {
-      berserker: { name: 'Investida Furiosa', desc: 'Investida Furiosa — atravesse a horda, arremessando inimigos para os lados.' },
-      tanker: { name: 'Modo Muralha', desc: 'Modo Muralha — torne-se imóvel com defesa dobrada por um tempo.' },
-      archer: { name: 'Tempestade de Flechas', desc: 'Tempestade de Flechas — dispare rajadas rápidas nos inimigos mais próximos.' },
-      mage: { name: 'Orbe Arcano', desc: 'Orbe Arcano — uma explosão gigante causando dano em área massivo.' },
+      berserker: { name: 'Investida Furiosa', desc: 'Investida Furiosa — atravesse a horda empurrando inimigos.' },
+      tanker: { name: 'Modo Muralha', desc: 'Modo Muralha — fique imóvel com defesa dobrada por um tempo.' },
+      archer: { name: 'Tempestade de Flechas', desc: 'Tempestade de Flechas — rajadas rápidas nos alvos próximos.' },
+      mage: { name: 'Orbe Arcano', desc: 'Orbe Arcano — explosão gigante com dano em área massivo.' },
     },
   },
 };
