@@ -856,7 +856,10 @@ export class UI {
     const key = this.dragItem
       ? 'hud.dragHint'
       : this.placePtr === 'touch' ? 'hud.placeTapHint' : 'hud.placeClickHint';
-    hint.innerHTML = `<span class="hint-x">${icon('x')}</span>` + t(key, { name: label });
+    // the message must be ONE flex item — bare text nodes around the
+    // inline gem icon would each become their own item and wrap apart
+    hint.innerHTML =
+      `<span class="hint-x">${icon('x')}</span><span class="hint-msg">${t(key, { name: label })}</span>`;
   }
 
   selectCardByIndex(i) {
