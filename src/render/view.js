@@ -2255,33 +2255,49 @@ export class GameView {
 
   // ---------------- build ghost ----------------
 
+  // The ghost follows every pointer move while dragging/hovering, so the
+  // model is instantiated once per item and then only repositioned and
+  // retinted — rebuilding it per move both cost a full instantiate and
+  // compounded the tint multiply into the cloned materials.
   setGhost(item, c, r, ok) {
-    this.clearGhost();
-    if (!item || c == null) return;
-    const key = item === 'obstacle' ? 'obstacle-rocks' : TOWERS[item]?.model;
-    if (!key) return;
-    const g = instantiate(key, { cloneMaterials: true, shadows: false }).group;
+    if (!item || c == null) return this.clearGhost();
+    if (this.ghost?.item !== item) {
+      this.clearGhost();
+      const key = item === 'obstacle' ? 'obstacle-rocks' : TOWERS[item]?.model;
+      if (!key) return;
+      const g = instantiate(key, { cloneMaterials: true, shadows: false }).group;
+      g.traverse((o) => {
+        if (o.isMesh && o.material) {
+          o.material.transparent = true;
+          o.material.opacity = 0.55;
+          o.userData.baseColor = o.material.color.clone();
+        }
+      });
+      this.scene.add(g);
+      this.ghost = { item, group: g, ok: null };
+    }
+    const g = this.ghost.group;
     const w = cellToWorld(c, r);
     g.position.set(w.x, 0.02, w.z);
-    g.traverse((o) => {
-      if (o.isMesh && o.material) {
-        o.material.transparent = true;
-        o.material.opacity = 0.55;
-        o.material.color.multiply(new THREE.Color(ok ? 0x9fff9f : 0xff8f8f));
-      }
-    });
-    this.scene.add(g);
-    this.ghost = g;
+    if (this.ghost.ok !== ok) {
+      this.ghost.ok = ok;
+      const tint = new THREE.Color(ok ? 0x9fff9f : 0xff8f8f);
+      g.traverse((o) => {
+        if (o.isMesh && o.material && o.userData.baseColor) {
+          o.material.color.copy(o.userData.baseColor).multiply(tint);
+        }
+      });
+    }
     this.gs.showCellHighlight(c, r, ok);
     if (item !== 'obstacle' && TOWERS[item]) {
-      this.gs.showRange(w.x, w.z, TOWERS[item].range);
+      this.gs.showRange(w.x, w.z, TOWERS[item].range, ok ? 'ok' : 'bad');
     } else {
       this.gs.hideRange();
     }
   }
 
   clearGhost() {
-    if (this.ghost) { this.scene.remove(this.ghost); this.ghost = null; }
+    if (this.ghost) { this.scene.remove(this.ghost.group); this.ghost = null; }
     this.gs.hideCellHighlight();
     this.gs.hideRange();
   }

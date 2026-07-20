@@ -770,12 +770,29 @@ export class GameScene {
   }
 
   buildOverlay() {
-    // build-mode grid lines over the buildable band
-    const pts = [];
+    // build-mode grid over the buildable band: a faint fill so the band
+    // itself reads as "this is where you can build", light tile lines,
+    // and a brighter border around the whole band — placement mode has
+    // to be legible at a glance on a phone in someone's hand
     const y = 0.04;
     const x0 = -HALF_W, x1 = HALF_W;
     const z0 = (BUILD_ROW_MIN - (ROWS - 1) / 2) * CELL - CELL / 2;
     const z1 = (BUILD_ROW_MAX - (ROWS - 1) / 2) * CELL + CELL / 2;
+    this.buildGrid = new THREE.Group();
+
+    const fill = new THREE.Mesh(
+      new THREE.PlaneGeometry(x1 - x0, z1 - z0),
+      new THREE.MeshBasicMaterial({
+        color: 0xf5ecd2, transparent: true, opacity: 0.07,
+        depthWrite: false, side: THREE.DoubleSide,
+      })
+    );
+    fill.rotation.x = -Math.PI / 2;
+    fill.position.set(0, y - 0.005, (z0 + z1) / 2);
+    fill.renderOrder = 3;
+    this.buildGrid.add(fill);
+
+    const pts = [];
     for (let c = 0; c <= COLS; c++) {
       const x = x0 + c * CELL;
       pts.push(x, y, z0, x, y, z1);
@@ -786,15 +803,33 @@ export class GameScene {
     }
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
-    this.gridLines = new THREE.LineSegments(
+    const lines = new THREE.LineSegments(
       geo,
       new THREE.LineBasicMaterial({
-        color: 0xe8b84b, transparent: true, opacity: 0.3, depthWrite: false,
+        color: 0xf3e9c8, transparent: true, opacity: 0.5, depthWrite: false,
       })
     );
-    this.gridLines.renderOrder = 4;
-    this.gridLines.visible = false;
-    this.scene.add(this.gridLines);
+    lines.renderOrder = 4;
+    this.buildGrid.add(lines);
+
+    const borderGeo = new THREE.BufferGeometry();
+    borderGeo.setAttribute('position', new THREE.Float32BufferAttribute([
+      x0, y, z0, x1, y, z0,
+      x1, y, z0, x1, y, z1,
+      x1, y, z1, x0, y, z1,
+      x0, y, z1, x0, y, z0,
+    ], 3));
+    const border = new THREE.LineSegments(
+      borderGeo,
+      new THREE.LineBasicMaterial({
+        color: 0xf6d98a, transparent: true, opacity: 0.9, depthWrite: false,
+      })
+    );
+    border.renderOrder = 4;
+    this.buildGrid.add(border);
+
+    this.buildGrid.visible = false;
+    this.scene.add(this.buildGrid);
 
     // hover cell highlight
     this.cellHighlight = new THREE.Mesh(
@@ -812,32 +847,32 @@ export class GameScene {
 
     // tower range indicator: soft fill + bright edge, always on top of terrain
     this.rangeGroup = new THREE.Group();
-    const rangeFill = new THREE.Mesh(
+    this.rangeFill = new THREE.Mesh(
       new THREE.CircleGeometry(1, 48),
       new THREE.MeshBasicMaterial({
         color: 0x8fd0ff, transparent: true, opacity: 0.13,
         depthWrite: false, side: THREE.DoubleSide,
       })
     );
-    const rangeEdge = new THREE.Mesh(
+    this.rangeEdge = new THREE.Mesh(
       new THREE.RingGeometry(0.965, 1, 64),
       new THREE.MeshBasicMaterial({
         color: 0xaadeff, transparent: true, opacity: 0.85,
         depthWrite: false, side: THREE.DoubleSide,
       })
     );
-    rangeEdge.position.z = 0.001;
-    this.rangeGroup.add(rangeFill, rangeEdge);
+    this.rangeEdge.position.z = 0.001;
+    this.rangeGroup.add(this.rangeFill, this.rangeEdge);
     this.rangeGroup.rotation.x = -Math.PI / 2;
     this.rangeGroup.position.y = 0.06;
     this.rangeGroup.renderOrder = 6;
-    rangeFill.renderOrder = 6;
-    rangeEdge.renderOrder = 7;
+    this.rangeFill.renderOrder = 6;
+    this.rangeEdge.renderOrder = 7;
     this.rangeGroup.visible = false;
     this.scene.add(this.rangeGroup);
   }
 
-  setBuildMode(on) { this.gridLines.visible = on; }
+  setBuildMode(on) { this.buildGrid.visible = on; }
 
   showCellHighlight(c, r, ok) {
     const w = cellToWorld(c, r);
@@ -847,7 +882,16 @@ export class GameScene {
   }
   hideCellHighlight() { this.cellHighlight.visible = false; }
 
-  showRange(x, z, range) {
+  // tone paints the ring by intent: 'info' (inspecting an existing
+  // tower), 'ok' (placement allowed here), 'bad' (placement refused)
+  showRange(x, z, range, tone = 'info') {
+    const [fill, edge] = {
+      info: [0x8fd0ff, 0xaadeff],
+      ok: [0x8fe98f, 0xbdf5bd],
+      bad: [0xe05a4e, 0xf5a79d],
+    }[tone] || [0x8fd0ff, 0xaadeff];
+    this.rangeFill.material.color.set(fill);
+    this.rangeEdge.material.color.set(edge);
     this.rangeGroup.visible = true;
     this.rangeGroup.position.set(x, 0.06, z);
     this.rangeGroup.scale.setScalar(range);
