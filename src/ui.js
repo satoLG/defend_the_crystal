@@ -779,15 +779,16 @@ export class UI {
           // a plain tap toggles sticky placement mode
           this.selectItem(this.selectedItem === d.item ? null : d.item, e.pointerType);
         }
-        // the browser may still synthesize a click after pointerup —
-        // don't let it re-toggle what the pointer flow just handled
-        this._pointerHandledT = performance.now();
       };
       card.addEventListener('pointerup', (e) => up(e, false));
       card.addEventListener('pointercancel', (e) => up(e, true));
-      // keyboard / assistive-tech activation never fires pointerdown
-      card.addEventListener('click', () => {
-        if (performance.now() - (this._pointerHandledT || 0) < 500) return;
+      // pointer-driven activation is fully handled above, but the browser
+      // still synthesizes a click after pointerup — possibly SECONDS later
+      // on a busy main thread, so a timing window can't filter it. Accept
+      // only non-pointer clicks (keyboard / assistive tech: no pointerType,
+      // detail 0), which never fire pointerdown.
+      card.addEventListener('click', (e) => {
+        if (e.pointerType || e.detail > 0) return;
         this.selectItem(this.selectedItem === card.dataset.item ? null : card.dataset.item);
       });
     }
