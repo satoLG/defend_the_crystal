@@ -95,7 +95,9 @@ export class UI {
     this.editingId = null;                // id being edited, null when creating new
     this.statsOpen = false;
     this.preview = null;                  // 3D turntable (attached after assets load)
-    this.selectedItem = null;   // build card
+    this.selectedItem = null;   // build card in sticky placement mode
+    this.dragItem = null;       // build card mid drag & drop
+    this.placePtr = 'mouse';    // pointer that picked the card (hint wording)
     this.pendingCell = null;    // two-tap confirm on touch
     this.panelCell = null;
     this.lastSnap = null;
@@ -161,7 +163,7 @@ export class UI {
     if (this.weaponPanelOpen) this.renderWeaponPanel();
     if (this.petDetailOpen) this.renderPetDetail();
     if (this.statsOpen && this._lastMe) { this._statsKey = null; this.renderStats(this._lastMe); }
-    if (this.selectedItem) this.renderBuildHint(); // rebuild the build-hint text
+    if (this.selectedItem || this.dragItem) this.renderBuildHint(); // rebuild the hint text
     // one-shot texts set outside the static pass
     this._goldShown = null; this._pbName = null; this._petHudKey = null;
     if (this.lobbyPlayersCache) this.updateLobby(this.lobbyPlayersCache, this.selfIdCache);
@@ -670,11 +672,7 @@ export class UI {
   // ---------------- HUD ----------------
 
   bindHud() {
-    for (const card of document.querySelectorAll('.build-card')) {
-      bindTap(card, () => this.selectItem(
-        card.dataset.item === this.selectedItem ? null : card.dataset.item
-      ));
-    }
+    this.bindBuildCards();
     // the hint bar doubles as a big cancel button
     $('build-hint').addEventListener('click', () => this.selectItem(null));
     for (const [key, def] of Object.entries(TOWERS)) {
@@ -729,11 +727,112 @@ export class UI {
     $('jump-btn').disabled = !on;
   }
 
-  selectItem(item) {
-    this.selectedItem = item;
+  // ---------------- placing towers & blocks ----------------
+  //
+  // Two ways to put something on the grid, both starting from a card:
+  //  1. press & DRAG the card — the item rides the pointer as a ghost
+  //     over the grid and drops on release (one placement per drag);
+  //  2. TAP the card — sticky placement mode: on desktop the ghost
+  //     follows the mouse and a click confirms; on touch the first tap
+  //     previews a tile and a second tap on it confirms.
+
+  bindBuildCards() {
+    const DRAG_PX = 10; // movement below this is still a tap
+    let drag = null;    // { item, id, sx, sy, started }
+    // Esc (and game-over) can abort a drag mid-gesture; the leftover
+    // pointer events are ignored because `drag` is already gone
+    this.cancelDrag = () => {
+      if (!drag) return;
+      const started = drag.started;
+      drag = null;
+      if (started) this.finishDrag(null);
+    };
+    for (const card of document.querySelectorAll('.build-card')) {
+      card.addEventListener('pointerdown', (e) => {
+        if (e.pointerType === 'mouse' && e.button !== 0) return;
+        if (drag) return; // one drag at a time — a second finger is ignored
+        e.preventDefault();
+        drag = {
+          item: card.dataset.item, id: e.pointerId,
+          sx: e.clientX, sy: e.clientY, started: false,
+        };
+        // keep every move/up on the card even when the pointer crosses
+        // onto the canvas (otherwise the joystick would grab the touch)
+        try { card.setPointerCapture(e.pointerId); } catch { /* ok */ }
+      });
+      card.addEventListener('pointermove', (e) => {
+        if (!drag || e.pointerId !== drag.id) return;
+        if (!drag.started) {
+          if (Math.hypot(e.clientX - drag.sx, e.clientY - drag.sy) < DRAG_PX) return;
+          drag.started = true;
+          this.startDrag(drag.item);
+        }
+        this.cb.onDragMove?.(e.clientX, e.clientY);
+      });
+      const up = (e, cancelled) => {
+        if (!drag || e.pointerId !== drag.id) return;
+        const d = drag;
+        drag = null;
+        if (d.started) {
+          this.finishDrag(cancelled ? null : { x: e.clientX, y: e.clientY });
+        } else if (!cancelled) {
+          // a plain tap toggles sticky placement mode
+          this.selectItem(this.selectedItem === d.item ? null : d.item, e.pointerType);
+        }
+        // the browser may still synthesize a click after pointerup —
+        // don't let it re-toggle what the pointer flow just handled
+        this._pointerHandledT = performance.now();
+      };
+      card.addEventListener('pointerup', (e) => up(e, false));
+      card.addEventListener('pointercancel', (e) => up(e, true));
+      // keyboard / assistive-tech activation never fires pointerdown
+      card.addEventListener('click', () => {
+        if (performance.now() - (this._pointerHandledT || 0) < 500) return;
+        this.selectItem(this.selectedItem === card.dataset.item ? null : card.dataset.item);
+      });
+    }
+  }
+
+  startDrag(item) {
+    // a sticky selection from before gives way to the drag
+    if (this.selectedItem) this.selectItem(null, null, { silent: true });
+    this.dragItem = item;
     this.pendingCell = null;
     this.closePanel();
-    sfx.toggle(!!item);
+    sfx.toggle(true);
+    for (const card of document.querySelectorAll('.build-card')) {
+      card.classList.toggle('dragging', card.dataset.item === item);
+    }
+    this.cb.onBuildMode(true);
+    this.renderBuildHint();
+  }
+
+  // drop = {x, y} on release, or null when the drag was cancelled
+  finishDrag(drop) {
+    const item = this.dragItem;
+    if (!item) return;
+    this.dragItem = null;
+    for (const card of document.querySelectorAll('.build-card')) {
+      card.classList.remove('dragging');
+    }
+    this.cb.onDragEnd?.(item, drop);
+    this.cb.onBuildMode(false);
+    this.renderBuildHint();
+  }
+
+  selectItem(item, pointerType = null, opts = {}) {
+    this.selectedItem = item;
+    // the hint's wording depends on how placement will be confirmed —
+    // remember which pointer picked the card (keyboard shortcuts fall
+    // back to the device's primary pointer)
+    if (item) {
+      this.placePtr = pointerType && pointerType !== 'pen'
+        ? pointerType
+        : (matchMedia('(pointer: coarse)').matches ? 'touch' : 'mouse');
+    }
+    this.pendingCell = null;
+    this.closePanel();
+    if (!opts.silent) sfx.toggle(!!item);
     for (const card of document.querySelectorAll('.build-card')) {
       card.classList.toggle('selected', card.dataset.item === item);
     }
@@ -741,15 +840,22 @@ export class UI {
     this.renderBuildHint();
   }
 
-  // the build-mode cancel hint bar (also rebuilt on a language switch)
+  // the placement hint bar, tucked into the bottom-left corner with the
+  // rest of the feedback messages; doubles as a big cancel button (also
+  // rebuilt on a language switch)
   renderBuildHint() {
     const hint = $('build-hint');
-    const item = this.selectedItem;
+    const item = this.dragItem || this.selectedItem;
+    $('hud').classList.toggle('placing', !!item);
     if (!item) { hint.classList.add('hidden'); return; }
     hint.classList.remove('hidden');
-    hint.innerHTML = `<span class="hint-x">${icon('x')}</span>` + (item === 'obstacle'
-      ? t('hud.placeBlockHint')
-      : t('hud.placeTowerHint', { name: towerName(item), cost: `${icon('gem')}${TOWERS[item].cost}` }));
+    const label = item === 'obstacle'
+      ? t('card.obstacle')
+      : `${towerName(item)} (${icon('gem')}${TOWERS[item].cost})`;
+    const key = this.dragItem
+      ? 'hud.dragHint'
+      : this.placePtr === 'touch' ? 'hud.placeTapHint' : 'hud.placeClickHint';
+    hint.innerHTML = `<span class="hint-x">${icon('x')}</span>` + t(key, { name: label });
   }
 
   selectCardByIndex(i) {
@@ -1497,12 +1603,14 @@ export class UI {
       if (skillCd > 0) cdEl.textContent = Math.ceil(skillCd);
 
       // never disable the currently selected card — otherwise you
-      // couldn't tap it again to unselect when resources run out
+      // couldn't tap it again to unselect when resources run out —
+      // nor the one mid-drag (disabling it would kill the gesture)
+      const inUse = (key) => this.selectedItem === key || this.dragItem === key;
       const obstCard = document.querySelector('[data-item="obstacle"]');
-      obstCard.disabled = obst < 1 && this.selectedItem !== 'obstacle';
+      obstCard.disabled = obst < 1 && !inUse('obstacle');
       for (const [key, def] of Object.entries(TOWERS)) {
         document.querySelector(`[data-item="${key}"]`).disabled =
-          snap.pts < def.cost && this.selectedItem !== key;
+          snap.pts < def.cost && !inUse(key);
       }
     }
 

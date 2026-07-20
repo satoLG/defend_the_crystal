@@ -111,6 +111,8 @@ async function boot() {
     onJump: () => doJump(),
     onSkill: () => doSkill(),
     onBuildMode: (on) => { gs.setBuildMode(on); if (!on) view.clearGhost(); },
+    onDragMove: (x, y) => onDragMove(x, y),
+    onDragEnd: (item, drop) => onDragEnd(item, drop),
     onPanelClose: () => gs.hideRange(),
     // the equipped pet changed (swap / rename / level-up) — tell the
     // host so the buffs & the follower everyone sees update live
@@ -282,7 +284,47 @@ function canPlaceLocal(item, c, r) {
   const g = clientGridRef();
   if (!g.isBuildable(c, r)) return false;
   if (!g.canPlaceAt(c, r, state.role === 'host' ? state.sim.enemyCells() : [])) return false;
+  if (!canAffordLocal(item)) return false;
+  if (someoneStandingAt(c, r)) return false;
   return true;
+}
+
+// mirror the sim's cost/stock check so the preview turns red up front
+// instead of the placement bouncing back off the host with a toast
+function canAffordLocal(item) {
+  const cost = TOWERS[item]?.cost || 0;
+  if (state.role === 'host') {
+    if (item === 'obstacle') return (state.sim.getPlayer(selfId)?.obst || 0) >= 1;
+    return state.sim.points >= cost;
+  }
+  const snap = state.snaps.latest();
+  if (!snap) return true; // no data yet — let the host arbitrate
+  if (item === 'obstacle') {
+    const me = snap.pl.find((p) => p[0] === selfId);
+    return (me?.[13] || 0) >= 1;
+  }
+  return snap.pts >= cost;
+}
+
+// mirror the sim's "don't build on top of a character" check (self uses
+// the locally-predicted position, allies come from the sim/snapshot)
+function someoneStandingAt(c, r) {
+  const w = cellToWorld(c, r);
+  const near = (x, z) =>
+    Math.abs(x - w.x) < 1 + PLAYER.RADIUS && Math.abs(z - w.z) < 1 + PLAYER.RADIUS;
+  if (!state.self.dead && (state.role === 'host' || state.selfInit) &&
+      near(state.self.x, state.self.z)) return true;
+  if (state.role === 'host') {
+    for (const q of state.sim.players.entities) {
+      if (q.id !== selfId && !q.dead && near(q.x, q.z)) return true;
+    }
+  } else {
+    for (const p of state.snaps.latest()?.pl || []) {
+      if (p[0] === selfId || p[11] === 1) continue;
+      if (near(p[2], p[3])) return true;
+    }
+  }
+  return false;
 }
 
 function clientGridRef() {
@@ -296,6 +338,43 @@ function onCanvasHover(x, y) {
   view.setGhost(ui.selectedItem, cell.c, cell.r, canPlaceLocal(ui.selectedItem, cell.c, cell.r));
 }
 
+// ---------------------------------------------------------
+// drag & drop placement (pointer is captured by the card, so the
+// canvas never sees these moves — hit-test and raycast manually)
+// ---------------------------------------------------------
+
+// a drag position only counts while it's over the game canvas (not HUD
+// chrome) and lands on a real board cell
+function dragCellAt(x, y) {
+  const el = document.elementFromPoint(x, y);
+  if (!el || el.id !== 'game-canvas') return null;
+  const cell = cellFromPointer(x, y);
+  if (!cell ||
+      cell.c < 0 || cell.c >= GRID.COLS || cell.r < 0 || cell.r >= GRID.ROWS) return null;
+  return cell;
+}
+
+function onDragMove(x, y) {
+  if (!state.started || state.over || !ui.dragItem) return;
+  const cell = dragCellAt(x, y);
+  if (!cell) return view.clearGhost();
+  view.setGhost(ui.dragItem, cell.c, cell.r, canPlaceLocal(ui.dragItem, cell.c, cell.r));
+}
+
+// drop = release position, or null when the drag was cancelled. Letting
+// go over the HUD or off the board is a silent cancel; releasing on a
+// red (invalid) tile answers with the error buzz.
+function onDragEnd(item, drop) {
+  if (!drop || !state.started || state.over) return;
+  const cell = dragCellAt(drop.x, drop.y);
+  if (!cell) return;
+  if (canPlaceLocal(item, cell.c, cell.r)) {
+    sendAction({ t: 'place', item, c: cell.c, r: cell.r });
+  } else {
+    sfx.error();
+  }
+}
+
 function onCanvasTap(x, y, pointerType, button) {
   if (!state.started) return;
   if (button === 2) return; // right-click cancels via contextmenu
@@ -307,12 +386,12 @@ function onCanvasTap(x, y, pointerType, button) {
     if (offBoard) { ui.selectItem(null); return; }
     const ok = canPlaceLocal(ui.selectedItem, cell.c, cell.r);
     if (pointerType === 'touch') {
-      // two-tap confirm so fat fingers don't waste points
+      // two-tap confirm so fat fingers don't waste points: the first tap
+      // previews the tile (ghost + range), a second tap on it commits
       if (ui.pendingCell && ui.pendingCell.c === cell.c && ui.pendingCell.r === cell.r) {
         if (ok) {
           sendAction({ t: 'place', item: ui.selectedItem, c: cell.c, r: cell.r });
-          ui.pendingCell = null;
-          view.clearGhost();
+          ui.selectItem(null); // one placement per pick
         } else {
           sfx.error();
         }
@@ -321,8 +400,12 @@ function onCanvasTap(x, y, pointerType, button) {
         view.setGhost(ui.selectedItem, cell.c, cell.r, ok);
       }
     } else {
-      if (ok) sendAction({ t: 'place', item: ui.selectedItem, c: cell.c, r: cell.r });
-      else sfx.error();
+      if (ok) {
+        sendAction({ t: 'place', item: ui.selectedItem, c: cell.c, r: cell.r });
+        ui.selectItem(null); // one placement per pick
+      } else {
+        sfx.error();
+      }
     }
     return;
   }
@@ -363,6 +446,7 @@ function onKeyAction(action) {
     case 'card4': ui.selectCardByIndex(4); break;
     case 'card5': ui.selectCardByIndex(5); break;
     case 'cancel':
+      ui.cancelDrag?.();
       ui.selectItem(null);
       ui.closePanel();
       gs.hideRange();
@@ -540,6 +624,7 @@ function handleEvent(ev) {
     case 'unplace': sfx.place(); break;
     case 'over':
       state.over = true;
+      ui.cancelDrag?.();
       ui.selectItem(null);
       ui.showGameOver(ev, state.role === 'host');
       sfx.error();
