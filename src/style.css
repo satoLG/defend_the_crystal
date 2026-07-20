@@ -156,6 +156,15 @@ input {
   text-shadow: 0 0 24px rgba(242, 242, 245, 0.32), 0 2px 14px rgba(0, 0, 0, 0.55);
   letter-spacing: 2px;
   text-transform: uppercase;
+  /* the wordmark always reads as two whole-word groups that wrap
+     together, with the article ("the" / "o") set much smaller — the
+     same relative sizing and layout on every screen the logo appears */
+  display: flex; flex-wrap: wrap; justify-content: center; align-items: baseline;
+  gap: 0 0.3em;
+}
+.title .t-grp { white-space: nowrap; }
+.title .t-the {
+  font-size: 0.4em; letter-spacing: 1px; opacity: 0.82; margin-right: 0.1em;
 }
 
 h2 { color: var(--gold); margin: 2px 0 10px; }
@@ -270,10 +279,10 @@ input:focus { border-color: var(--gold); }
 }
 .title-crest {
   display: flex; align-items: center; justify-content: center;
-  margin: 2px auto 0;
+  margin: 2px auto 0; position: relative; z-index: 0;
 }
 .title-crest .ico, .title-crest img {
-  width: clamp(104px, 32vw, 168px); height: clamp(104px, 32vw, 168px);
+  width: clamp(140px, 42vw, 224px); height: clamp(140px, 42vw, 224px);
   object-fit: contain; color: #eef1f4;
   filter: drop-shadow(0 0 24px rgba(236, 240, 244, 0.45))
           drop-shadow(0 6px 12px rgba(0, 0, 0, 0.55));
@@ -289,14 +298,13 @@ input:focus { border-color: var(--gold); }
    when it fits, otherwise Defend on top and the Crystal beneath. The
    article ("the" / "o") is set much smaller than the rest. */
 .logo-title {
-  display: flex; flex-wrap: wrap; justify-content: center; align-items: baseline;
-  gap: 0 0.3em; width: 100%; max-width: min(470px, 94vw);
-  font-size: clamp(2.5rem, 9.5vw, 3.9rem); line-height: 1.02; margin: 8px 0 16px;
+  width: 100%; max-width: min(470px, 94vw);
+  font-size: clamp(2.5rem, 9.5vw, 3.9rem); line-height: 1.02;
+  /* the negative top margin tucks the wordmark up under the crystal so
+     the crystal's base sits just behind the title — a small overlap for
+     flair, with the text kept above the art */
+  margin: -0.32em 0 16px; position: relative; z-index: 1;
   animation: logo-in 0.8s cubic-bezier(0.2, 0.8, 0.3, 1) 0.12s both;
-}
-.logo-title .t-grp { white-space: nowrap; }
-.logo-title .t-the {
-  font-size: 0.4em; letter-spacing: 1px; opacity: 0.82; margin-right: 0.1em;
 }
 @keyframes logo-in { from { opacity: 0; transform: translateY(16px); filter: blur(7px); } }
 
@@ -691,7 +699,14 @@ input:focus { border-color: var(--gold); }
   border-color: var(--gold); background: rgba(242, 242, 245, 0.14);
   color: var(--gold); box-shadow: 0 0 12px rgba(242, 242, 245, 0.25);
 }
-.lang-btn .flag { font-size: 1.15rem; line-height: 1; }
+/* real SVG flags — a fixed little rounded rectangle that renders the
+   same on every platform (emoji flags don't on desktop) */
+.flag {
+  flex: none; display: inline-block; width: 22px; height: 15px;
+  border-radius: 2px; overflow: hidden; line-height: 0;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.3);
+}
+.flag svg { display: block; width: 100%; height: 100%; }
 .lang-row { flex-wrap: wrap; }
 .lang-row > label { flex: 0 0 auto; }
 .lang-row .lang-switch { margin-left: auto; }

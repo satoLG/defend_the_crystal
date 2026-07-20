@@ -5,18 +5,18 @@ import {
 } from './render/view.js';
 import { CharacterPreview } from './render/preview.js';
 import { Sim } from './sim/sim.js';
-import { Grid, worldToCell, cellToWorld, canJumpFrom, computeDashEnd } from './sim/grid.js';
+import { Grid, worldToCell, cellToWorld, findJump, computeDashEnd } from './sim/grid.js';
 import { Net, selfId } from './net.js';
 import { SnapBuffer } from './net_interp.js';
 import { Input } from './input.js';
 import { UI } from './ui.js';
 import { armAudioOnFirstGesture, bindAudioLifecycle, sfx, setSfxVolume } from './audio.js';
 import {
-  CLASSES, PLAYER, NET, SIM_DT, TOWERS, TOWER_UPGRADE, GRID, JUMP, SKILLS,
+  CLASSES, PLAYER, ENEMY, NET, SIM_DT, TOWERS, TOWER_UPGRADE, GRID, JUMP, SKILLS,
   petEffects, jumpDurFor,
 } from './config.js';
 import { petRefOf, loadoutOf } from './character.js';
-import { makeRoomCode, lerp, dist2d } from './utils.js';
+import { makeRoomCode, lerp, dist2d, approachAngle } from './utils.js';
 import { settings } from './settings.js';
 import { music } from './music.js';
 import { t, getLang, onLangChange, bossName, bossFlavor, enemyName } from './i18n.js';
@@ -43,7 +43,7 @@ const state = {
   snaps: new SnapBuffer(),
   // local self-prediction (jump = in-flight hop over a grid cell,
   // dash = the berserker's special sprint)
-  self: { x: 0, z: 4, yaw: Math.PI, moving: false, kbx: 0, kbz: 0, dead: false, speed: 4, jump: null, dash: null },
+  self: { x: 0, z: 4, yaw: Math.PI, moving: false, kbx: 0, kbz: 0, dead: false, speed: 4, range: 0, jump: null, dash: null },
   selfInit: false,
   clientGrid: new Grid(),
   blockedKey: '',
@@ -375,6 +375,19 @@ function onDragEnd(item, drop) {
   }
 }
 
+// after a successful placement: blocks stay selected so you can lay a
+// whole run of them without re-picking the card each time (towers are
+// pricier and deselect, one per pick). Running out of stock red-flags
+// the ghost / disables the card via the normal HUD update.
+function afterPlace(item) {
+  if (item === 'obstacle') {
+    ui.pendingCell = null; // touch: next tap previews a fresh cell
+    view.clearGhost();
+  } else {
+    ui.selectItem(null);
+  }
+}
+
 function onCanvasTap(x, y, pointerType, button) {
   if (!state.started) return;
   if (button === 2) return; // right-click cancels via contextmenu
@@ -391,7 +404,7 @@ function onCanvasTap(x, y, pointerType, button) {
       if (ui.pendingCell && ui.pendingCell.c === cell.c && ui.pendingCell.r === cell.r) {
         if (ok) {
           sendAction({ t: 'place', item: ui.selectedItem, c: cell.c, r: cell.r });
-          ui.selectItem(null); // one placement per pick
+          afterPlace(ui.selectedItem);
         } else {
           sfx.error();
         }
@@ -402,7 +415,7 @@ function onCanvasTap(x, y, pointerType, button) {
     } else {
       if (ok) {
         sendAction({ t: 'place', item: ui.selectedItem, c: cell.c, r: cell.r });
-        ui.selectItem(null); // one placement per pick
+        afterPlace(ui.selectedItem);
       } else {
         sfx.error();
       }
@@ -471,17 +484,27 @@ function localJumpCells() {
   return pet ? petEffects(pet.id, pet.lvl).jump : 1;
 }
 
+// where the player wants to vault: their movement heading if they're
+// walking, otherwise null so the jump just takes whichever wall is
+// adjacent (facing is ignored — it may be locked onto a foe)
+function jumpHeading() {
+  const dir = input.moveDir();
+  return Math.hypot(dir.x, dir.z) > 0.15 ? Math.atan2(dir.x, dir.z) : null;
+}
+
 function doJump() {
   const s = state.self;
   if (!state.started || state.over || s.dead || s.jump || s.dash) return false;
   if (state.role === 'client' && !state.selfInit) return false;
-  const info = canJumpFrom(clientGridRef(), s.x, s.z, s.yaw, localJumpCells());
+  const info = findJump(clientGridRef(), s.x, s.z, localJumpCells(), jumpHeading());
   if (!info) return false;
   const dur = jumpDurFor(info.span);
   s.jump = { fx: s.x, fz: s.z, tx: info.to.x, tz: info.to.z, t: 0, dur };
   view.startJump(selfId, dur);
   sfx.jump();
-  sendAction({ t: 'jump', yaw: Math.round(s.yaw * 100) / 100 });
+  // jyaw is the cardinal we vault along; the character's facing (s.yaw)
+  // is left alone so it can keep looking at whatever it's fighting
+  sendAction({ t: 'jump', jyaw: Math.round(info.yaw * 100) / 100 });
   return true;
 }
 
@@ -490,7 +513,7 @@ function updateJumpButton() {
   const s = state.self;
   const ok = state.started && !state.over && !s.dead && !s.jump && !s.dash &&
     (state.role === 'host' || state.selfInit) &&
-    !!canJumpFrom(clientGridRef(), s.x, s.z, s.yaw, localJumpCells());
+    !!findJump(clientGridRef(), s.x, s.z, localJumpCells());
   if (ok !== jumpWasEnabled) {
     jumpWasEnabled = ok;
     ui.setJumpEnabled(ok);
@@ -648,6 +671,7 @@ function syncSelfFromSim() {
   if (p) {
     state.self.x = p.x; state.self.z = p.z; state.self.yaw = p.yaw;
     state.self.speed = p.speed;
+    state.self.range = p.range;
     state.self.dead = p.dead;
     state.self.jump = null;
     state.self.dash = null;
@@ -662,6 +686,11 @@ function reconcileSelf(snap) {
   state.self.speed = (typeof me[19] === 'number' && me[19] > 0)
     ? me[19]
     : (CLASSES[me[1]]?.speed || 4);
+  // attack range (index 27) drives the face-the-foe turn; fall back to
+  // the class base until the host starts sending the richer snapshot
+  state.self.range = (typeof me[27] === 'number' && me[27] > 0)
+    ? me[27]
+    : (CLASSES[me[1]]?.range || 0);
   state.self.dead = me[11] === 1;
   // mid-dash the host briefly lags far behind the predicted position —
   // don't let that trip the teleport-back threshold
@@ -682,6 +711,26 @@ function syncClientGrid(snap) {
   for (const t of snap.tw) state.clientGrid.blocked[t[3] * GRID.COLS + t[2]] = 1;
   for (const o of snap.ob) state.clientGrid.blocked[o[3] * GRID.COLS + o[2]] = 1;
   state.clientGrid.computeFlow();
+}
+
+// how fast the character swings around to face a foe (rad/s) — brisk
+// enough to feel responsive, slow enough to read as a smooth turn
+const FACE_TURN_RATE = 11;
+
+// nearest enemy within the local hero's attack range, read off the last
+// snapshot (enemy row: [id, kind, x, z, ...]). Mirrors the sim's own
+// auto-attack acquisition so the gaze lands on whatever it'd be hitting.
+function nearestFoeInRange(x, z, range) {
+  if (!range) return null;
+  const en = state.snaps.latest()?.en;
+  if (!en) return null;
+  const maxD = range + ENEMY.RADIUS;
+  let best = null, bestD = maxD;
+  for (const e of en) {
+    const d = Math.hypot(e[2] - x, e[3] - z);
+    if (d < bestD) { bestD = d; best = { x: e[2], z: e[3] }; }
+  }
+  return best;
 }
 
 function stepSelf(dt) {
@@ -719,6 +768,15 @@ function stepSelf(dt) {
   if (s.moving) {
     vx = dir.x * s.speed;
     vz = dir.z * s.speed;
+  }
+  // facing is decoupled from movement: a foe inside attack range wins the
+  // character's gaze — it turns to face it smoothly (rotation only, you
+  // still walk wherever you steer). Only with nothing in range does the
+  // look direction follow your movement, so the two never fight over yaw.
+  const foe = nearestFoeInRange(s.x, s.z, s.range);
+  if (foe) {
+    s.yaw = approachAngle(s.yaw, Math.atan2(foe.x - s.x, foe.z - s.z), FACE_TURN_RATE * dt);
+  } else if (s.moving) {
     s.yaw = Math.atan2(dir.x, dir.z);
   }
   // knockback impulse
@@ -759,9 +817,9 @@ function frame(t) {
       state.sim.step(SIM_DT);
       simAccum -= SIM_DT;
     }
-    // keep local prediction speed in sync with pet buffs (cat/dog)
+    // keep local prediction speed + range in sync with pet/weapon buffs
     const meSim = state.sim.getPlayer(selfId);
-    if (meSim) state.self.speed = meSim.speed;
+    if (meSim) { state.self.speed = meSim.speed; state.self.range = meSim.range; }
     const events = state.sim.drainEvents();
     if (events.length) {
       for (const ev of events) handleEvent(ev);

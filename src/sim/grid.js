@@ -44,6 +44,12 @@ export function canJumpFrom(grid, x, z, yaw, maxCells = 1) {
   const dx = Math.sin(yaw), dz = Math.cos(yaw);
   const dc = Math.abs(dx) >= Math.abs(dz) ? (dx > 0 ? 1 : -1) : 0;
   const dr = dc === 0 ? (dz > 0 ? 1 : -1) : 0;
+  return jumpAlong(grid, c, r, x, z, dc, dr, maxCells);
+}
+
+// Core of the vault check for one cardinal step (dc, dr). Shared by the
+// facing-based check above and the proximity-based findJump below.
+function jumpAlong(grid, c, r, x, z, dc, dr, maxCells) {
   const oc = c + dc, or = r + dr; // first cell being vaulted
   if (!inBounds(oc, or) || !grid.blocked[idx(oc, or)]) return null;
   // must actually be right in front of the vaulted cell
@@ -57,6 +63,38 @@ export function canJumpFrom(grid, x, z, yaw, maxCells = 1) {
     return { to: cellToWorld(lc, lr), over: { c: oc, r: or }, span };
   }
   return null; // the wall is thicker than this character can clear
+}
+
+// the four cardinals with the yaw that points along each — used to pick
+// a jump direction from proximity rather than the character's facing
+const JUMP_DIRS = [
+  { dc: 0, dr: 1, yaw: 0 },
+  { dc: 1, dr: 0, yaw: Math.PI / 2 },
+  { dc: 0, dr: -1, yaw: Math.PI },
+  { dc: -1, dr: 0, yaw: -Math.PI / 2 },
+];
+
+// Proximity jump: standing at (x,z), is there ANY adjacent wall we can
+// vault, regardless of which way the character is facing? So the hero can
+// hop a block just by being next to it while looking at a foe. When
+// `preferYaw` is given (the player's movement heading) and several walls
+// are jumpable, the one most aligned with it wins. Returns the same shape
+// as canJumpFrom plus `yaw` (the cardinal jumped along), or null.
+export function findJump(grid, x, z, maxCells = 1, preferYaw = null) {
+  const { c, r } = worldToCell(x, z);
+  if (!inBounds(c, r)) return null;
+  let best = null, bestScore = Infinity;
+  for (const d of JUMP_DIRS) {
+    const info = jumpAlong(grid, c, r, x, z, d.dc, d.dr, maxCells);
+    if (!info) continue;
+    if (preferYaw == null) return { ...info, yaw: d.yaw };
+    let diff = (d.yaw - preferYaw) % (Math.PI * 2);
+    if (diff > Math.PI) diff -= Math.PI * 2;
+    if (diff < -Math.PI) diff += Math.PI * 2;
+    const score = Math.abs(diff);
+    if (score < bestScore) { bestScore = score; best = { ...info, yaw: d.yaw }; }
+  }
+  return best;
 }
 
 // Endpoint of the berserker's dash: march forward along yaw up to

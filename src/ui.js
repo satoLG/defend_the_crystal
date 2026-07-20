@@ -13,7 +13,7 @@ import {
 } from './i18n.js';
 import { sfx, setSfxVolume } from './audio.js';
 import { normalizeRoomCode } from './utils.js';
-import { icon, mountIcons } from './icons.js';
+import { icon, mountIcons, mountFlags } from './icons.js';
 import { settings } from './settings.js';
 import { music } from './music.js';
 import { loadRoster, saveRoster, defaultCharacter, petRefOf, grantPetXp, loadoutOf } from './character.js';
@@ -115,6 +115,7 @@ export class UI {
     this.weaponPanelOpen = false;
 
     mountIcons();
+    mountFlags();            // draw real SVG flags on the language buttons
     applyStaticI18n();       // paint every [data-i18n*] node in the current language
     this.bindStart();
     this.bindMenu();
@@ -1611,6 +1612,11 @@ export class UI {
       // nor the one mid-drag (disabling it would kill the gesture)
       const inUse = (key) => this.selectedItem === key || this.dragItem === key;
       const obstCard = document.querySelector('[data-item="obstacle"]');
+      // blocks stay selected so you can lay several in a row; once the
+      // stock is spent, drop the selection so a stray tap doesn't just buzz
+      if (this.selectedItem === 'obstacle' && obst < 1) {
+        this.selectItem(null, null, { silent: true });
+      }
       obstCard.disabled = obst < 1 && !inUse('obstacle');
       for (const [key, def] of Object.entries(TOWERS)) {
         document.querySelector(`[data-item="${key}"]`).disabled =
