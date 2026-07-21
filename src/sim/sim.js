@@ -431,8 +431,12 @@ export class Sim {
   // window and tells everyone so they can animate it too
   tryJump(p, act) {
     if (p.dead || p.jumpT > 0 || p.dashT > 0 || this.phase === 'over') return;
-    if (typeof act?.yaw === 'number') p.yaw = act.yaw;
-    const info = canJumpFrom(this.grid, p.x, p.z, p.yaw, p.jumpCells || 1);
+    // the hop direction (jyaw) is chosen from proximity to a wall, not
+    // the character's gaze — so leave p.yaw untouched (it may be locked
+    // onto a foe). Fall back to yaw/facing for older clients.
+    const heading = typeof act?.jyaw === 'number' ? act.jyaw
+      : typeof act?.yaw === 'number' ? act.yaw : p.yaw;
+    const info = canJumpFrom(this.grid, p.x, p.z, heading, p.jumpCells || 1);
     if (!info) return;
     const dur = jumpDurFor(info.span);
     p.jumpT = dur;
@@ -1717,6 +1721,9 @@ export class Sim {
         // right prop with the right gold/crystal finish
         p.weapon?.id || '', p.weapon?.tier || 0,
         p.shield?.id || '', p.shield?.tier || 0,
+        // attack range (index 27) — the owning client turns to face any
+        // foe inside it, so it needs the wave/weapon-adjusted value
+        rnd2(p.range),
       ]),
       en: this.enemies.entities.map((e) => [
         e.id, e.kind, rnd2(e.vehicle.position.x), rnd2(e.vehicle.position.z),

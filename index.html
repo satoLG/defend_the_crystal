@@ -17,7 +17,7 @@
     <div id="loading" class="screen start-screen">
       <div class="start-panel">
         <div class="title-crest"><img src="./img/crystal-logo.png" alt="" class="crest-img" /></div>
-        <h1 class="title logo-title" data-i18n-html="brand.title">Defend the Crystal</h1>
+        <h1 class="title logo-title" data-i18n-html="brand.title"><span class="t-grp">Defend</span><span class="t-grp"><span class="t-the">the</span> Crystal</span></h1>
         <!-- loading strip and the actions share one fixed-height cell so
              swapping between them never nudges the logo above -->
         <div class="start-swap">
@@ -36,8 +36,8 @@
             <div class="start-actions">
               <button id="start-btn-main" class="btn primary big"><i data-icon="play"></i> <span data-i18n="start.play">Play</span></button>
               <div class="lang-switch" data-lang-switch>
-                <button class="lang-btn" data-lang="pt"><span class="flag">🇧🇷</span> <span data-i18n="lang.pt">Português</span></button>
-                <button class="lang-btn" data-lang="en"><span class="flag">🇺🇸</span> <span data-i18n="lang.en">English</span></button>
+                <button class="lang-btn" data-lang="pt"><span class="flag" data-flag="br"></span> <span data-i18n="lang.pt">Português</span></button>
+                <button class="lang-btn" data-lang="en"><span class="flag" data-flag="us"></span> <span data-i18n="lang.en">English</span></button>
               </div>
             </div>
           </div>
@@ -107,7 +107,7 @@
     <div id="menu" class="screen hidden">
       <div class="panel menu-panel">
         <button id="menu-settings" class="btn small corner-btn" data-i18n-title="common.settings" title="Settings"><i data-icon="gear"></i></button>
-        <h1 class="title" data-i18n-html="brand.title">Defend<br/>the Crystal</h1>
+        <h1 class="title" data-i18n-html="brand.title"><span class="t-grp">Defend</span><span class="t-grp"><span class="t-the">the</span> Crystal</span></h1>
         <div id="best-wave" class="muted"></div>
 
         <div id="menu-linked" class="room-invite hidden">
@@ -299,8 +299,8 @@
         <div class="setting-row lang-row">
           <label data-i18n="lang.label">Language</label>
           <div class="lang-switch" data-lang-switch>
-            <button class="lang-btn" data-lang="pt"><span class="flag">🇧🇷</span> <span data-i18n="lang.pt">Português</span></button>
-            <button class="lang-btn" data-lang="en"><span class="flag">🇺🇸</span> <span data-i18n="lang.en">English</span></button>
+            <button class="lang-btn" data-lang="pt"><span class="flag" data-flag="br"></span> <span data-i18n="lang.pt">Português</span></button>
+            <button class="lang-btn" data-lang="en"><span class="flag" data-flag="us"></span> <span data-i18n="lang.en">English</span></button>
           </div>
         </div>
         <button id="settings-close" class="btn primary big" data-i18n="common.done">Done</button>
