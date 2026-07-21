@@ -4,11 +4,81 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <meta name="theme-color" content="#141021" />
-  <title>Defend the Crystal</title>
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2366e0ff' stroke-width='2' stroke-linejoin='round'%3E%3Cpath d='M7 4h10l4 5-9 11L3 9z'/%3E%3Cpath d='M3 9h18M12 20L8.5 9l3.5-5 3.5 5z'/%3E%3C/svg%3E" />
+  <meta name="color-scheme" content="dark" />
+
+  <!-- ============ SEO ============ -->
+  <title>Defend the Crystal — Co-op 3D Tower Defense</title>
+  <meta name="description" content="Free co-op 3D tower defense in your browser. Pick a class, build a maze of towers, and fend off monster waves with up to 4 friends — on desktop, mobile or offline." />
+  <meta name="keywords" content="tower defense, co-op game, browser game, 3D game, multiplayer, free game, defend the crystal, HTML5 game, PWA game" />
+  <meta name="author" content="satoLG" />
+  <meta name="robots" content="index, follow" />
+  <link rel="canonical" href="https://defend-the-crystal.vercel.app/" />
+
+  <!-- Open Graph (Facebook, Discord, WhatsApp, …) -->
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="Defend the Crystal" />
+  <meta property="og:title" content="Defend the Crystal — Co-op 3D Tower Defense" />
+  <meta property="og:description" content="Team up with up to 4 friends, build a maze of towers, and hold the line against waves of monsters. Plays on desktop and mobile, and installs for offline play." />
+  <meta property="og:url" content="https://defend-the-crystal.vercel.app/" />
+  <meta property="og:image" content="https://defend-the-crystal.vercel.app/img/crystal-logo.png" />
+  <meta property="og:image:alt" content="Defend the Crystal logo" />
+
+  <!-- Twitter card -->
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="Defend the Crystal — Co-op 3D Tower Defense" />
+  <meta name="twitter:description" content="Free co-op 3D tower defense in your browser. Build a maze of towers and fend off monster waves with up to 4 friends." />
+  <meta name="twitter:image" content="https://defend-the-crystal.vercel.app/img/crystal-logo.png" />
+
+  <!-- ============ PWA / icons ============ -->
+  <link rel="manifest" href="./manifest.webmanifest" />
+  <!-- browser tab + search-engine favicon: the transparent crystal, so it
+       sits cleanly on any light/dark tab bar (already preloaded below) -->
+  <link rel="icon" type="image/png" href="./img/crystal-logo.png" />
+  <!-- installed-app icon: iOS needs an opaque, standard-size PNG or it
+       falls back to a letter tile — crystal on the dark start-screen plate.
+       (Also served at the site root as /apple-touch-icon.png, which iOS
+       probes automatically.) -->
+  <link rel="apple-touch-icon" sizes="180x180" href="./apple-touch-icon.png" />
+  <meta name="application-name" content="Defend the Crystal" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Crystal" />
+
+  <!-- LCP: the title crest is the first thing painted on the start screen -->
+  <link rel="preload" as="image" href="./img/crystal-logo.png" fetchpriority="high" />
+
   <link rel="stylesheet" href="./src/style.css" />
+
+  <!-- Rich result for search engines -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "VideoGame",
+    "name": "Defend the Crystal",
+    "description": "Free co-op 3D tower defense for the browser. 1 to 4 players pick a class, build a maze of blocks and towers, and fight side by side to keep monsters away from the crystal.",
+    "url": "https://defend-the-crystal.vercel.app/",
+    "image": "https://defend-the-crystal.vercel.app/img/crystal-logo.png",
+    "genre": ["Tower Defense", "Strategy", "Cooperative"],
+    "gamePlatform": ["Web Browser", "PWA"],
+    "applicationCategory": "Game",
+    "operatingSystem": "Any",
+    "author": { "@type": "Person", "name": "satoLG" },
+    "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" }
+  }
+  </script>
 </head>
 <body>
+  <noscript>
+    <div style="max-width:640px;margin:12vh auto;padding:0 24px;font-family:system-ui,sans-serif;color:#e9e9ee;text-align:center;">
+      <h1>Defend the Crystal</h1>
+      <p>Co-op 3D tower defense for the browser — 1 to 4 players pick a class,
+      build a maze of blocks and towers, and fight side by side to keep monsters
+      away from the crystal. Plays great on desktop and mobile, and installs as
+      an app for offline play.</p>
+      <p><strong>This game needs JavaScript.</strong> Please enable it to play.</p>
+    </div>
+  </noscript>
   <div id="app">
     <canvas id="game-canvas"></canvas>
     <div id="vignette"></div>
@@ -39,6 +109,9 @@
                 <button class="lang-btn" data-lang="pt"><span class="flag" data-flag="br"></span> <span data-i18n="lang.pt">Português</span></button>
                 <button class="lang-btn" data-lang="en"><span class="flag" data-flag="us"></span> <span data-i18n="lang.en">English</span></button>
               </div>
+              <!-- shown only when the browser offers an install prompt and
+                   we're not already running as the installed app -->
+              <button id="install-btn" class="btn subtle install-btn hidden"><i data-icon="install"></i> <span data-i18n="install.button">Install app</span></button>
             </div>
           </div>
         </div>
@@ -303,7 +376,24 @@
             <button class="lang-btn" data-lang="en"><span class="flag" data-flag="us"></span> <span data-i18n="lang.en">English</span></button>
           </div>
         </div>
+        <!-- install-as-app row: hidden unless the browser offers an install
+             prompt and we're not already inside the installed PWA -->
+        <div id="install-row" class="setting-row install-row hidden">
+          <label data-i18n="install.settingsLabel">Install on this device</label>
+          <button id="set-install" class="btn small"><i data-icon="install"></i> <span data-i18n="install.button">Install app</span></button>
+        </div>
         <button id="settings-close" class="btn primary big" data-i18n="common.done">Done</button>
+      </div>
+    </div>
+
+    <!-- ============ INSTALL HELP (manual PWA install steps) ============ -->
+    <div id="install-help" class="screen overlay hidden">
+      <div class="panel center-panel">
+        <button id="install-help-close" class="btn small corner-btn" data-i18n-title="common.close" title="Close"><i data-icon="x"></i></button>
+        <h2><i data-icon="install"></i> <span data-i18n="install.helpTitle">Install the game</span></h2>
+        <p class="muted install-help-intro" data-i18n="install.helpIntro">Add Defend the Crystal to your device to play offline, anytime.</p>
+        <p id="install-help-steps" class="install-help-steps"></p>
+        <button id="install-help-ok" class="btn primary big" data-i18n="common.done">Done</button>
       </div>
     </div>
 

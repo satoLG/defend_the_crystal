@@ -331,6 +331,18 @@ input:focus { border-color: var(--gold); }
 /* the two language buttons fill the Play button's width → a tidy rectangle */
 .start-actions .lang-switch { display: flex; gap: 10px; margin-top: 0; }
 .start-actions .lang-btn { flex: 1; justify-content: center; }
+/* install-as-app button, tucked right under the language row — a quiet
+   full-width affordance that only appears when the browser offers it */
+.start-actions .install-btn {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  width: 100%; font-size: 0.9rem; opacity: 0.92;
+}
+.start-actions .install-btn .ico { width: 1.05em; height: 1.05em; }
+/* settings modal install row: keep the button on one line beside its label */
+.install-row #set-install { display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; }
+/* manual install-instructions modal */
+.install-help-intro { margin-bottom: 8px; }
+.install-help-steps { margin: 8px 0 14px; line-height: 1.5; font-size: 1rem; }
 /* a gentle, non-shouty breathing glow to draw the eye to Play */
 #start-area.revealed .btn.primary { animation: play-pulse 2.8s ease-in-out 1s infinite; }
 @keyframes play-pulse { 50% { box-shadow: 0 0 26px rgba(242, 242, 245, 0.3); } }
