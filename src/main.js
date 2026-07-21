@@ -629,7 +629,10 @@ function handleEvent(ev) {
     case 'hit': sfx.hit(); break;
     case 'die':
       if (ev.player) {
-        if (ev.id === selfId) { sfx.hurt(); state.self.dead = true; }
+        if (ev.id === selfId) {
+          sfx.hurt(); state.self.dead = true;
+          state.self.kbx = 0; state.self.kbz = 0; // drop any residual shove
+        }
         ui.toast(t('toast.defenderFallen'), 'error');
       } else if (ev.boss) {
         ui.toast(t('toast.bossDefeated'), 'gold');
@@ -640,6 +643,7 @@ function handleEvent(ev) {
       if (ev.id === selfId) {
         state.self.x = ev.x; state.self.z = ev.z;
         state.self.dead = false;
+        state.self.kbx = 0; state.self.kbz = 0; // clean slate on respawn
         sfx.success();
       }
       break;
@@ -834,16 +838,26 @@ function stepSelf(dt) {
     s.yaw = Math.atan2(dir.x, dir.z);
     state.self.faceId = null;
   }
-  // knockback impulse
+  // knockback impulse — cap the accumulated push first so a pile-up of
+  // simultaneous hits can't fling the hero across the board or over a wall
+  const kacc = Math.hypot(s.kbx, s.kbz);
+  if (kacc > PLAYER.KB_MAX) { const sc = PLAYER.KB_MAX / kacc; s.kbx *= sc; s.kbz *= sc; }
   vx += s.kbx * 6;
   vz += s.kbz * 6;
   const decay = Math.exp(-PLAYER.KB_DECAY * dt);
   s.kbx *= decay; s.kbz *= decay;
+  if (Math.abs(s.kbx) < 0.02) s.kbx = 0;
+  if (Math.abs(s.kbz) < 0.02) s.kbz = 0;
 
-  const nx = s.x + vx * dt;
-  const nz = s.z + vz * dt;
-  const fixed = clientGridRef().resolveCircle(nx, nz, PLAYER.RADIUS, true);
-  s.x = fixed.x; s.z = fixed.z;
+  // integrate in short hops, resolving walls after each — a hard knock can
+  // never tunnel the hero through an obstacle (worst case: pinned to it)
+  const grid = clientGridRef();
+  const dxTot = vx * dt, dzTot = vz * dt;
+  const steps = Math.max(1, Math.ceil(Math.hypot(dxTot, dzTot) / PLAYER.KB_STEP));
+  for (let i = 0; i < steps; i++) {
+    const fixed = grid.resolveCircle(s.x + dxTot / steps, s.z + dzTot / steps, PLAYER.RADIUS, true);
+    s.x = fixed.x; s.z = fixed.z;
+  }
 }
 
 // ---------------------------------------------------------

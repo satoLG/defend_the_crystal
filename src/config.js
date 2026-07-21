@@ -447,7 +447,10 @@ export const PLAYER = {
   LEVEL_CAP: 60,
   XP_BASE: 50,          // xpNext = XP_BASE * lvl^1.35
   XP_POW: 1.35,
-  KB_DECAY: 7,          // knockback impulse decay per second
+  KB_DECAY: 7,          // knockback impulse decay per second (shared w/ enemies)
+  KB_MAX: 4,            // hard cap on accumulated knockback (anti fling-off)
+  KB_STEP: 0.25,        // knockback integrated in hops this small so a hard
+                        // knock can never tunnel a body through a wall
 };
 
 // ---------- towers ----------
@@ -563,6 +566,7 @@ export const ENEMY = {
   DRAG_TIME: 2.6,        // seconds being dragged backward before giving up
   AGGRO_REFRACT: 5,      // seconds of aggro immunity after giving up
   KNOCKBACK_ON_PLAYER: 2.4,
+  KB_MAX: 4,             // hard cap on accumulated knockback (anti fling-off)
   SEPARATION_WEIGHT: 1.4,
   BREACH_DIST: 1.0,      // how close to the crystal counts as a breach
   HP_PER_WAVE: 0.16,     // +16% HP per wave past the first
