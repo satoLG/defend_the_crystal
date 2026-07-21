@@ -206,13 +206,20 @@ export function makeBow(height = 0.5) {
 // space): stand the long axis (handle) upright, drop the grip on the
 // origin — `gripBias` slides it down the handle so it reads as held —
 // and scale to a hand-prop height.
-function makeUprightProp(key, height, gripBias = 0.28) {
-  const inner = instantiate(key, { shadows: false }).group;
-  const pre = new THREE.Box3().setFromObject(inner);
+function makeUprightProp(key, height, gripBias = 0.28, flip = false) {
+  const raw = instantiate(key, { shadows: false }).group;
+  const pre = new THREE.Box3().setFromObject(raw);
   const s = pre.getSize(new THREE.Vector3());
   // whichever axis is longest is the handle — rotate it upright (+Y)
-  if (s.x >= s.y && s.x >= s.z) inner.rotation.z = Math.PI / 2;
-  else if (s.z >= s.y && s.z >= s.x) inner.rotation.x = Math.PI / 2;
+  if (s.x >= s.y && s.x >= s.z) raw.rotation.z = Math.PI / 2;
+  else if (s.z >= s.y && s.z >= s.x) raw.rotation.x = Math.PI / 2;
+
+  // some kit models export blade-down — flip end-for-end so the grip
+  // sits low in the hand and the business end points up (done on a
+  // wrapper so the centering/grip-bias below still works unchanged)
+  const inner = new THREE.Group();
+  inner.add(raw);
+  if (flip) inner.rotation.x = Math.PI;
 
   const holder = new THREE.Group();
   holder.add(inner);
@@ -231,7 +238,11 @@ export function makeAxe() { return makeUprightProp('prop-axe', 0.6); }
 export function makeGreatAxe() { return makeUprightProp('prop-axe-great', 0.85); }
 export function makeHammer() { return makeUprightProp('prop-hammer', 0.8); }
 export function makeSpear() { return makeUprightProp('prop-spear', 1.05, 0.1); }
-export function makeGreatSword() { return makeUprightProp('prop-sword-great', 0.78); }
+// the great-sword kit model exports blade-down, so flip it upright
+export function makeGreatSword() { return makeUprightProp('prop-sword-great', 0.78, 0.28, true); }
+// the gravedigger's shovel (graveyard kit) exports the same way — flip
+// it and normalize it like the axe so it grips the hand right-side up
+export function makeShovel() { return makeUprightProp('prop-shovel', 0.7, 0.28, true); }
 
 // the mini-dungeon rectangle shield, blown up relative to the round
 // shield the tanker starts with (both kits share the mini scale)
@@ -245,7 +256,9 @@ export function makeGreatShield() {
   const ownH = own.getSize(new THREE.Vector3()).y;
   const center = own.getCenter(new THREE.Vector3());
   inner.position.sub(center); // center on the grip like the round shield
-  holder.scale.setScalar((baseH * 1.5) / Math.max(ownH, 1e-3));
+  // a touch over the round shield — 1.5× dragged on the ground for
+  // normal-size heroes (bosses still scale the whole model up on top)
+  holder.scale.setScalar((baseH * 1.25) / Math.max(ownH, 1e-3));
   return holder;
 }
 
@@ -548,7 +561,7 @@ const ENEMY_PROPS = {
   // the gravedigger grips his shovel exactly like the berserker holds his
   // axe (same bone-relative pos/rot); he's just scaled up as a whole, so
   // the relative placement carries straight over
-  keeper: [{ key: 'prop-shovel', bone: 'arm-right', pos: [-0.225, 0.01, 0.09], rot: [0.66, 0.6, -0.45], scale: 0.9 }],
+  keeper: [{ gen: makeShovel, ...MOUNTS.axe, scale: 0.9 }],
   // skeleton archers hold the bow & quiver identically to the player archer
   archer: CLASS_PROPS.archer,
   // Zé do Caixão hauls his own coffin on his back

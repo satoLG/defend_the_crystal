@@ -454,6 +454,13 @@ export class UI {
         sfx.click();
         this.charDraft.cls = card.dataset.cls;
         this.charDraft.colors = {}; // parts differ per model — start from its defaults
+        // the free starter arsenal is class-specific: clear the loadout so
+        // switching class doesn't carry the previous class's starter (e.g.
+        // the berserker's axe) onto the new hero. grantStarterWeapons()
+        // re-grants the right starters for this class when the draft saves.
+        this.charDraft.weapons = {};
+        this.charDraft.activeWeapon = null;
+        this.charDraft.activeShield = null;
         this.selectCharClass(card.dataset.cls);
         this.renderCharInfo();
         this.renderColorSlots();
