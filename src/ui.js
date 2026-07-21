@@ -16,7 +16,7 @@ import { normalizeRoomCode } from './utils.js';
 import { icon, mountIcons, mountFlags } from './icons.js';
 import { settings } from './settings.js';
 import { music } from './music.js';
-import { canInstall, promptInstall, onInstallChange } from './pwa.js';
+import { isInstalled, hasNativePrompt, promptInstall, onInstallChange } from './pwa.js';
 import { loadRoster, saveRoster, defaultCharacter, petRefOf, grantPetXp, loadoutOf } from './character.js';
 import { getSlots } from './render/customize.js';
 
@@ -155,27 +155,62 @@ export class UI {
   }
 
   // "Install app" affordances: one under the language buttons on the
-  // start screen, one in the settings modal. Both are driven straight
-  // off the PWA layer — they only appear once the browser has offered
-  // an install prompt, and NEVER while running as the installed app
-  // (canInstall() returns false in standalone), so the button can't
-  // show inside the installed PWA.
+  // start screen, one in the settings modal. They stay visible the whole
+  // time the game ISN'T installed. On click we use the browser's native
+  // install prompt when we have one (Chromium, once it's offered); on
+  // every other browser (iOS Safari, Firefox, or before Chrome offers
+  // the prompt) there is no API to open that dialog, so we show a short
+  // manual "how to install" guide instead. Once installed, both vanish.
   bindInstall() {
     const trigger = async () => {
       sfx.click();
-      await promptInstall();
-      this.refreshInstall(); // a spent prompt hides the buttons
+      if (hasNativePrompt()) {
+        const outcome = await promptInstall();
+        // if the native prompt couldn't run after all, fall back to help
+        if (outcome === null) this.showInstallHelp();
+      } else {
+        this.showInstallHelp();
+      }
+      this.refreshInstall();
     };
     $('install-btn')?.addEventListener('click', trigger);
     $('set-install')?.addEventListener('click', trigger);
+
+    $('install-help-close')?.addEventListener('click', () => { sfx.click(); this.hide('install-help'); });
+    $('install-help-ok')?.addEventListener('click', () => { sfx.click(); this.hide('install-help'); });
+    $('install-help')?.addEventListener('click', (e) => {
+      if (e.target === $('install-help')) this.hide('install-help');
+    });
+
     onInstallChange(() => this.refreshInstall());
     this.refreshInstall();
   }
 
+  // show the buttons whenever the game isn't already installed
   refreshInstall() {
-    const show = canInstall();
+    const show = !isInstalled();
     $('install-btn')?.classList.toggle('hidden', !show);
     $('install-row')?.classList.toggle('hidden', !show);
+  }
+
+  // manual install instructions, tailored to the platform, for browsers
+  // that don't expose the native prompt
+  showInstallHelp() {
+    const el = $('install-help-steps');
+    if (el) el.textContent = this.installHelpStep();
+    this.show('install-help');
+  }
+
+  installHelpStep() {
+    const ua = navigator.userAgent || '';
+    const iOS = /iphone|ipad|ipod/i.test(ua) ||
+      (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1); // iPadOS masquerades as Mac
+    const android = /android/i.test(ua);
+    const coarse = matchMedia?.('(pointer: coarse)').matches;
+    if (iOS) return t('install.iosSafari');
+    if (android) return t('install.androidChrome');
+    if (!coarse) return t('install.desktop');
+    return t('install.generic');
   }
 
   // re-apply translations everywhere without a reload, so switching the

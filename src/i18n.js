@@ -184,7 +184,15 @@ const STRINGS = {
     },
     brand: { title: '<span class="t-grp">Defend</span><span class="t-grp"><span class="t-the">the</span> Crystal</span>' },
     lang: { label: 'Language', pt: 'Português', en: 'English' },
-    install: { button: 'Install app', settingsLabel: 'Install on this device' },
+    install: {
+      button: 'Install app', settingsLabel: 'Install on this device',
+      helpTitle: 'Install the game',
+      helpIntro: 'Add Defend the Crystal to your device to play offline, anytime.',
+      iosSafari: 'Tap the Share button at the bottom of Safari, then choose “Add to Home Screen”.',
+      androidChrome: 'Open the browser menu (⋮) and tap “Install app” (or “Add to Home screen”).',
+      desktop: 'Click the install icon in the address bar, or open the browser menu and choose “Install Defend the Crystal”.',
+      generic: 'Open your browser’s menu and look for “Install app” or “Add to Home Screen”.',
+    },
     start: {
       play: 'Play', summoning: 'Summoning models…', ready: 'Ready!',
     },
@@ -382,7 +390,15 @@ const STRINGS = {
     },
     brand: { title: '<span class="t-grp">Defenda</span><span class="t-grp"><span class="t-the">o</span> Cristal</span>' },
     lang: { label: 'Idioma', pt: 'Português', en: 'English' },
-    install: { button: 'Instalar app', settingsLabel: 'Instalar neste dispositivo' },
+    install: {
+      button: 'Instalar app', settingsLabel: 'Instalar neste dispositivo',
+      helpTitle: 'Instalar o jogo',
+      helpIntro: 'Adicione o Defenda o Cristal ao seu dispositivo para jogar offline quando quiser.',
+      iosSafari: 'Toque no botão Compartilhar na parte de baixo do Safari e escolha “Adicionar à Tela de Início”.',
+      androidChrome: 'Abra o menu do navegador (⋮) e toque em “Instalar app” (ou “Adicionar à tela inicial”).',
+      desktop: 'Clique no ícone de instalar na barra de endereço, ou abra o menu do navegador e escolha “Instalar Defenda o Cristal”.',
+      generic: 'Abra o menu do seu navegador e procure por “Instalar app” ou “Adicionar à Tela de Início”.',
+    },
     start: {
       play: 'Jogar', summoning: 'Invocando modelos…', ready: 'Pronto!',
     },

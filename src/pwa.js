@@ -1,16 +1,23 @@
 // ============================================================
 // PWA glue: service-worker registration, install-prompt capture,
-// and "am I running as an installed app?" detection.
+// and "am I already installed?" detection.
 //
-// The install UI (a button on the start screen and one in the
-// settings modal) is driven entirely from here: it only becomes
-// available once the browser fires `beforeinstallprompt`, and it
-// is never available when the game is already running standalone
-// (installed) — so the button can't show inside the installed PWA.
+// Important browser reality: there is NO API to force the native
+// install dialog on demand. The dialog can only be opened by
+// calling .prompt() on a `beforeinstallprompt` event, which only
+// Chromium fires, and only once its install criteria are met.
+// iOS Safari and Firefox never fire it at all.
+//
+// So the on-screen install button is ALWAYS shown while the game
+// isn't installed. When tapped it uses the native prompt if we
+// captured one; otherwise the UI falls back to a short "how to
+// install" guide (see ui.js). This module just exposes the state
+// the UI needs to make that choice.
 // ============================================================
 
-let deferredPrompt = null;        // the captured beforeinstallprompt event
-const listeners = new Set();      // notified whenever install availability flips
+let deferredPrompt = null;        // the captured beforeinstallprompt event (Chromium only)
+let installed = false;            // flipped true once appinstalled fires
+const listeners = new Set();      // notified whenever install state changes
 
 // running as an installed app? display-mode covers Android/desktop,
 // navigator.standalone covers iOS Safari's home-screen web apps
@@ -23,22 +30,24 @@ export function isStandalone() {
   );
 }
 
-// true only when we hold a usable install prompt AND aren't already installed
-export function canInstall() {
-  return !!deferredPrompt && !isStandalone();
-}
+// already installed (running standalone, or installed this session)?
+export function isInstalled() { return installed || isStandalone(); }
 
-// subscribe to availability changes; fires with the current value on demand
+// do we hold a usable native install prompt right now?
+export function hasNativePrompt() { return !!deferredPrompt; }
+
+// subscribe to state changes (prompt captured, app installed, …)
 export function onInstallChange(fn) { listeners.add(fn); }
-function emit() { for (const fn of listeners) fn(canInstall()); }
+function emit() { for (const fn of listeners) fn(); }
 
-// show the browser's native install dialog. Returns the user's choice
-// ('accepted' | 'dismissed' | null when nothing to prompt).
+// Fire the browser's native install dialog. Returns:
+//   'accepted' | 'dismissed'  — the user's choice
+//   null                      — no native prompt available (UI should
+//                               fall back to manual instructions)
 export async function promptInstall() {
   const ev = deferredPrompt;
   if (!ev) return null;
-  // a prompt can only be used once — drop it and reflect that in the UI
-  deferredPrompt = null;
+  deferredPrompt = null; // a prompt can only be used once
   emit();
   try {
     ev.prompt();
@@ -59,14 +68,14 @@ export function initPwa() {
     emit();
   });
 
-  // once installed, the prompt is spent and the buttons should vanish
+  // once installed, hide the install UI and drop the spent prompt
   window.addEventListener('appinstalled', () => {
+    installed = true;
     deferredPrompt = null;
     emit();
   });
 
-  // a live switch into standalone (e.g. user installs & the tab reflows)
-  // should also hide the install UI
+  // a live switch into standalone should also update the UI
   window.matchMedia?.('(display-mode: standalone)')
     .addEventListener?.('change', () => emit());
 
@@ -75,7 +84,6 @@ export function initPwa() {
   if (import.meta.env.PROD && 'serviceWorker' in navigator) {
     window.addEventListener('load', () => {
       // resolve against the document base so it works at any subpath
-      // (GitHub Pages project sites live under /<repo>/)
       const swUrl = new URL('sw.js', document.baseURI).href;
       navigator.serviceWorker.register(swUrl).catch(() => { /* offline unavailable — fine */ });
     });
