@@ -18,7 +18,7 @@
  * old store on activate.
  * ============================================================ */
 
-const CACHE = 'dtc-cache-v1';
+const CACHE = 'dtc-cache-v2';
 
 // the minimal shell pre-cached on install so the very first
 // offline launch has something to boot from
@@ -26,8 +26,6 @@ const CORE = [
   './',
   './index.html',
   './manifest.webmanifest',
-  './icon.svg',
-  './icon-maskable.svg',
   './img/crystal-logo.png',
 ];
 
