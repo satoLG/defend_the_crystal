@@ -25,14 +25,3 @@ export function angleLerp(a, b, t) {
   if (d < -Math.PI) d += Math.PI * 2;
   return a + d * t;
 }
-
-// Turn angle `a` toward `target` by at most `maxStep` radians, taking
-// the shortest way around. Constant angular speed (unlike angleLerp's
-// ease), so a character turns smoothly at a fixed rate to face a foe.
-export function approachAngle(a, target, maxStep) {
-  let d = (target - a) % (Math.PI * 2);
-  if (d > Math.PI) d -= Math.PI * 2;
-  if (d < -Math.PI) d += Math.PI * 2;
-  if (Math.abs(d) <= maxStep) return target;
-  return a + Math.sign(d) * maxStep;
-}

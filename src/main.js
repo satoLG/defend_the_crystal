@@ -16,7 +16,7 @@ import {
   petEffects, jumpDurFor,
 } from './config.js';
 import { petRefOf, loadoutOf } from './character.js';
-import { makeRoomCode, lerp, dist2d, approachAngle } from './utils.js';
+import { makeRoomCode, lerp, dist2d, angleLerp } from './utils.js';
 import { settings } from './settings.js';
 import { music } from './music.js';
 import { t, getLang, onLangChange, bossName, bossFlavor, enemyName } from './i18n.js';
@@ -43,7 +43,7 @@ const state = {
   snaps: new SnapBuffer(),
   // local self-prediction (jump = in-flight hop over a grid cell,
   // dash = the berserker's special sprint)
-  self: { x: 0, z: 4, yaw: Math.PI, moving: false, kbx: 0, kbz: 0, dead: false, speed: 4, range: 0, jump: null, dash: null },
+  self: { x: 0, z: 4, yaw: Math.PI, moving: false, kbx: 0, kbz: 0, dead: false, speed: 4, range: 0, faceId: null, jump: null, dash: null },
   selfInit: false,
   clientGrid: new Grid(),
   blockedKey: '',
@@ -713,24 +713,36 @@ function syncClientGrid(snap) {
   state.clientGrid.computeFlow();
 }
 
-// how fast the character swings around to face a foe (rad/s) — brisk
-// enough to feel responsive, slow enough to read as a smooth turn
-const FACE_TURN_RATE = 11;
+// turn responsiveness (1/s) for the exponential ease toward a foe — high
+// enough to be facing it before the swing lands, eased so it still reads
+// as a smooth rotation rather than a snap
+const FACE_TURN_RESP = 16;
+// start turning a touch before the foe is technically in attack range, so
+// the model is already facing it by the time the sim fires the attack
+const FACE_MARGIN = 0.7;
+// keep facing the current foe until a rival is clearly closer — stops the
+// gaze from flickering between two near-equidistant enemies
+const FACE_STICK = 0.8;
 
-// nearest enemy within the local hero's attack range, read off the last
-// snapshot (enemy row: [id, kind, x, z, ...]). Mirrors the sim's own
-// auto-attack acquisition so the gaze lands on whatever it'd be hitting.
-function nearestFoeInRange(x, z, range) {
+// the enemy the local hero should be looking at: the nearest one within
+// (attack range + a small lead), read off the last snapshot (enemy row:
+// [id, kind, x, z, ...]). Mirrors the sim's auto-attack acquisition, with
+// hysteresis so it commits to whatever it's already turned toward.
+function foeToFace(x, z, range) {
   if (!range) return null;
   const en = state.snaps.latest()?.en;
   if (!en) return null;
-  const maxD = range + ENEMY.RADIUS;
-  let best = null, bestD = maxD;
+  const maxD = range + ENEMY.RADIUS + FACE_MARGIN;
+  let best = null, bestD = maxD, cur = null, curD = Infinity;
   for (const e of en) {
     const d = Math.hypot(e[2] - x, e[3] - z);
-    if (d < bestD) { bestD = d; best = { x: e[2], z: e[3] }; }
+    if (d > maxD) continue;
+    if (d < bestD) { bestD = d; best = e; }
+    if (e[0] === state.self.faceId) { cur = e; curD = d; }
   }
-  return best;
+  const pick = (cur && curD <= bestD + FACE_STICK) ? cur : best;
+  state.self.faceId = pick ? pick[0] : null;
+  return pick ? { x: pick[2], z: pick[3] } : null;
 }
 
 function stepSelf(dt) {
@@ -770,14 +782,16 @@ function stepSelf(dt) {
     vz = dir.z * s.speed;
   }
   // facing is decoupled from movement: a foe inside attack range wins the
-  // character's gaze — it turns to face it smoothly (rotation only, you
-  // still walk wherever you steer). Only with nothing in range does the
-  // look direction follow your movement, so the two never fight over yaw.
-  const foe = nearestFoeInRange(s.x, s.z, s.range);
+  // character's gaze — it eases around to look straight at it (rotation
+  // only, you still walk wherever you steer). Only with nothing in range
+  // does the look direction follow your movement, so the two never fight.
+  const foe = foeToFace(s.x, s.z, s.range);
   if (foe) {
-    s.yaw = approachAngle(s.yaw, Math.atan2(foe.x - s.x, foe.z - s.z), FACE_TURN_RATE * dt);
+    const target = Math.atan2(foe.x - s.x, foe.z - s.z);
+    s.yaw = angleLerp(s.yaw, target, 1 - Math.exp(-FACE_TURN_RESP * dt));
   } else if (s.moving) {
     s.yaw = Math.atan2(dir.x, dir.z);
+    state.self.faceId = null;
   }
   // knockback impulse
   vx += s.kbx * 6;
