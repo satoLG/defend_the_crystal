@@ -707,28 +707,29 @@ export const NET = {
 };
 
 // ---------- Supabase Realtime signaling (preferred transport) ----------
-// Trystero can broker the WebRTC handshake over a Supabase Realtime
-// Broadcast channel — a signaling path WE control, far steadier than the
-// public Nostr/torrent/MQTT relays (which stay on as automatic backups).
-//
-// Only the *handshake* crosses Supabase. Once two peers link up, every bit
-// of gameplay traffic flows directly peer-to-peer over WebRTC and never
-// touches Supabase again — so this is about making peers FIND each other
+// Trystero brokers the WebRTC handshake over a Supabase Realtime Broadcast
+// channel we control — a signaling path far steadier than the public
+// Nostr/torrent/MQTT relays (which stay on as automatic backups, see
+// net.js). Only the *handshake* crosses Supabase; once two peers link up,
+// every bit of gameplay traffic flows directly peer-to-peer over WebRTC and
+// never touches Supabase again. This is about making peers FIND each other
 // reliably, not about routing game data through a server.
 //
-// Fill both fields and the Supabase transport switches on automatically
-// (see net.js) and becomes the primary way peers discover each other;
-// leave them blank and the game keeps using the public relays exactly as
-// it does today. The `anon public` key is designed to be shipped in the
-// client — access is governed by Supabase Realtime authorization — so it
-// can live here, but the cleanest wiring is Vite env vars at build time
-// (VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY in a .env file).
+//   URL - the project's base URL (Supabase dashboard -> Project Settings ->
+//         API -> "Project URL"); Trystero uses it as the appId. It is the
+//         bare project origin, with NO "/rest/v1/" path.
+//   KEY - the project's publishable key ("sb_publishable_...", the current
+//         replacement for the legacy anon key). It is public by design — it
+//         ships in the client bundle and access is governed by Supabase
+//         Realtime authorization — so committing it here is fine; rotate it
+//         in the dashboard any time.
+//
+// Env vars override the defaults at build time (VITE_SUPABASE_URL /
+// VITE_SUPABASE_KEY in a .env file); blank both out and the game falls back
+// to the public relays exactly as before.
 export const SUPABASE = {
-  // Project URL, e.g. 'https://abcdefgh.supabase.co' (Trystero uses this
-  // as the appId for the Supabase strategy).
-  URL: import.meta.env?.VITE_SUPABASE_URL || '',
-  // The project's `anon public` API key.
-  ANON_KEY: import.meta.env?.VITE_SUPABASE_ANON_KEY || '',
+  URL: import.meta.env?.VITE_SUPABASE_URL || 'https://jfswwxbsxbmkpbhbvmkz.supabase.co',
+  KEY: import.meta.env?.VITE_SUPABASE_KEY || 'sb_publishable_oz5an94SaG1zEaEfpwtHuw_MZIdDuxU',
 };
 
 export const SIM_DT = 1 / 30;

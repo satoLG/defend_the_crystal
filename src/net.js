@@ -78,7 +78,7 @@ const NOSTR_RELAYS = [
 // are configured; otherwise the game runs on the public relays alone,
 // exactly as before. The Supabase project URL is Trystero's `appId` for
 // this strategy and the anon key goes in relayConfig.supabaseKey.
-const supabaseReady = !!(SUPABASE.URL && SUPABASE.ANON_KEY);
+const supabaseReady = !!(SUPABASE.URL && SUPABASE.KEY);
 
 // Each transport is a named joiner. They are attempted in order and
 // any that fails to initialize is skipped, so a single broken
@@ -90,7 +90,7 @@ const TRANSPORTS = [
     name: 'supabase',
     primary: true,
     join: (code) => joinSupabase(
-      { appId: SUPABASE.URL, relayConfig: { supabaseKey: SUPABASE.ANON_KEY } },
+      { appId: SUPABASE.URL, relayConfig: { supabaseKey: SUPABASE.KEY } },
       code,
     ),
   }] : []),
