@@ -5,6 +5,14 @@ import { joinRoom as joinSupabase } from '@trystero-p2p/supabase';
 import { NET, SUPABASE } from './config.js';
 
 const useLocalNet = new URLSearchParams(location.search).has('localnet');
+// `trysteroId` comes from the 'trystero' (Nostr) package, but every
+// transport below re-exports its own `selfId` pulled from the SAME
+// underlying @trystero-p2p/core module — that only holds if all four
+// trystero-p2p packages resolve to one shared copy of core, which is why
+// package.json pins them to matching exact versions (see its dependencies
+// block). If that ever drifts, a single browser tab can present a
+// different peer id per transport, and the SAME player joining over two
+// transports (e.g. Supabase + Nostr) shows up as two separate players.
 export const selfId = useLocalNet
   ? `local-${Math.random().toString(36).slice(2, 10)}`
   : trysteroId;

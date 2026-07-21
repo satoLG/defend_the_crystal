@@ -124,6 +124,7 @@ async function boot() {
     onDragMove: (x, y) => onDragMove(x, y),
     onDragEnd: (item, drop) => onDragEnd(item, drop),
     onPanelClose: () => gs.hideRange(),
+    onLeaveLobby: () => leaveLobby(),
     // the equipped pet changed (swap / rename / level-up) — tell the
     // host so the buffs & the follower everyone sees update live
     onPetChange: (pet) => { if (state.started) sendAction({ t: 'pet', pet }); },
@@ -168,7 +169,10 @@ function hostGame(character) {
   state.role = 'host';
   state.hostId = selfId;
   const code = makeRoomCode();
-  state.net = new Net(code);
+  // captured locally so a message that arrives after leaveLobby() (or
+  // after hosting a fresh room) can tell it's stale and ignore itself,
+  // instead of reviving a room state we already tore down
+  const net = state.net = new Net(code);
   state.sim = new Sim();
   state.sim.addPlayer(
     selfId, character.name, character.cls, character.colors,
@@ -176,16 +180,22 @@ function hostGame(character) {
   );
   syncSelfFromSim();
 
-  state.net.on('hello', (data, peerId) => {
+  net.on('hello', (data, peerId) => {
+    if (state.net !== net) return;
     if (!state.sim.getPlayer(peerId)) {
       state.sim.addPlayer(peerId, data?.name, data?.cls, data?.colors, data?.pet, data?.loadout);
     }
     broadcastLobby();
   });
-  state.net.on('input', (data, peerId) => state.sim.setInput(peerId, data));
-  state.net.on('act', (data, peerId) => state.sim.handleAction(peerId, data));
-  state.net.onPeerJoin = () => { state.lastStaticSend = 0; broadcastLobby(); };
-  state.net.onPeerLeave = (peerId) => {
+  net.on('input', (data, peerId) => state.sim.setInput(peerId, data));
+  net.on('act', (data, peerId) => state.sim.handleAction(peerId, data));
+  net.onPeerJoin = () => {
+    if (state.net !== net) return;
+    state.lastStaticSend = 0;
+    broadcastLobby();
+  };
+  net.onPeerLeave = (peerId) => {
+    if (state.net !== net) return;
     state.sim.removePlayer(peerId);
     broadcastLobby();
   };
@@ -208,17 +218,21 @@ function broadcastLobby() {
 
 function joinGame(code, character) {
   state.role = 'client';
-  state.net = new Net(code);
+  // captured locally so a message that arrives after leaveLobby() (or
+  // after joining a different room) can tell it's stale and ignore
+  // itself, instead of reviving a room state we already tore down
+  const net = state.net = new Net(code);
   ui.showLobby(code, false);
   $status(t('lobby.lookingForHost'));
 
-  const hello = () => state.net.send('hello', {
+  const hello = () => net.send('hello', {
     name: character.name, cls: character.cls, colors: character.colors,
     pet: petRefOf(character), loadout: loadoutOf(character),
   });
-  state.net.onPeerJoin = () => hello();
+  net.onPeerJoin = () => { if (state.net === net) hello(); };
 
-  state.net.on('lobby', (data) => {
+  net.on('lobby', (data) => {
+    if (state.net !== net) return;
     state.hostId = data.host;
     state.lobbyPlayers = data.players || [];
     ui.updateLobby(state.lobbyPlayers, selfId);
@@ -226,23 +240,26 @@ function joinGame(code, character) {
     $status('');
     if (data.started && !state.started) enterGame();
   });
-  state.net.on('snap', (snap) => {
+  net.on('snap', (snap) => {
+    if (state.net !== net) return;
     withStatic(snap); // re-fill cached towers/obstacles/graves if this was a lean tick
     state.snaps.push(snap, performance.now() / 1000);
     if (!state.started) enterGame();
     syncClientGrid(snap);
     reconcileSelf(snap);
   });
-  state.net.on('ev', (events) => {
+  net.on('ev', (events) => {
+    if (state.net !== net) return;
     for (const ev of events) handleEvent(ev);
   });
-  state.net.onPeerLeave = (peerId) => {
+  net.onPeerLeave = (peerId) => {
+    if (state.net !== net) return;
     if (peerId === state.hostId) ui.showHostLost();
   };
 
   // if we never hear from a host, tell the player
   setTimeout(() => {
-    if (!state.hostId && !state.started) {
+    if (state.net === net && !state.hostId && !state.started) {
       $status(t('lobby.nobodyHere'));
     }
   }, 12000);
@@ -251,6 +268,20 @@ function joinGame(code, character) {
 function $status(msg) {
   const el = document.getElementById('lobby-status');
   if (msg) el.textContent = msg;
+}
+
+// "Sair" while waiting in the lobby (hosting or looking for a host): drop
+// every transport right away and bounce straight back to the menu — no
+// page reload, so it doesn't wait on asset/scene reloading to take effect.
+function leaveLobby() {
+  state.net?.leave();
+  state.net = null;
+  state.role = null;
+  state.hostId = null;
+  state.sim = null;
+  state.started = false;
+  state.lobbyPlayers = [];
+  ui.showMenu();
 }
 
 function startMatch() {
