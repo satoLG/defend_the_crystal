@@ -20,6 +20,8 @@ import { makeRoomCode, lerp, dist2d, angleLerp } from './utils.js';
 import { settings } from './settings.js';
 import { music } from './music.js';
 import { t, getLang, onLangChange, bossName, bossFlavor, enemyName } from './i18n.js';
+import { initPwa } from './pwa.js';
+import { initSync } from './sync.js';
 
 // ============================================================
 // Bootstraps everything and runs the two game loops:
@@ -87,6 +89,14 @@ const effectiveVolumes = () => ({
 });
 
 async function boot() {
+  // PWA: register the service worker (offline play) and start listening
+  // for the install prompt BEFORE the UI is built, so the install button
+  // reflects availability the moment beforeinstallprompt fires. Progress
+  // already persists locally; initSync() wires the (empty) online-sync
+  // template to reconnect events.
+  initPwa();
+  initSync();
+
   // reflect the active language on <html lang> and keep it in sync
   document.documentElement.lang = getLang() === 'pt' ? 'pt-BR' : 'en';
   onLangChange((l) => { document.documentElement.lang = l === 'pt' ? 'pt-BR' : 'en'; });

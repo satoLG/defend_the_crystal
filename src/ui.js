@@ -16,6 +16,7 @@ import { normalizeRoomCode } from './utils.js';
 import { icon, mountIcons, mountFlags } from './icons.js';
 import { settings } from './settings.js';
 import { music } from './music.js';
+import { canInstall, promptInstall, onInstallChange } from './pwa.js';
 import { loadRoster, saveRoster, defaultCharacter, petRefOf, grantPetXp, loadoutOf } from './character.js';
 import { getSlots } from './render/customize.js';
 
@@ -128,6 +129,7 @@ export class UI {
     this.bindOverlays();
     this.bindSettings();
     this.bindLang();
+    this.bindInstall();
     // a language change re-paints the static chrome and re-renders every
     // dynamic bit currently on screen, so the whole UI stays one language
     onLangChange(() => this.retranslate());
@@ -150,6 +152,30 @@ export class UI {
     for (const btn of document.querySelectorAll('[data-lang-switch] .lang-btn')) {
       btn.classList.toggle('active', btn.dataset.lang === lang);
     }
+  }
+
+  // "Install app" affordances: one under the language buttons on the
+  // start screen, one in the settings modal. Both are driven straight
+  // off the PWA layer — they only appear once the browser has offered
+  // an install prompt, and NEVER while running as the installed app
+  // (canInstall() returns false in standalone), so the button can't
+  // show inside the installed PWA.
+  bindInstall() {
+    const trigger = async () => {
+      sfx.click();
+      await promptInstall();
+      this.refreshInstall(); // a spent prompt hides the buttons
+    };
+    $('install-btn')?.addEventListener('click', trigger);
+    $('set-install')?.addEventListener('click', trigger);
+    onInstallChange(() => this.refreshInstall());
+    this.refreshInstall();
+  }
+
+  refreshInstall() {
+    const show = canInstall();
+    $('install-btn')?.classList.toggle('hidden', !show);
+    $('install-row')?.classList.toggle('hidden', !show);
   }
 
   // re-apply translations everywhere without a reload, so switching the

@@ -1,0 +1,36 @@
+{
+  "id": "./",
+  "name": "Defend the Crystal",
+  "short_name": "Crystal",
+  "description": "Free co-op 3D tower defense. Pick a class, build a maze of towers, and fend off monster waves with up to 4 friends — on desktop, mobile or offline.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "display_override": ["standalone", "minimal-ui", "fullscreen"],
+  "orientation": "any",
+  "background_color": "#141021",
+  "theme_color": "#141021",
+  "lang": "en",
+  "dir": "ltr",
+  "categories": ["games", "entertainment"],
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "icon-maskable.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    },
+    {
+      "src": "img/crystal-logo.png",
+      "sizes": "969x969",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}

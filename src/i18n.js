@@ -184,6 +184,7 @@ const STRINGS = {
     },
     brand: { title: '<span class="t-grp">Defend</span><span class="t-grp"><span class="t-the">the</span> Crystal</span>' },
     lang: { label: 'Language', pt: 'Português', en: 'English' },
+    install: { button: 'Install app', settingsLabel: 'Install on this device' },
     start: {
       play: 'Play', summoning: 'Summoning models…', ready: 'Ready!',
     },
@@ -381,6 +382,7 @@ const STRINGS = {
     },
     brand: { title: '<span class="t-grp">Defenda</span><span class="t-grp"><span class="t-the">o</span> Cristal</span>' },
     lang: { label: 'Idioma', pt: 'Português', en: 'English' },
+    install: { button: 'Instalar app', settingsLabel: 'Instalar neste dispositivo' },
     start: {
       play: 'Jogar', summoning: 'Invocando modelos…', ready: 'Pronto!',
     },
