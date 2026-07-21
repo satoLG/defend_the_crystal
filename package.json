@@ -15,6 +15,7 @@
   "dependencies": {
     "@rexa-developer/tiks": "^0.3.0",
     "@trystero-p2p/mqtt": "^0.25.2",
+    "@trystero-p2p/supabase": "^0.25.2",
     "@trystero-p2p/torrent": "^0.25.2",
     "miniplex": "^2.0.0",
     "three": "^0.185.0",
