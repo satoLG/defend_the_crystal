@@ -17,6 +17,16 @@ import { clamp, dist2d, nextId } from '../utils.js';
 
 const rnd2 = (v) => Math.round(v * 100) / 100;
 
+// A knockback vector of magnitude `mag` that pushes a body at `pos` straight
+// away from the origin (fx,fz) the hit came from — i.e. BACKWARD along the
+// direction the blow travelled. Returns [kx, kz].
+function kbAway(fx, fz, pos, mag) {
+  if (mag <= 0) return [0, 0];
+  const dx = pos.x - fx, dz = pos.z - fz;
+  const d = Math.hypot(dx, dz) || 1;
+  return [(dx / d) * mag, (dz / d) * mag];
+}
+
 // ============================================================
 // Host-authoritative simulation. Runs only on the host; clients
 // receive snapshots + events. Movement of each character is
@@ -84,7 +94,7 @@ export class Sim {
       weapon: sanitizeWeaponRef(loadout?.weapon, cls, 'weapon') || starterRef('weapon'),
       shield: sanitizeWeaponRef(loadout?.shield, cls, 'shield') || starterRef('shield'),
       lvl: 1, xp: 0, xpNext: this.xpNext(1),
-      dead: false, respawnT: 0, atkCd: 0, lastDmg: -99, jumpT: 0,
+      dead: false, respawnT: 0, atkCd: 0, lastDmg: -99, invT: 0, jumpT: 0,
       skillCd: 0, wallT: 0, dashT: 0,
       kills: 0, obst: 0, lastInputT: this.time,
     });
@@ -480,9 +490,12 @@ export class Sim {
         : 0;
       if (dist2d(fx + dx * t, fz + dz * t, ep.x, ep.z) > S.width + ENEMY.RADIUS) continue;
       const id = e.id, pid = p.id;
+      // flung along the charge, whichever way it was aimed
+      const dl = Math.sqrt(len2) || 1;
+      const kx = (dx / dl) * S.kb, kz = (dz / dl) * S.kb;
       this.pending.push({ at: this.time + S.dur * t, fn: () => {
         const hit = this.enemies.entities.find((n) => n.id === id);
-        if (hit) this.damageEnemy(hit, dmg, S.kb, 0, pid);
+        if (hit) this.damageEnemy(hit, dmg, kx, kz, pid);
       }});
     }
     this.emit({
@@ -539,11 +552,13 @@ export class Sim {
         t: 'shoot', k: 'arrow',
         f: [rnd2(p.x), 1.0, rnd2(p.z)], to: [rnd2(tp.x), 0.7, rnd2(tp.z)], ft: rnd2(ft),
       });
-      const id = f.e.id, dmg = p.atk * S.dmgMult, pid = p.id;
+      const id = f.e.id, dmg = p.atk * S.dmgMult, pid = p.id, ox = p.x, oz = p.z;
       const kb = 0.4 + (p.kbDealt || 0);
       this.pending.push({ at: this.time + ft, fn: () => {
         const e = this.enemies.entities.find((n) => n.id === id);
-        if (e) this.damageEnemy(e, dmg, kb, 0, pid);
+        if (!e) return;
+        const [kx, kz] = kbAway(ox, oz, e.vehicle.position, kb);
+        this.damageEnemy(e, dmg, kx, kz, pid);
       }});
     }
     return true;
@@ -710,15 +725,22 @@ export class Sim {
     // heavy armor (Brutus): flat reduction on every hit, any source
     if (e.armor > 0) dmg *= 1 - e.armor;
     e.hp -= dmg;
-    // knockback always throws enemies BACKWARD (away from the crystal),
-    // never toward it — only the magnitude of the hit matters
-    const mag = Math.hypot(kbx, kbz);
-    if (mag > 0) {
-      const pos = e.vehicle.position;
-      const dx = pos.x - CRYSTAL_POS.x, dz = pos.z - CRYSTAL_POS.z;
-      const d = Math.hypot(dx, dz) || 1;
-      e.kbx += (dx / d) * mag;
-      e.kbz += (dz / d) * mag;
+    // knockback shoves the enemy BACKWARD along the direction the hit
+    // travelled — away from whoever landed it, whatever side that is (a
+    // stab in the back sends it forward, not blindly away from the crystal).
+    // Only player-dealt blows knock back: tower attacks and DoT ticks pass
+    // no killer and deal damage only, their stun/slow/etc. coming from
+    // their own specials — never a default shove.
+    if (killer && (kbx || kbz)) {
+      e.kbx += kbx;
+      e.kbz += kbz;
+      // clamp the accumulated impulse so a pile-up of simultaneous hits
+      // can't fling the enemy across the board (or through a wall)
+      const acc = Math.hypot(e.kbx, e.kbz);
+      if (acc > ENEMY.KB_MAX) {
+        const s = ENEMY.KB_MAX / acc;
+        e.kbx *= s; e.kbz *= s;
+      }
     }
     this.emit({ t: 'hit', id: e.id });
     // getting shot/blasted pulls aggro — but only under the same rules
@@ -964,6 +986,13 @@ export class Sim {
 
   damagePlayer(p, rawDmg, kbx, kbz) {
     if (p.dead) return;
+    // invulnerability frames: a brief window after any hit lands during
+    // which the character simply can't be hurt again. This is the hard
+    // guarantee that HP can NEVER drain in a rapid loop — no matter how
+    // many enemies pile onto the same spot (or get shoved into a wall on
+    // top of you), you take at most one hit per window. Legitimate combat
+    // is unaffected: a lone enemy swings far slower than this.
+    if (p.invT > 0) return;
     // shields can block a hit outright — no damage, no knockback
     if (p.blockCh > 0 && Math.random() < p.blockCh) {
       this.emit({ t: 'block', id: p.id, x: rnd2(p.x), z: rnd2(p.z) });
@@ -978,6 +1007,7 @@ export class Sim {
     const dmg = rawDmg * (1 - def);
     p.hp -= dmg;
     p.lastDmg = this.time;
+    p.invT = PLAYER.HIT_IFRAME; // open the i-frame window
     this.emit({ t: 'hit', id: p.id });
     if (kbx || kbz) this.emit({ t: 'kb', id: p.id, dx: rnd2(kbx), dz: rnd2(kbz) });
     if (p.hp <= 0) {
@@ -1002,6 +1032,7 @@ export class Sim {
     p.hp = p.maxHp;
     p.x = s.x; p.z = s.z;
     p.lastDmg = -99;
+    p.invT = 0;
     this.emit({ t: 'respawn', id: p.id, x: rnd2(s.x), z: rnd2(s.z) });
   }
 
@@ -1146,6 +1177,7 @@ export class Sim {
     for (const p of this.players) {
       if (p.skillCd > 0) p.skillCd = Math.max(p.skillCd - dt, 0);
       if (p.wallT > 0) p.wallT = Math.max(p.wallT - dt, 0);
+      if (p.invT > 0) p.invT = Math.max(p.invT - dt, 0);
       if (p.dead) {
         p.respawnT -= dt;
         if (p.respawnT <= 0 && this.phase !== 'over') this.respawnPlayer(p);
@@ -1183,10 +1215,12 @@ export class Sim {
         });
         // with the hog pet even arrows carry a punch
         const kb = p.kbDealt || 0;
-        const id = best.id, dmg = p.atk, kx = kb, kz = 0, pid = p.id;
+        const id = best.id, dmg = p.atk, pid = p.id, ox = p.x, oz = p.z;
         this.pending.push({ at: this.time + ft, fn: () => {
           const e = this.enemies.entities.find((n) => n.id === id);
-          if (e) this.damageEnemy(e, dmg, kx, kz, pid);
+          if (!e) return;
+          const [kx, kz] = kbAway(ox, oz, e.vehicle.position, kb);
+          this.damageEnemy(e, dmg, kx, kz, pid);
         }});
       } else if (p.cls === 'mage' && p.bolts > 0) {
         // arcane orb: no blast — several guided bolts split across the
@@ -1207,10 +1241,12 @@ export class Sim {
             t: 'shoot', k: 'magic', wt,
             f: [rnd2(p.x), 1.15, rnd2(p.z)], to: [rnd2(bp.x), 0.6, rnd2(bp.z)], ft: rnd2(ft),
           });
-          const id = f.e.id, dmg = p.atk * ORB.BOLT_MULT, pid = p.id;
+          const id = f.e.id, dmg = p.atk * ORB.BOLT_MULT, pid = p.id, ox = p.x, oz = p.z;
           this.pending.push({ at: this.time + ft, fn: () => {
             const e = this.enemies.entities.find((n) => n.id === id);
-            if (e) this.damageEnemy(e, dmg, 0.5, 0, pid);
+            if (!e) return;
+            const [kx, kz] = kbAway(ox, oz, e.vehicle.position, 0.5);
+            this.damageEnemy(e, dmg, kx, kz, pid);
           }});
         }
       } else if (p.cls === 'mage') {
@@ -1304,13 +1340,21 @@ export class Sim {
       }
 
       // knockback impulses decay quickly; ground units can't be
-      // pushed through walls/obstacles (ghosts fly over them)
+      // pushed through walls/obstacles (ghosts fly over them). The slide
+      // is integrated in short hops with a wall-resolve after each, so
+      // even a hard knock never tunnels a body through an obstacle — the
+      // worst case is being pinned flat against it.
       if (e.kbx || e.kbz) {
-        pos.x += e.kbx * dt * 6;
-        pos.z += e.kbz * dt * 6;
-        if (!e.flying && pos.z > -HALF_H + 0.2) {
-          const fixed = this.grid.resolveCircle(pos.x, pos.z, ENEMY.RADIUS);
-          pos.x = fixed.x; pos.z = fixed.z;
+        const solid = !e.flying && pos.z > -HALF_H + 0.2;
+        const dxTot = e.kbx * dt * 6, dzTot = e.kbz * dt * 6;
+        const steps = Math.max(1, Math.ceil(Math.hypot(dxTot, dzTot) / PLAYER.KB_STEP));
+        for (let i = 0; i < steps; i++) {
+          pos.x += dxTot / steps;
+          pos.z += dzTot / steps;
+          if (solid) {
+            const fixed = this.grid.resolveCircle(pos.x, pos.z, ENEMY.RADIUS);
+            pos.x = fixed.x; pos.z = fixed.z;
+          }
         }
         const decay = Math.exp(-PLAYER.KB_DECAY * dt);
         e.kbx *= decay; e.kbz *= decay;
@@ -1576,8 +1620,8 @@ export class Sim {
         const ep = e.vehicle.position;
         const d = dist2d(cx, cz, ep.x, ep.z);
         if (d <= r + ENEMY.RADIUS) {
-          const n = Math.max(d, 0.2);
-          this.damageEnemy(e, dmg, ((ep.x - cx) / n) * 1.2, ((ep.z - cz) / n) * 1.2, null);
+          // tower blast: damage only, no default knockback
+          this.damageEnemy(e, dmg, 0, 0, null);
         }
       }
       if (napalm) {
@@ -1640,10 +1684,9 @@ export class Sim {
     const kind = t.spec === 'ice' ? 'ice' : t.spec === 'storm' ? 'storm' : 'crystal';
     this.emit({ t: 'aoe', x: rnd2(w.x), z: rnd2(w.z), r: rnd2(st.aoe), k: kind, ft: 0 });
     const hitIds = new Set();
-    for (const { e, d } of inRange) {
-      const ep = e.vehicle.position;
-      const n = Math.max(d, 0.4);
-      this.damageEnemy(e, st.dmg, ((ep.x - w.x) / n) * 0.8, ((ep.z - w.z) / n) * 0.8, null);
+    for (const { e } of inRange) {
+      // crystal pulse: damage only (its ice/storm specs add slow/arc, not a shove)
+      this.damageEnemy(e, st.dmg, 0, 0, null);
       hitIds.add(e.id);
       if (t.spec === 'ice') {
         this.applySlow(e, spec.slowF, spec.slowDur);
