@@ -574,7 +574,7 @@ const STRINGS = {
           blurb: 'Uma muralha imóvel que absorve dano e sempre segura a linha.',
         },
         archer: {
-          name: 'Arqueiro', weapon: 'Arco longo',
+          name: 'Arqueiro', weapon: 'Arco',
           blurb: 'Um atirador ágil que chove flechas a uma distância segura.',
         },
         mage: {
@@ -630,7 +630,7 @@ const STRINGS = {
         greatsword: { name: 'Espada Grande', blurb: 'Uma arma de duas mãos: mais dano e alcance que a espada, um pouco mais lenta.' },
         shield: { name: 'Escudo', blurb: 'Um escudo redondo confiável — de vez em quando bloqueia um golpe por completo.' },
         greatshield: { name: 'Escudo Grande', blurb: 'Um escudo-muralha: mais absorção, mais bloqueios, um passo mais pesado.' },
-        bow: { name: 'Arco', blurb: 'O arco longo confiável — dano, alcance e velocidade equilibrados.' },
+        bow: { name: 'Arco', blurb: 'O arco confiável — dano, alcance e velocidade equilibrados.' },
         greatbow: { name: 'Arco Grande', blurb: 'Um arco de guerra imponente: golpes mais fortes de mais longe, mais lento para armar.' },
         crossbow: { name: 'Besta', blurb: 'Virotes mais leves, mas gatilho rápido — o atirador mais veloz dos arcos.' },
         staff: { name: 'Cajado Arcano', blurb: 'O cajado de conjurador completo — a explosão única mais forte que um mago pode lançar.' },

@@ -47,7 +47,7 @@ export const CLASSES = {
     name: 'Archer', icon: 'bow',
     hp: 150, def: 0.10, atk: 13, range: 7.0, rate: 2.3, speed: 5.3,
     knockback: 0.6, model: 'char-archer',
-    weapon: 'Longbow',
+    weapon: 'Bow',
     blurb: 'A nimble sharpshooter raining fast arrows from a safe distance.',
   },
   mage: {
@@ -293,7 +293,7 @@ export const WEAPONS = {
     name: 'Bow', slot: 'weapon', kind: 'bow', price: 3,
     classes: ['archer'], starterFor: ['archer'],
     atk: 1.15, rate: 1.0, crit: 0.05,
-    blurb: 'The trusty longbow — balanced damage, range and speed.',
+    blurb: 'The trusty bow — balanced damage, range and speed.',
   },
   greatbow: {
     name: 'Great Bow', slot: 'weapon', kind: 'bow', price: 7,
