@@ -31,11 +31,14 @@
 
   <!-- ============ PWA / icons ============ -->
   <link rel="manifest" href="./manifest.webmanifest" />
-  <!-- the start-screen crystal (transparent PNG) doubles as the favicon,
-       search-engine icon and installed-app icon; it's already preloaded
-       for the start screen, so reusing it here costs no extra download -->
+  <!-- browser tab + search-engine favicon: the transparent crystal, so it
+       sits cleanly on any light/dark tab bar (already preloaded below) -->
   <link rel="icon" type="image/png" href="./img/crystal-logo.png" />
-  <link rel="apple-touch-icon" href="./img/crystal-logo.png" />
+  <!-- installed-app icon: iOS needs an opaque, standard-size PNG or it
+       falls back to a letter tile — crystal on the dark start-screen plate.
+       (Also served at the site root as /apple-touch-icon.png, which iOS
+       probes automatically.) -->
+  <link rel="apple-touch-icon" sizes="180x180" href="./apple-touch-icon.png" />
   <meta name="application-name" content="Defend the Crystal" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="mobile-web-app-capable" content="yes" />

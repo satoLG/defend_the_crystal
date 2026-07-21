@@ -9,7 +9,8 @@
     "preview": "vite preview",
     "smoke": "node scripts/smoke.mjs",
     "smoke:placement": "node scripts/verify-placement.mjs",
-    "gen:weapons": "node scripts/gen-weapon-previews.mjs"
+    "gen:weapons": "node scripts/gen-weapon-previews.mjs",
+    "gen:icons": "node scripts/gen-icons.mjs"
   },
   "dependencies": {
     "@rexa-developer/tiks": "^0.3.0",
