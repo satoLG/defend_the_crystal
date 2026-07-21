@@ -94,7 +94,7 @@ export class Sim {
       weapon: sanitizeWeaponRef(loadout?.weapon, cls, 'weapon') || starterRef('weapon'),
       shield: sanitizeWeaponRef(loadout?.shield, cls, 'shield') || starterRef('shield'),
       lvl: 1, xp: 0, xpNext: this.xpNext(1),
-      dead: false, respawnT: 0, atkCd: 0, lastDmg: -99, jumpT: 0,
+      dead: false, respawnT: 0, atkCd: 0, lastDmg: -99, invT: 0, jumpT: 0,
       skillCd: 0, wallT: 0, dashT: 0,
       kills: 0, obst: 0, lastInputT: this.time,
     });
@@ -986,6 +986,13 @@ export class Sim {
 
   damagePlayer(p, rawDmg, kbx, kbz) {
     if (p.dead) return;
+    // invulnerability frames: a brief window after any hit lands during
+    // which the character simply can't be hurt again. This is the hard
+    // guarantee that HP can NEVER drain in a rapid loop — no matter how
+    // many enemies pile onto the same spot (or get shoved into a wall on
+    // top of you), you take at most one hit per window. Legitimate combat
+    // is unaffected: a lone enemy swings far slower than this.
+    if (p.invT > 0) return;
     // shields can block a hit outright — no damage, no knockback
     if (p.blockCh > 0 && Math.random() < p.blockCh) {
       this.emit({ t: 'block', id: p.id, x: rnd2(p.x), z: rnd2(p.z) });
@@ -1000,6 +1007,7 @@ export class Sim {
     const dmg = rawDmg * (1 - def);
     p.hp -= dmg;
     p.lastDmg = this.time;
+    p.invT = PLAYER.HIT_IFRAME; // open the i-frame window
     this.emit({ t: 'hit', id: p.id });
     if (kbx || kbz) this.emit({ t: 'kb', id: p.id, dx: rnd2(kbx), dz: rnd2(kbz) });
     if (p.hp <= 0) {
@@ -1024,6 +1032,7 @@ export class Sim {
     p.hp = p.maxHp;
     p.x = s.x; p.z = s.z;
     p.lastDmg = -99;
+    p.invT = 0;
     this.emit({ t: 'respawn', id: p.id, x: rnd2(s.x), z: rnd2(s.z) });
   }
 
@@ -1168,6 +1177,7 @@ export class Sim {
     for (const p of this.players) {
       if (p.skillCd > 0) p.skillCd = Math.max(p.skillCd - dt, 0);
       if (p.wallT > 0) p.wallT = Math.max(p.wallT - dt, 0);
+      if (p.invT > 0) p.invT = Math.max(p.invT - dt, 0);
       if (p.dead) {
         p.respawnT -= dt;
         if (p.respawnT <= 0 && this.phase !== 'over') this.respawnPlayer(p);

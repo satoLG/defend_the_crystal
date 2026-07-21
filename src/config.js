@@ -447,6 +447,8 @@ export const PLAYER = {
   LEVEL_CAP: 60,
   XP_BASE: 50,          // xpNext = XP_BASE * lvl^1.35
   XP_POW: 1.35,
+  HIT_IFRAME: 0.3,      // invulnerability window (s) after a hit lands —
+                        // hard cap that stops HP ever draining in a loop
   KB_DECAY: 7,          // knockback impulse decay per second (shared w/ enemies)
   KB_MAX: 4,            // hard cap on accumulated knockback (anti fling-off)
   KB_STEP: 0.25,        // knockback integrated in hops this small so a hard
