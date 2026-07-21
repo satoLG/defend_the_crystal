@@ -1,9 +1,18 @@
 import { joinRoom as joinNostr, selfId as trysteroId } from 'trystero';
 import { joinRoom as joinTorrent } from '@trystero-p2p/torrent';
 import { joinRoom as joinMqtt } from '@trystero-p2p/mqtt';
-import { NET } from './config.js';
+import { joinRoom as joinSupabase } from '@trystero-p2p/supabase';
+import { NET, SUPABASE } from './config.js';
 
 const useLocalNet = new URLSearchParams(location.search).has('localnet');
+// `trysteroId` comes from the 'trystero' (Nostr) package, but every
+// transport below re-exports its own `selfId` pulled from the SAME
+// underlying @trystero-p2p/core module — that only holds if all four
+// trystero-p2p packages resolve to one shared copy of core, which is why
+// package.json pins them to matching exact versions (see its dependencies
+// block). If that ever drifts, a single browser tab can present a
+// different peer id per transport, and the SAME player joining over two
+// transports (e.g. Supabase + Nostr) shows up as two separate players.
 export const selfId = useLocalNet
   ? `local-${Math.random().toString(36).slice(2, 10)}`
   : trysteroId;
@@ -18,16 +27,26 @@ export const selfId = useLocalNet
 // other even though plenty of *other* relays are healthy.
 //
 // To make connecting far more reliable we:
-//   1. Feed the Nostr strategy a large, curated relay pool (both
+//   1. When configured, broker the handshake over a Supabase
+//      Realtime Broadcast channel WE control (see config.SUPABASE).
+//      Public relays go up and down; a Supabase project doesn't, so
+//      this becomes the steady, PREFERRED discovery path. Only the
+//      WebRTC handshake crosses Supabase — once peers link up, all
+//      gameplay data flows directly peer-to-peer and never touches it.
+//   2. Feed the Nostr strategy a large, curated relay pool (both
 //      peers use the exact same list, so overlap is guaranteed
 //      and a single healthy relay is enough to connect).
-//   2. Join the same room over several *independent* transports
-//      at once (Nostr relays, WebTorrent trackers, MQTT brokers).
-//      A peer is discovered as soon as ANY transport links them,
-//      so all of them have to be down for a match to fail.
+//   3. Join the same room over several *independent* transports
+//      at once (Supabase, Nostr relays, WebTorrent trackers, MQTT
+//      brokers). A peer is discovered as soon as ANY transport links
+//      them, so all of them have to be down for a match to fail.
 //
-// The transports run in parallel and are merged behind one Net
-// interface; the game layer is unaware of the plumbing.
+// All transports run in parallel and are merged behind one Net
+// interface; the game layer is unaware of the plumbing. Supabase, when
+// present, is marked `primary`: whenever it links a peer that another
+// transport also found, sends are routed through Supabase, so the
+// public relays only ever carry traffic Supabase couldn't — i.e. they
+// act as automatic backups without any explicit failover step.
 // ============================================================
 
 // A wide mix of well-known, permissive public Nostr relays. Every
@@ -63,10 +82,26 @@ const NOSTR_RELAYS = [
 // respective strategies' own defaults, which are already broad and
 // independent of Nostr; we just enable those transports below.
 
+// The Supabase transport is only wired up when a project URL + anon key
+// are configured; otherwise the game runs on the public relays alone,
+// exactly as before. The Supabase project URL is Trystero's `appId` for
+// this strategy and the anon key goes in relayConfig.supabaseKey.
+const supabaseReady = !!(SUPABASE.URL && SUPABASE.KEY);
+
 // Each transport is a named joiner. They are attempted in order and
 // any that fails to initialize is skipped, so a single broken
-// strategy can never take the others down with it.
+// strategy can never take the others down with it. A transport marked
+// `primary` becomes the preferred send path once it links a peer (see
+// _initRoom); Supabase, when configured, is listed first and primary.
 const TRANSPORTS = [
+  ...(supabaseReady ? [{
+    name: 'supabase',
+    primary: true,
+    join: (code) => joinSupabase(
+      { appId: SUPABASE.URL, relayConfig: { supabaseKey: SUPABASE.KEY } },
+      code,
+    ),
+  }] : []),
   {
     name: 'nostr',
     join: (code) => joinNostr(
@@ -170,7 +205,7 @@ export class Net {
 
     for (const transport of activeTransports()) {
       try {
-        this._initRoom(transport.join(code));
+        this._initRoom(transport.join(code), transport.primary === true);
       } catch (err) {
         console.warn(`[net] transport "${transport.name}" unavailable:`, err);
       }
@@ -180,7 +215,7 @@ export class Net {
     }
   }
 
-  _initRoom(room) {
+  _initRoom(room, preferred = false) {
     this.rooms.push(room);
     const members = new Set();
     this._membersByRoom.set(room, members);
@@ -201,6 +236,11 @@ export class Net {
         this.peers.add(peerId);
         this._primary.set(peerId, room);
         this.onPeerJoin?.(peerId);
+      } else if (preferred && this._primary.get(peerId) !== room) {
+        // Peer is already reachable via another transport, but our
+        // preferred (Supabase) path just linked it too — route future
+        // sends through this one. No join event: the peer is not new.
+        this._primary.set(peerId, room);
       }
     };
     room.onPeerLeave = (peerId) => {

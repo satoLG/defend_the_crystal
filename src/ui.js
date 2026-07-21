@@ -698,7 +698,7 @@ export class UI {
       }
     });
     $('start-btn').addEventListener('click', () => { sfx.success(); this.cb.onStartMatch(); });
-    $('leave-btn').addEventListener('click', () => this.cb.onExit());
+    $('leave-btn').addEventListener('click', () => this.cb.onLeaveLobby());
   }
 
   showLobby(code, isHost) {

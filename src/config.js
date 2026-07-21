@@ -706,4 +706,30 @@ export const NET = {
   INTERP_MAX: 1.25,
 };
 
+// ---------- Supabase Realtime signaling (preferred transport) ----------
+// Trystero brokers the WebRTC handshake over a Supabase Realtime Broadcast
+// channel we control — a signaling path far steadier than the public
+// Nostr/torrent/MQTT relays (which stay on as automatic backups, see
+// net.js). Only the *handshake* crosses Supabase; once two peers link up,
+// every bit of gameplay traffic flows directly peer-to-peer over WebRTC and
+// never touches Supabase again. This is about making peers FIND each other
+// reliably, not about routing game data through a server.
+//
+//   URL - the project's base URL (Supabase dashboard -> Project Settings ->
+//         API -> "Project URL"); Trystero uses it as the appId. It is the
+//         bare project origin, with NO "/rest/v1/" path.
+//   KEY - the project's publishable key ("sb_publishable_...", the current
+//         replacement for the legacy anon key). It is public by design — it
+//         ships in the client bundle and access is governed by Supabase
+//         Realtime authorization — so committing it here is fine; rotate it
+//         in the dashboard any time.
+//
+// Env vars override the defaults at build time (VITE_SUPABASE_URL /
+// VITE_SUPABASE_KEY in a .env file); blank both out and the game falls back
+// to the public relays exactly as before.
+export const SUPABASE = {
+  URL: import.meta.env?.VITE_SUPABASE_URL || 'https://jfswwxbsxbmkpbhbvmkz.supabase.co',
+  KEY: import.meta.env?.VITE_SUPABASE_KEY || 'sb_publishable_oz5an94SaG1zEaEfpwtHuw_MZIdDuxU',
+};
+
 export const SIM_DT = 1 / 30;

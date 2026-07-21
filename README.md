@@ -26,9 +26,13 @@ workflow included in `.github/workflows/deploy.yml`; enable Pages →
 "GitHub Actions" in the repo settings and push to `main`).
 
 > Multiplayer uses [Trystero](https://github.com/dmotz/trystero)
-> (serverless WebRTC over public Nostr relays), so there is no backend to
-> deploy — but peers do need internet access to find each other.
-> For a quick same-device test, open two tabs with `?localnet` in the URL.
+> (serverless WebRTC). Peers discover each other over a Supabase Realtime
+> Broadcast channel by default, with public Nostr relays, WebTorrent
+> trackers and MQTT brokers as automatic backups — only the handshake
+> crosses those channels; gameplay itself runs directly peer-to-peer, so
+> there is still no game backend to deploy. Peers do need internet access
+> to find each other. For a quick same-device test, open two tabs with
+> `?localnet` in the URL.
 
 ## How it works
 
@@ -98,7 +102,8 @@ Every 10th wave a **named boss** stomps in, on rotation:
 - [three.js](https://github.com/mrdoob/three.js) — rendering (animated GLTF minis, night ambience)
 - [miniplex](https://github.com/hmans/miniplex) — ECS for the authoritative simulation
 - [yuka](https://github.com/Mugen87/yuka) — enemy steering (seek + separation) on top of a BFS flow field
-- [trystero](https://github.com/dmotz/trystero) — serverless WebRTC rooms; host-authoritative sim,
+- [trystero](https://github.com/dmotz/trystero) — serverless WebRTC rooms (Supabase Realtime
+  signaling, with Nostr/torrent/MQTT relays as backups); host-authoritative sim,
   12 Hz snapshots with client interpolation, client-side movement prediction
 - [tiks](https://github.com/rexa-developer/tiks) — procedural arcade UI sounds, zero audio files
 - [Kenney](https://www.kenney.nl) CC0 assets — see [CREDITS.md](CREDITS.md)
