@@ -1107,6 +1107,31 @@ input:focus { border-color: var(--gold); }
   50% { box-shadow: 0 4px 16px rgba(0, 0, 0, 0.55), 0 0 26px rgba(242, 242, 245, 0.7); }
 }
 
+/* floating "talk" prompt pinned under the nearest sanctuary NPC —
+   same projection treatment as the two shop prompts */
+#npc-prompt {
+  position: fixed; left: 0; top: 0; transform: translate(-50%, 0);
+  background: linear-gradient(180deg, rgba(22, 22, 26, 0.96), rgba(12, 12, 15, 0.96));
+  color: var(--text); border: 1.5px solid var(--line); border-radius: 20px;
+  padding: 8px 16px; font-family: inherit; font-weight: 500; font-size: 0.9rem;
+  cursor: pointer; display: flex; align-items: center; gap: 8px; white-space: nowrap;
+  animation: petshop-glow 1.6s infinite; touch-action: none;
+}
+
+/* NPC conversation panel */
+.npc-dialog-panel { max-width: 420px; text-align: left; }
+.nd-name {
+  font-weight: 800; font-size: 1.05rem; color: #e8b84b; margin-bottom: 8px;
+}
+.nd-text { min-height: 84px; line-height: 1.5; font-size: 0.95rem; }
+.nd-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; }
+
+/* exit button while training mode runs at the dummies */
+#train-exit {
+  position: fixed; left: 50%; bottom: 132px; transform: translateX(-50%);
+  z-index: 40;
+}
+
 /* black-screen intro: the crystal's plea typed out letter by letter
    just before the hero materializes at the sanctuary portal */
 #intro-overlay {

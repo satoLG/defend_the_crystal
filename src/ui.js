@@ -19,6 +19,7 @@ import { music } from './music.js';
 import { isInstalled, hasNativePrompt, promptInstall, onInstallChange } from './pwa.js';
 import { loadRoster, saveRoster, defaultCharacter, petRefOf, grantPetXp, loadoutOf } from './character.js';
 import { getSlots } from './render/customize.js';
+import { NPCS } from './sanctuary.js';
 
 // class accent colours (mirror the 3D CLASS_TINT) used to tint the
 // class glyph in the roster, lobby and HUD chrome
@@ -126,6 +127,7 @@ export class UI {
     this.bindHud();
     this.bindPets();
     this.bindWeapons();
+    this.bindNpcDialog();
     this.bindOverlays();
     this.bindSettings();
     this.bindLang();
@@ -348,6 +350,82 @@ export class UI {
         }, 950);
       }
     }, 62);
+  }
+
+  // ---------------- sanctuary NPC dialogs ----------------
+
+  bindNpcDialog() {
+    bindTap($('npc-prompt'), () => {
+      if (this.npcNear) { sfx.click(); this.openNpcDialog(this.npcNear); }
+    });
+    $('nd-next').addEventListener('click', () => { sfx.click(); this.dlgPage(1); });
+    $('nd-close').addEventListener('click', () => { sfx.click(); this.closeNpcDialog(); });
+    $('npc-dialog').addEventListener('click', (e) => {
+      if (e.target === $('npc-dialog')) this.closeNpcDialog();
+    });
+    $('nd-train').addEventListener('click', () => {
+      sfx.success();
+      this.closeNpcDialog();
+      this.cb.onTrain?.(true);
+    });
+    bindTap($('train-exit'), () => { sfx.click(); this.cb.onTrain?.(false); });
+  }
+
+  // main.js flips this as the hero walks up to / away from a talkable
+  // NPC; the floating prompt is pinned under the NPC by pinPrompt
+  setNpcNear(id) {
+    if (id === this.npcNear) return;
+    this.npcNear = id;
+    $('npc-prompt').classList.toggle('hidden', !id);
+    if (id) {
+      $('npc-prompt-label').textContent = t('npc.talkTo', { name: NPCS[id]?.name || '' });
+      sfx.notify();
+    } else if (this.dlgId) {
+      this.closeNpcDialog(); // walked away mid-conversation
+    }
+  }
+
+  // paged, translated conversation; pages live under dlg.<id>.<n> and
+  // the page count is discovered by probing the dictionary
+  openNpcDialog(id) {
+    this.dlgId = id;
+    this.dlgIdx = 0;
+    this.renderDlgPage();
+    this.show('npc-dialog');
+  }
+
+  dlgPage(step) {
+    this.dlgIdx += step;
+    this.renderDlgPage();
+  }
+
+  renderDlgPage() {
+    const id = this.dlgId;
+    if (!id) return;
+    $('nd-name').textContent = NPCS[id]?.name || '';
+    $('nd-text').textContent = t(`dlg.${id}.${this.dlgIdx}`);
+    const hasNext = t(`dlg.${id}.${this.dlgIdx + 1}`) !== `dlg.${id}.${this.dlgIdx + 1}`;
+    $('nd-next').classList.toggle('hidden', !hasNext);
+    $('nd-next').textContent = t('dlg.next');
+    $('nd-close').textContent = t('common.close');
+    // the drill master offers a round of training on his last page
+    const train = id === 'treino' && !hasNext;
+    $('nd-train').classList.toggle('hidden', !train);
+    if (train) $('nd-train').textContent = t('dlg.train');
+  }
+
+  closeNpcDialog() {
+    this.dlgId = null;
+    this.hide('npc-dialog');
+  }
+
+  // the on-screen "exit training" button while training mode is active
+  setTraining(on) {
+    $('train-exit').classList.toggle('hidden', !on);
+    if (on) {
+      $('train-exit').textContent = t('train.exit');
+      this.toast(t('train.enter'), 'gold');
+    }
   }
 
   // huge dramatic splash when a (mini-)boss stomps onto the field

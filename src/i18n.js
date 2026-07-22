@@ -332,7 +332,39 @@ const STRINGS = {
       defaultFlavor: 'The ground trembles…',
       subbossFlavor: 'A monstrous champion joins the wave!',
     },
-    npc: { greeting: 'Hi!', pets: 'Pets!', weapons: 'Weapons!' },
+    npc: {
+      greeting: 'Hi!', pets: 'Pets!', weapons: 'Weapons!',
+      talkTo: 'Talk to {name}',
+      // Nina's rotating shouts of encouragement (one per pass-by)
+      inc0: 'Protect the crystal!',
+      inc1: 'You can do this, hero!',
+      inc2: 'The crystal believes in you!',
+      inc3: 'Hold the line up there!',
+      inc4: 'Every wall counts — build smart!',
+      inc5: 'We are all counting on you!',
+    },
+    dlg: {
+      next: 'Next', train: 'Start training',
+      duvidas: {
+        0: 'Welcome, hero! I am Théo, keeper of this sanctuary. Up those stairs, past the colonnade, lies the crystal we all live to protect.',
+        1: 'Monsters pour out of the dark woods to the north. Your duty is to stop them before they reach the crystal — with your weapon, your towers and your walls.',
+        2: 'Slain foes drop crystal fragments and experience. Spend the fragments on towers, place blocks to bend the monsters\' path, and grow stronger every wave.',
+        3: 'Between waves — at checkpoints — this sanctuary opens again: rest, talk to us, visit Tonho and Baru. When everyone has crossed past the crystal, the battle begins.',
+      },
+      blessings: {
+        0: 'Blessings upon you, defender. I am Iris, cleric of this sanctuary. The crystal you guard is no mere gem — it is the heart of this forest.',
+        1: 'Its light holds back the darkness beyond the trees. Should it shatter, everything you see — the sanctuary, the woods, all of us — fades with it.',
+        2: 'In time I will be able to channel its light into blessings for worthy heroes. Prove yourselves on the field, and return to me.',
+      },
+      treino: {
+        0: 'I am Rocha, drill master. Those dummies beside me? Hit them as hard as you like — they always spring back up.',
+        1: 'One day I will also help you climb the ranks of your class. Not yet, though — care for a round of training?',
+      },
+    },
+    train: {
+      exit: 'Exit training',
+      enter: 'Training mode! Hit the dummies — walk away to stop.',
+    },
     toast: {
       joined: '{name} joined the defense!', left: '{name} left.',
       noBlocks: 'No blocks left — earn more each wave',
@@ -541,7 +573,38 @@ const STRINGS = {
       defaultFlavor: 'O chão treme…',
       subbossFlavor: 'Um campeão monstruoso entra na onda!',
     },
-    npc: { greeting: 'Oi!', pets: 'Pets!', weapons: 'Armas!' },
+    npc: {
+      greeting: 'Oi!', pets: 'Pets!', weapons: 'Armas!',
+      talkTo: 'Falar com {name}',
+      inc0: 'Proteja o cristal!',
+      inc1: 'Você consegue, herói!',
+      inc2: 'O cristal acredita em você!',
+      inc3: 'Segure a linha lá em cima!',
+      inc4: 'Cada muralha conta — construa direito!',
+      inc5: 'Estamos todos contando com você!',
+    },
+    dlg: {
+      next: 'Próximo', train: 'Começar treino',
+      duvidas: {
+        0: 'Bem-vindo, herói! Eu sou Théo, guardião deste santuário. Subindo aquelas escadas, além da colunata, está o cristal que vivemos para proteger.',
+        1: 'Monstros brotam da mata escura ao norte. Seu dever é detê-los antes que alcancem o cristal — com sua arma, suas torres e suas muralhas.',
+        2: 'Inimigos abatidos soltam fragmentos de cristal e experiência. Gaste os fragmentos em torres, posicione blocos para desviar o caminho deles e fique mais forte a cada onda.',
+        3: 'Entre as ondas — nos checkpoints — este santuário se abre de novo: descanse, fale conosco, visite Tonho e Baru. Quando todos tiverem atravessado além do cristal, a batalha começa.',
+      },
+      blessings: {
+        0: 'Bênçãos sobre você, defensor. Eu sou Iris, clériga deste santuário. O cristal que você guarda não é uma joia qualquer — é o coração desta floresta.',
+        1: 'A luz dele mantém a escuridão além das árvores sob controle. Se ele se estilhaçar, tudo o que você vê — o santuário, a mata, todos nós — se apaga junto.',
+        2: 'Com o tempo, poderei canalizar a luz dele em bênçãos para heróis dignos. Provem seu valor em campo e voltem até mim.',
+      },
+      treino: {
+        0: 'Eu sou Rocha, mestre de treino. Aqueles bonecos do meu lado? Bata neles à vontade — eles sempre voltam a ficar de pé.',
+        1: 'Um dia também vou te ajudar a subir os níveis da sua classe. Ainda não, porém — que tal uma rodada de treino?',
+      },
+    },
+    train: {
+      exit: 'Sair do treino',
+      enter: 'Modo treino! Bata nos bonecos — afaste-se para parar.',
+    },
     toast: {
       joined: '{name} entrou na defesa!', left: '{name} saiu.',
       noBlocks: 'Sem blocos — ganhe mais a cada onda',

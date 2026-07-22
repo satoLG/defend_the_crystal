@@ -6,7 +6,7 @@ import {
 import { CharacterPreview } from './render/preview.js';
 import { Sim } from './sim/sim.js';
 import { Grid, worldToCell, cellToWorld, findJump, computeDashEnd } from './sim/grid.js';
-import { terrainY, ELEV } from './sanctuary.js';
+import { terrainY, ELEV, NPCS } from './sanctuary.js';
 import { Net, selfId } from './net.js';
 import { SnapBuffer } from './net_interp.js';
 import { Input } from './input.js';
@@ -129,6 +129,8 @@ async function boot() {
     onDragEnd: (item, drop) => onDragEnd(item, drop),
     onPanelClose: () => gs.hideRange(),
     onLeaveLobby: () => leaveLobby(),
+    // enter/leave training mode at the drill master's yard
+    onTrain: (on) => sendAction({ t: 'train', on: on ? 1 : 0 }),
     // the equipped pet changed (swap / rename / level-up) — tell the
     // host so the buffs & the follower everyone sees update live
     onPetChange: (pet) => { if (state.started) sendAction({ t: 'pet', pet }); },
@@ -673,6 +675,11 @@ function handleEvent(ev) {
         }
       }
       break;
+    case 'train':
+      // the on-screen "exit training" button follows the sim's word —
+      // it also ends by distance or when a wave starts
+      if (ev.id === selfId) ui.setTraining(ev.on === 1);
+      break;
     case 'petswap':
       if (ev.id === selfId) sfx.notify();
       break;
@@ -985,10 +992,24 @@ function frame(t) {
   const atSmith = canRoam &&
     dist2d(state.self.x, state.self.z, WEAPON_SHOP_POS.x, WEAPON_SHOP_POS.z) < WEAPON_SHOP_RADIUS;
   ui.setSmithNear(atSmith);
+  // …and walking up to one of the talkable NPCs (guide / cleric /
+  // drill master) surfaces a "talk" prompt under them — conversations
+  // are checkpoint-only, same as the shops
+  let nearNpc = null;
+  if (canRoam) {
+    for (const id of ['duvidas', 'blessings', 'treino']) {
+      if (dist2d(state.self.x, state.self.z, NPCS[id].x, NPCS[id].z) < 2.7) {
+        nearNpc = id;
+        break;
+      }
+    }
+  }
+  ui.setNpcNear(nearNpc);
   // pin each shop button under its vendor's model (screen-space) rather
   // than at a fixed corner — project the NPC's feet and drop it below
   pinPrompt('petshop-prompt', PET_SHOP_POS);
   pinPrompt('weaponshop-prompt', WEAPON_SHOP_POS);
+  if (nearNpc) pinPrompt('npc-prompt', NPCS[nearNpc]);
 
   gs.update(dt);
   if (view) view.update(dt, gs.camera, selfPose());

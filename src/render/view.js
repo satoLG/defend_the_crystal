@@ -858,6 +858,35 @@ export class GameView {
     else fg.material.color.setHSL(lerp(0, 0.33, frac), 0.75, 0.5);
   }
 
+  // auto-sized speech bubble for longer NPC lines (the fixed-canvas
+  // makeTextSprite would clip them) — width follows the text
+  makeBubbleSprite(text) {
+    const ss = 2, H = 64, pad = 18;
+    const font = 'bold 36px "Trebuchet MS", sans-serif';
+    const meas = document.createElement('canvas').getContext('2d');
+    meas.font = font;
+    const W = Math.max(120, Math.ceil(meas.measureText(text).width) + pad * 2);
+    const canvas = document.createElement('canvas');
+    canvas.width = W * ss; canvas.height = H * ss;
+    const ctx = canvas.getContext('2d');
+    ctx.scale(ss, ss);
+    ctx.font = font;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.lineWidth = 7;
+    ctx.strokeStyle = 'rgba(0,0,0,0.78)';
+    ctx.strokeText(text, W / 2, H / 2);
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText(text, W / 2, H / 2);
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    const spr = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthWrite: false }));
+    const worldW = W * 0.0065;
+    spr.scale.set(worldW, worldW * H / W, 1);
+    spr.renderOrder = 11;
+    return spr;
+  }
+
   makeTextSprite(text, tint, width = 3.1) {
     const canvas = document.createElement('canvas');
     canvas.width = 384; canvas.height = 84;
@@ -1156,11 +1185,41 @@ export class GameView {
     actor.customTex = tex;
   }
 
+  // a live, attackable training dummy (sim-side enemy) — looks exactly
+  // like the static yard props it temporarily replaces
+  makeDummyActor() {
+    const group = this.makeDummyMesh();
+    group.rotation.y = Math.PI / 2 + 0.35;
+    const mixer = new THREE.AnimationMixer(group); // no clips — API compat
+    const mats = [];
+    group.traverse((o) => {
+      if (o.isMesh && o.material) { o.material = o.material.clone(); mats.push(o.material); }
+    });
+    return {
+      group, mixer, actions: {}, mats, factor: 1,
+      current: null, currentName: null, oneShot: null, flashT: 0,
+    };
+  }
+
   ensureEnemy(row) {
     const id = row[EN.ID];
     let a = this.enemies.get(id);
     if (a) return a;
     const kind = row[EN.KIND];
+    if (kind === 'dummy') {
+      a = this.makeDummyActor();
+      a.kind = kind;
+      a.hpBar = this.makeHpBar(0.85, 1.75);
+      a.hpBar.visible = false;
+      a.group.add(a.hpBar);
+      a.statusMask = 0;
+      a.statusFx = {};
+      a.topLocal = 1.75;
+      a.fade = 1;
+      this.scene.add(a.group);
+      this.enemies.set(id, a);
+      return a;
+    }
     const def = ENEMIES[kind] || {};
     const isBoss = row[EN.BOSS] === 2;
     a = this.makeAnimated(def.model || `enemy-${kind}`);
@@ -1327,7 +1386,8 @@ export class GameView {
   spawnNpcs() {
     const defs = [
       { ...NPCS.duvidas, id: 'duvidas', model: 'char-mage', tint: 0xd8c890 },
-      { ...NPCS.incentivo, id: 'incentivo', model: 'char-archer', tint: 0x8fb8ff },
+      // Nina shouts a different encouragement every time you pass by
+      { ...NPCS.incentivo, id: 'incentivo', model: 'char-archer', tint: 0x8fb8ff, rotate: true },
       { ...NPCS.blessings, id: 'blessings', model: 'char-mage', tint: 0xfff0c8 },
       { ...NPCS.treino, id: 'treino', model: 'char-berserker', tint: 0xc86a5a },
       ...AMBIENT_NPCS,
@@ -1397,6 +1457,7 @@ export class GameView {
     bubble.visible = false;
     a.group.add(bubble);
     a.bubble = bubble;
+    a.rotatePhrases = !!d.rotate;
     a.homeYaw = d.yaw;
     this.scene.add(a.group);
     this.setLoco(a, 'idle');
@@ -1698,6 +1759,15 @@ export class GameView {
         );
         a.group.rotation.y = angleLerp(a.group.rotation.y, ty, Math.min(dt * 6, 1));
         if (!a.bubble.visible && a.actions.wave) this.playOnce(a, 'wave', 1.1);
+        // the cheerleader swaps in a fresh encouragement on every visit
+        if (a.rotatePhrases && !a.bubble.visible) {
+          a.phraseIdx = ((a.phraseIdx ?? -1) + 1) % 6;
+          a.group.remove(a.bubble);
+          a.bubble.material.map.dispose();
+          a.bubble = this.makeBubbleSprite(t(`npc.inc${a.phraseIdx}`));
+          a.bubble.position.y = 2.5;
+          a.group.add(a.bubble);
+        }
       } else {
         a.group.rotation.y = angleLerp(a.group.rotation.y, a.homeYaw, Math.min(dt * 2, 1));
       }
@@ -1878,8 +1948,12 @@ export class GameView {
       }
       a.group.position.x = x;
       a.group.position.z = z;
-      a.group.position.y = a.isGhost ? 0.25 + Math.sin(this.time * 3 + id) * 0.12 : 0;
-      a.group.rotation.y = yaw;
+      // ghosts hover; everything else stands on the terrain (training
+      // dummies live down on the sunken sanctuary floor)
+      a.group.position.y = a.isGhost
+        ? 0.25 + Math.sin(this.time * 3 + id) * 0.12
+        : terrainY(z);
+      if (a.kind !== 'dummy') a.group.rotation.y = yaw;
       // enemies spawn hidden deep in the northern woods and slowly
       // step out of the penumbra: invisible until the forest mouth,
       // fully lit a few cells into the board
@@ -1902,6 +1976,11 @@ export class GameView {
     for (const [id, a] of this.enemies) {
       if (!seenE.has(id)) { this.scene.remove(a.group); this.enemies.delete(id); }
     }
+    // the static yard dummies stand in whenever no live (attackable)
+    // sim dummies exist — the two never show at once
+    let liveDummy = false;
+    for (const a of this.enemies.values()) if (a.kind === 'dummy') { liveDummy = true; break; }
+    for (const g of this.dummyProps || []) g.visible = this.sanctActive && !liveDummy;
 
     // ---- towers / obstacles
     const seenT = new Set();
@@ -2066,6 +2145,11 @@ export class GameView {
         // tiger-pet critical hit: punchy ring + floating callout
         this.burst(ev.x, ev.z, 0.9, 0xffb020);
         this.spawnFloatText('CRIT!', ev.x, ev.z, 0xffb020);
+        break;
+      }
+      case 'dreset': {
+        // a depleted training dummy springs back to full
+        this.burst(ev.x, ev.z, 1.0, 0xffd24a);
         break;
       }
       case 'petswap': {

@@ -339,6 +339,10 @@
 
       <button id="petshop-prompt" class="hidden"><i data-icon="paw"></i> <span data-i18n="hud.petShop">Pet Shop</span></button>
       <button id="weaponshop-prompt" class="hidden"><i data-icon="swords"></i> <span data-i18n="hud.weaponSmith">Weapon Smith</span></button>
+      <!-- floating "talk" call-to-action pinned under the nearest NPC -->
+      <button id="npc-prompt" class="hidden"><span id="npc-prompt-label"></span></button>
+      <!-- shown while training mode is active down at the dummies -->
+      <button id="train-exit" class="btn primary hidden"></button>
 
       <!-- centered announcements (wave banners) -->
       <div id="toasts"></div>
@@ -349,6 +353,19 @@
 
     <!-- black-screen plea typed out just before spawning at the portal -->
     <div id="intro-overlay" class="hidden"><div id="intro-text"></div></div>
+
+    <!-- paged conversation with a sanctuary NPC -->
+    <div id="npc-dialog" class="screen overlay hidden">
+      <div class="panel npc-dialog-panel">
+        <div id="nd-name" class="nd-name"></div>
+        <p id="nd-text" class="nd-text"></p>
+        <div class="nd-actions">
+          <button id="nd-train" class="btn primary hidden">Start training</button>
+          <button id="nd-next" class="btn primary">Next</button>
+          <button id="nd-close" class="btn subtle">Close</button>
+        </div>
+      </div>
+    </div>
 
     <!-- ============ SETTINGS ============ -->
     <div id="settings-panel" class="screen overlay hidden">
