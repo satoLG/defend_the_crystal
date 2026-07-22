@@ -1245,9 +1245,15 @@ export class GameView {
   // like the static yard props it temporarily replaces
   makeDummyActor(x, z) {
     const group = this.makeDummyMesh();
-    // face the training hero, same as the static yard props
-    const focus = { x: NPCS.treino.x - 2.4, z: NPCS.treino.z + 1.2 };
-    group.rotation.y = Math.atan2(focus.x - x, focus.z - z);
+    // match the static yard prop nearest this spawn (same yaw & scale)
+    let near = DUMMIES[0];
+    let bestD = Infinity;
+    for (const d of DUMMIES) {
+      const dd = (d.x - x) ** 2 + (d.z - z) ** 2;
+      if (dd < bestD) { bestD = dd; near = d; }
+    }
+    group.rotation.y = near.yaw;
+    group.scale.setScalar(near.scale);
     const mixer = new THREE.AnimationMixer(group); // no clips — API compat
     const mats = [];
     group.traverse((o) => {
@@ -1519,13 +1525,11 @@ export class GameView {
   // and a painted target board, standing in his little training yard
   buildTrainingDummies() {
     this.dummyProps = [];
-    // face each dummy toward where a training hero would stand (just in
-    // front of the drill master), so the target board looks at the player
-    const focus = { x: NPCS.treino.x - 2.4, z: NPCS.treino.z + 1.2 };
     for (const d of DUMMIES) {
       const g = this.makeDummyMesh();
       g.position.set(d.x, terrainY(d.z), d.z);
-      g.rotation.y = Math.atan2(focus.x - d.x, focus.z - d.z);
+      g.rotation.y = d.yaw;
+      g.scale.setScalar(d.scale);
       this.scene.add(g);
       this.sanctNodes.push(g);
       this.dummyProps.push(g);
@@ -1550,9 +1554,10 @@ export class GameView {
     // The kit board stands upright with its face along local +X, so a
     // quarter-turn points that face forward (+Z), centered on the body.
     const target = instantiate('kit-target', { shadows: false }).group;
-    target.rotation.y = Math.PI / 2;   // face (local +X) → forward (+Z)
+    // transform dialed in with the in-game dev editor
+    target.rotation.set(0, -1.44, 0);
     target.scale.setScalar(1.25);
-    target.position.set(0, 0.62, 0.06); // centered on the chest, a hair proud
+    target.position.set(0, 0.62, 0.28);
     g.add(target);
     g.userData.target = target; // handle for the dev editor overlay
     return g;
