@@ -346,7 +346,7 @@ const STRINGS = {
     dlg: {
       next: 'Next', train: 'Start training',
       duvidas: {
-        0: 'Welcome, hero! I am Théo, keeper of this sanctuary. Up those stairs, past the colonnade, lies the crystal we all live to protect.',
+        0: 'Welcome, hero! I am Thea, keeper of this sanctuary. Up those stairs, past the colonnade, lies the crystal we all live to protect.',
         1: 'Monsters pour out of the dark woods to the north. Your duty is to stop them before they reach the crystal — with your weapon, your towers and your walls.',
         2: 'Slain foes drop crystal fragments and experience. Spend the fragments on towers, place blocks to bend the monsters\' path, and grow stronger every wave.',
         3: 'Between waves — at checkpoints — this sanctuary opens again: rest, talk to us, visit Tonho and Baru. When everyone has crossed past the crystal, the battle begins.',
@@ -586,7 +586,7 @@ const STRINGS = {
     dlg: {
       next: 'Próximo', train: 'Começar treino',
       duvidas: {
-        0: 'Bem-vindo, herói! Eu sou Théo, guardião deste santuário. Subindo aquelas escadas, além da colunata, está o cristal que vivemos para proteger.',
+        0: 'Bem-vindo, herói! Eu sou Thea, guardiã deste santuário. Subindo aquelas escadas, além da colunata, está o cristal que vivemos para proteger.',
         1: 'Monstros brotam da mata escura ao norte. Seu dever é detê-los antes que alcancem o cristal — com sua arma, suas torres e suas muralhas.',
         2: 'Inimigos abatidos soltam fragmentos de cristal e experiência. Gaste os fragmentos em torres, posicione blocos para desviar o caminho deles e fique mais forte a cada onda.',
         3: 'Entre as ondas — nos checkpoints — este santuário se abre de novo: descanse, fale conosco, visite Tonho e Baru. Quando todos tiverem atravessado além do cristal, a batalha começa.',

@@ -103,10 +103,11 @@ export const NPCS = {
 // focused on the service NPCs)
 export const AMBIENT_NPCS = [];
 
-// training dummies flanking Rocha
+// training dummies lined up on Rocha's outer (east) flank, clear of the
+// walk path — the drill master (x 6.2) stands between them and the plaza
 export const DUMMIES = [
-  { x: 7.35, z: PZ + 8.3 },
-  { x: 7.35, z: PZ + 10.9 },
+  { x: 8.2, z: PZ + 8.4 },
+  { x: 8.2, z: PZ + 11.0 },
 ];
 // wander farther than this from Rocha and training mode ends itself
 export const TRAIN = { RADIUS: 11 };

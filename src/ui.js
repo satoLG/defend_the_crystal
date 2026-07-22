@@ -60,12 +60,22 @@ const $ = (id) => document.getElementById(id);
 // down, so trigger on that (falling back to click for keyboard/
 // assistive-tech activation, which never fires pointerdown).
 const bindTap = (el, fn) => {
-  el.addEventListener('pointerdown', (e) => {
-    if (e.pointerType === 'mouse' && e.button !== 0) return;
-    e.preventDefault();
+  // pointerdown fires first (snappy on touch); the browser then fires a
+  // synthesized click right after. Dedupe so the handler runs ONCE per
+  // tap — otherwise everything bound here double-fires on touch (which,
+  // for one-shot actions like "start wave", showed the toast twice).
+  // Assistive tech that only emits click still works via the same guard.
+  let last = 0;
+  const run = (e) => {
+    if (e.type === 'pointerdown' && e.pointerType === 'mouse' && e.button !== 0) return;
+    const now = performance.now();
+    if (now - last < 500) return; // the paired click after a pointerdown
+    last = now;
+    if (e.type === 'pointerdown') e.preventDefault();
     fn();
-  });
-  el.addEventListener('click', fn);
+  };
+  el.addEventListener('pointerdown', run);
+  el.addEventListener('click', run);
 };
 
 // real render of the 3D model (Kenney preview) instead of a generic glyph

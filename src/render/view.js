@@ -1243,9 +1243,11 @@ export class GameView {
 
   // a live, attackable training dummy (sim-side enemy) — looks exactly
   // like the static yard props it temporarily replaces
-  makeDummyActor() {
+  makeDummyActor(x, z) {
     const group = this.makeDummyMesh();
-    group.rotation.y = Math.PI / 2 + 0.35;
+    // face the training hero, same as the static yard props
+    const focus = { x: NPCS.treino.x - 2.4, z: NPCS.treino.z + 1.2 };
+    group.rotation.y = Math.atan2(focus.x - x, focus.z - z);
     const mixer = new THREE.AnimationMixer(group); // no clips — API compat
     const mats = [];
     group.traverse((o) => {
@@ -1263,7 +1265,7 @@ export class GameView {
     if (a) return a;
     const kind = row[EN.KIND];
     if (kind === 'dummy') {
-      a = this.makeDummyActor();
+      a = this.makeDummyActor(row[EN.X], row[EN.Z]);
       a.kind = kind;
       a.hpBar = this.makeHpBar(0.85, 1.75);
       a.hpBar.visible = false;
@@ -1461,21 +1463,22 @@ export class GameView {
       const a = this.mkNpc(d);
       if (d.id) this.npcById[d.id] = a;
     }
-    // a small glowing crystal shard stands at Iris's side
+    // a glowing crystal shard stands at Iris's side (chest-high, so it
+    // reads clearly next to her)
     const iris = NPCS.blessings;
     const shard = instantiate('prop-crystal', { cloneMaterials: true }).group;
-    shard.scale.setScalar(0.5);
-    shard.position.set(iris.x + 0.85, terrainY(iris.z) + 0.35, iris.z + 0.35);
+    shard.scale.setScalar(1.9);
+    shard.position.set(iris.x + 0.95, terrainY(iris.z) + 0.15, iris.z + 0.35);
     shard.traverse((o) => {
       if (o.isMesh && o.material?.emissive) {
         o.material.emissive.set(0x39b6e0);
-        o.material.emissiveIntensity = 0.8;
+        o.material.emissiveIntensity = 0.85;
       }
     });
     this.scene.add(shard);
     this.sanctNodes.push(shard);
-    const shardGlow = new THREE.PointLight(0x66c8e8, 3, 4, 2);
-    shardGlow.position.set(iris.x + 0.85, terrainY(iris.z) + 0.7, iris.z + 0.35);
+    const shardGlow = new THREE.PointLight(0x66c8e8, 4, 5, 2);
+    shardGlow.position.set(iris.x + 0.95, terrainY(iris.z) + 1.0, iris.z + 0.35);
     this.scene.add(shardGlow);
     this.sanctNodes.push(shardGlow);
 
@@ -1516,10 +1519,13 @@ export class GameView {
   // and a painted target board, standing in his little training yard
   buildTrainingDummies() {
     this.dummyProps = [];
+    // face each dummy toward where a training hero would stand (just in
+    // front of the drill master), so the target board looks at the player
+    const focus = { x: NPCS.treino.x - 2.4, z: NPCS.treino.z + 1.2 };
     for (const d of DUMMIES) {
       const g = this.makeDummyMesh();
       g.position.set(d.x, terrainY(d.z), d.z);
-      g.rotation.y = Math.PI / 2 + 0.35; // targets angled toward the plaza
+      g.rotation.y = Math.atan2(focus.x - d.x, focus.z - d.z);
       this.scene.add(g);
       this.sanctNodes.push(g);
       this.dummyProps.push(g);
@@ -1540,10 +1546,13 @@ export class GameView {
     const head = new THREE.Mesh(new THREE.SphereGeometry(0.17, 8, 8), woodDark);
     head.position.y = 1.38;
     g.add(head);
-    // a real round archery target strapped to the dummy's chest
+    // a real round archery target strapped square onto the dummy's chest.
+    // The kit board stands upright with its face along local +X, so a
+    // quarter-turn points that face forward (+Z), centered on the body.
     const target = instantiate('kit-target', { shadows: false }).group;
-    target.position.set(0, 0.95, 0.12);
-    target.rotation.x = Math.PI / 2; // stand the flat disc up, facing +z
+    target.rotation.y = Math.PI / 2;   // face (local +X) → forward (+Z)
+    target.scale.setScalar(1.25);
+    target.position.set(0, 0.62, 0.06); // centered on the chest, a hair proud
     g.add(target);
     return g;
   }
