@@ -6,7 +6,7 @@ import {
 import { CharacterPreview } from './render/preview.js';
 import { Sim } from './sim/sim.js';
 import { Grid, worldToCell, cellToWorld, findJump, computeDashEnd } from './sim/grid.js';
-import { terrainY, ELEV, NPCS } from './sanctuary.js';
+import { terrainY, ELEV, NPCS, findColliderJump } from './sanctuary.js';
 import { Net, selfId } from './net.js';
 import { SnapBuffer } from './net_interp.js';
 import { Input } from './input.js';
@@ -301,9 +301,10 @@ function startMatch() {
 function enterGame() {
   state.started = true;
   state.over = false;
-  // black screen typing the crystal's plea while the portal flares
-  // open behind it — every player entering the match gets the moment
-  ui.playIntro();
+  // black screen typing the crystal's plea, THEN — a beat after the
+  // scene is revealed — the portal flares open and the hero steps out
+  const introDur = ui.playIntro();
+  view.beginArrival(introDur + 2.0);
   ui.showHud();
   sfx.notify();
 }
@@ -542,11 +543,21 @@ function jumpHeading() {
   return Math.hypot(dir.x, dir.z) > 0.15 ? Math.atan2(dir.x, dir.z) : null;
 }
 
+// a jump the local hero can currently make: a blocked grid cell in
+// front, or — in the open sanctuary — a hoppable prop/NPC/lantern
+function findAnyJump() {
+  const s = state.self;
+  const info = findJump(clientGridRef(), s.x, s.z, localJumpCells(), jumpHeading());
+  if (info) return info;
+  if (state.allowPlaza) return findColliderJump(s.x, s.z, PLAYER.RADIUS, jumpHeading());
+  return null;
+}
+
 function doJump() {
   const s = state.self;
   if (!state.started || state.over || s.dead || s.jump || s.dash) return false;
   if (state.role === 'client' && !state.selfInit) return false;
-  const info = findJump(clientGridRef(), s.x, s.z, localJumpCells(), jumpHeading());
+  const info = findAnyJump();
   if (!info) return false;
   const dur = jumpDurFor(info.span);
   s.jump = { fx: s.x, fz: s.z, tx: info.to.x, tz: info.to.z, t: 0, dur };
@@ -563,7 +574,8 @@ function updateJumpButton() {
   const s = state.self;
   const ok = state.started && !state.over && !s.dead && !s.jump && !s.dash &&
     (state.role === 'host' || state.selfInit) &&
-    !!findJump(clientGridRef(), s.x, s.z, localJumpCells());
+    (!!findJump(clientGridRef(), s.x, s.z, localJumpCells()) ||
+      (state.allowPlaza && !!findColliderJump(s.x, s.z, PLAYER.RADIUS)));
   if (ok !== jumpWasEnabled) {
     jumpWasEnabled = ok;
     ui.setJumpEnabled(ok);
@@ -716,7 +728,10 @@ function handleEvent(ev) {
       ui.hideGameOver();
       view.reset();
       syncSelfFromSim();
-      ui.playIntro(); // the party re-enters through the portal
+      { // the party re-enters through the portal after the plea
+        const dur = ui.playIntro();
+        view.beginArrival(dur + 2.0);
+      }
       ui.toast(t('toast.newDefense'), 'gold');
       break;
   }

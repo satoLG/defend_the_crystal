@@ -328,11 +328,14 @@ export class UI {
     setTimeout(() => el.remove(), 2800);
   }
 
-  // full-black screen typing the crystal's plea, letter by letter, just
-  // before the hero materializes at the sanctuary portal
+  // full-black screen typing the crystal's plea, letter by letter, then
+  // fading to reveal the sanctuary. Returns how many seconds until the
+  // overlay is fully gone, so the caller can time the portal arrival to
+  // land a beat AFTER the scene is actually visible.
   playIntro() {
     const ov = $('intro-overlay'), txt = $('intro-text');
-    if (!ov) return;
+    const STEP = 62, HOLD = 900, FADE = 780;
+    if (!ov) return 0;
     clearTimeout(this._introT);
     clearInterval(this._introI);
     ov.classList.remove('hidden', 'fade');
@@ -346,10 +349,11 @@ export class UI {
         clearInterval(this._introI);
         this._introT = setTimeout(() => {
           ov.classList.add('fade');
-          this._introT = setTimeout(() => ov.classList.add('hidden'), 780);
-        }, 950);
+          this._introT = setTimeout(() => ov.classList.add('hidden'), FADE);
+        }, HOLD);
       }
-    }, 62);
+    }, STEP);
+    return (msg.length * STEP + HOLD + FADE) / 1000;
   }
 
   // ---------------- sanctuary NPC dialogs ----------------

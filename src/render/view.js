@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { instantiate, getTemplate } from './assets.js';
-import { buildTexture, applyTexture } from './customize.js';
+import { buildTexture, applyTexture, getSlots } from './customize.js';
 import { iconPaths } from '../icons.js';
 import { CLASSES, TOWERS, JUMP, ENEMIES, BOSSES, PETS, WEAPONS, classStarterWeapons } from '../config.js';
 import { t, bossNameByKind } from '../i18n.js';
@@ -99,6 +99,55 @@ function tierTexture(modelKey, kind, stage /* 0 = stage-2, 1 = stage-3 */) {
     }
   }
   tierTexCache.set(key, tex);
+  return tex;
+}
+
+// Recolor a mini-character atlas by hue rule (currently only 'green' →
+// a target colour), preserving per-pixel shading. Cached per model+rules
+// and cloned so no other actor wearing the shared colormap is affected.
+const npcHueCache = new Map();
+function npcHueTexture(modelKey, rules) {
+  const key = modelKey + '|' + rules.map((r) => r.match + r.to).join(',');
+  if (npcHueCache.has(key)) return npcHueCache.get(key);
+  let src = null;
+  getTemplate(modelKey).group.traverse((o) => {
+    if (!src && (o.isMesh || o.isSkinnedMesh)) {
+      const m = Array.isArray(o.material) ? o.material[0] : o.material;
+      if (m?.map?.image) src = m.map;
+    }
+  });
+  let tex = null;
+  if (src?.image) {
+    const img = src.image;
+    const cv = document.createElement('canvas');
+    cv.width = img.width; cv.height = img.height;
+    const ctx = cv.getContext('2d');
+    ctx.drawImage(img, 0, 0);
+    const data = ctx.getImageData(0, 0, cv.width, cv.height);
+    const d = data.data;
+    const cl = (v) => Math.min(Math.max(Math.round(v), 0), 255);
+    for (const rule of rules) {
+      if (rule.match !== 'green') continue;
+      const to = new THREE.Color(rule.to);
+      const tr = to.r * 255, tg = to.g * 255, tb = to.b * 255;
+      for (let i = 0; i < d.length; i += 4) {
+        const r = d[i], g = d[i + 1], b = d[i + 2];
+        if (d[i + 3] > 8 && g > r + 12 && g > b + 12) {
+          const f = lumOf(r, g, b) / Math.max(lumOf(0, 200, 0), 1);
+          d[i] = cl(tr * f); d[i + 1] = cl(tg * f); d[i + 2] = cl(tb * f);
+        }
+      }
+    }
+    ctx.putImageData(data, 0, 0);
+    tex = new THREE.CanvasTexture(cv);
+    tex.flipY = src.flipY;
+    tex.colorSpace = src.colorSpace;
+    tex.wrapS = src.wrapS; tex.wrapT = src.wrapT;
+    tex.magFilter = src.magFilter; tex.minFilter = src.minFilter;
+    tex.generateMipmaps = src.generateMipmaps;
+    tex.needsUpdate = true;
+  }
+  npcHueCache.set(key, tex);
   return tex;
 }
 
@@ -1010,12 +1059,19 @@ export class GameView {
       a.group.add(a.label);
     }
 
-    // arriving through the sanctuary portal: flare it open and let the
-    // hero materialize out of it (scale-in handled per-frame in update)
+    // arriving through the sanctuary portal. While an arrival is armed
+    // (the intro is playing) the hero stays hidden until the timer fires
+    // so the whole flare-open + step-out reads AFTER the scene appears;
+    // otherwise (a late checkpoint join) it plays right away.
     if (Math.hypot(row[PL.X] - PORTAL.x, row[PL.Z] - PORTAL.z) < 3.5) {
-      this.spawnPortalFx();
-      a.spawnT = 0;
-      a.group.scale.setScalar(0.01);
+      if (this.arrivalArmed) {
+        a.arrivalPending = true;
+        a.group.visible = false;
+      } else {
+        this.spawnPortalFx();
+        a.spawnT = -0.22; // let the portal open a touch before the pop-in
+        a.group.scale.setScalar(0.01);
+      }
     }
 
     this.scene.add(a.group);
@@ -1385,10 +1441,18 @@ export class GameView {
   // players read them front-on) plus two ambient strollers
   spawnNpcs() {
     const defs = [
-      { ...NPCS.duvidas, id: 'duvidas', model: 'char-mage', tint: 0xd8c890 },
+      // Thea the guide: the mini-market employee, her green apron dyed
+      // yellow (recolor rules run instead of a flat tint)
+      { ...NPCS.duvidas, id: 'duvidas', model: 'char-employee',
+        recolor: [{ match: 'green', to: 0xf2c33a }] },
       // Nina shouts a different encouragement every time you pass by
       { ...NPCS.incentivo, id: 'incentivo', model: 'char-archer', tint: 0x8fb8ff, rotate: true },
-      { ...NPCS.blessings, id: 'blessings', model: 'char-mage', tint: 0xfff0c8 },
+      // Iris the cleric: white hair, blue robe & tiara
+      { ...NPCS.blessings, id: 'blessings', model: 'char-mage',
+        recolor: [
+          { match: 'hair', to: 0xeef0f4 },
+          { match: 'outfit', to: 0x3f6fd8 },
+        ] },
       { ...NPCS.treino, id: 'treino', model: 'char-berserker', tint: 0xc86a5a },
       ...AMBIENT_NPCS,
     ];
@@ -1397,7 +1461,55 @@ export class GameView {
       const a = this.mkNpc(d);
       if (d.id) this.npcById[d.id] = a;
     }
+    // a small glowing crystal shard stands at Iris's side
+    const iris = NPCS.blessings;
+    const shard = instantiate('prop-crystal', { cloneMaterials: true }).group;
+    shard.scale.setScalar(0.5);
+    shard.position.set(iris.x + 0.85, terrainY(iris.z) + 0.35, iris.z + 0.35);
+    shard.traverse((o) => {
+      if (o.isMesh && o.material?.emissive) {
+        o.material.emissive.set(0x39b6e0);
+        o.material.emissiveIntensity = 0.8;
+      }
+    });
+    this.scene.add(shard);
+    this.sanctNodes.push(shard);
+    const shardGlow = new THREE.PointLight(0x66c8e8, 3, 4, 2);
+    shardGlow.position.set(iris.x + 0.85, terrainY(iris.z) + 0.7, iris.z + 0.35);
+    this.scene.add(shardGlow);
+    this.sanctNodes.push(shardGlow);
+
     this.buildTrainingDummies();
+  }
+
+  // recolor a mini-character's shared colormap atlas by hue rule (green
+  // apron → yellow, mage hair → white, etc.), keeping per-pixel shading.
+  // Rules run on a per-actor clone so nothing else wearing the atlas is
+  // touched. Matchers: 'green' (apron/skin-green), 'hair' & 'outfit' use
+  // the customize analyzer's real part cells for precise targeting.
+  recolorNpc(actor, modelKey, rules) {
+    // pixel-hue rules (e.g. the employee's green apron)
+    const hueRules = rules.filter((r) => r.match === 'green');
+    if (hueRules.length) {
+      const tex = npcHueTexture(modelKey, hueRules);
+      if (tex) applyTexture(actor.group, modelKey, tex);
+    }
+    // part-cell rules (hair / outfit) via the customization analyzer
+    const partRules = rules.filter((r) => r.match === 'hair' || r.match === 'outfit');
+    if (partRules.length) {
+      const slots = getSlots(modelKey);
+      const colors = {};
+      for (const s of slots) {
+        const lbl = s.label.toLowerCase();
+        if (lbl.includes('skin')) continue;
+        const hair = partRules.find((r) => r.match === 'hair');
+        const outfit = partRules.find((r) => r.match === 'outfit');
+        if (lbl.includes('hair') && hair) colors[s.id] = '#' + new THREE.Color(hair.to).getHexString();
+        else if (outfit) colors[s.id] = '#' + new THREE.Color(outfit.to).getHexString();
+      }
+      const tex = buildTexture(modelKey, colors);
+      if (tex) applyTexture(actor.group, modelKey, tex);
+    }
   }
 
   // the drill master's target dummies: a wooden post with a crossbar
@@ -1428,18 +1540,11 @@ export class GameView {
     const head = new THREE.Mesh(new THREE.SphereGeometry(0.17, 8, 8), woodDark);
     head.position.y = 1.38;
     g.add(head);
-    // the painted target board on the chest
-    const rings = [[0.26, 0xe8e4d8], [0.18, 0xd23b2e], [0.09, 0xe8e4d8], [0.04, 0xd23b2e]];
-    let rz = 0.101;
-    for (const [r, col] of rings) {
-      const disc = new THREE.Mesh(
-        new THREE.CircleGeometry(r, 20),
-        new THREE.MeshStandardMaterial({ color: col, roughness: 0.9 })
-      );
-      disc.position.set(0, 0.95, rz);
-      rz += 0.004;
-      g.add(disc);
-    }
+    // a real round archery target strapped to the dummy's chest
+    const target = instantiate('kit-target', { shadows: false }).group;
+    target.position.set(0, 0.95, 0.12);
+    target.rotation.x = Math.PI / 2; // stand the flat disc up, facing +z
+    g.add(target);
     return g;
   }
 
@@ -1447,8 +1552,10 @@ export class GameView {
     const a = this.makeAnimated(d.model);
     a.group.position.set(d.x, terrainY(d.z), d.z);
     a.group.rotation.y = d.yaw;
-    // dye the outfit so they don't read as one of the player classes
-    for (const m of a.mats) m.color.multiply(new THREE.Color(d.tint));
+    // either recolor specific parts (hue/part rules) or, failing that,
+    // dye the whole outfit so they don't read as a player class
+    if (d.recolor) this.recolorNpc(a, d.model, d.recolor);
+    else if (d.tint) for (const m of a.mats) m.color.multiply(new THREE.Color(d.tint));
     const label = this.makeTextSprite(d.name, 0xffe9b8, 2.2);
     label.position.y = 2.0;
     a.group.add(label);
@@ -1475,6 +1582,35 @@ export class GameView {
   }
 
   // ---------------- the arrival portal ----------------
+
+  // arm a delayed arrival: heroes spawned at the portal wait hidden,
+  // then flare it open and step out once the timer fires — timed by the
+  // caller to land a beat after the intro clears the screen
+  beginArrival(delay) {
+    this.arrivalArmed = true;
+    this.arrivalT = delay;
+    // anything already spawned near the portal joins the wait
+    for (const a of this.players.values()) {
+      if (Math.hypot(a.group.position.x - PORTAL.x, a.group.position.z - PORTAL.z) < 3.5) {
+        a.arrivalPending = true;
+        a.group.visible = false;
+      }
+    }
+  }
+
+  fireArrival() {
+    this.arrivalArmed = false;
+    let any = false;
+    for (const a of this.players.values()) {
+      if (!a.arrivalPending) continue;
+      a.arrivalPending = false;
+      a.group.visible = true;
+      a.spawnT = -0.22; // portal opens a touch before the hero pops in
+      a.group.scale.setScalar(0.01);
+      any = true;
+    }
+    if (any) this.spawnPortalFx();
+  }
 
   // swirling vortex shader for the round portal plane — arms spiraling
   // into a bright core, ringed by a purple glow; uOpen drives both the
@@ -1609,7 +1745,7 @@ export class GameView {
 
     // Tonho stands a clear step out front, facing the portal
     this.mkNpc({
-      model: 'char-berserker', name: 'Tonho', tint: 0x9ad86a,
+      model: 'char-male-f', name: 'Tonho',
       x, z, yaw: 0, bubble: t('npc.pets'),
     });
 
@@ -1881,7 +2017,8 @@ export class GameView {
       seenP.add(id);
       const a = this.ensurePlayer(row, selfId);
       const dead = row[PL.DEAD] === 1;
-      a.group.visible = !dead;
+      // stay hidden while waiting on an armed portal arrival
+      a.group.visible = !dead && !a.arrivalPending;
       let x = row[PL.X], z = row[PL.Z], yaw = row[PL.YAW], moving = row[PL.MOV] === 1;
       const p = prevPl.get(id);
       if (id === selfId && selfPose) {
@@ -2642,17 +2779,27 @@ export class GameView {
     this.updateNpcs(dt, selfPos);
     this.updateShowPets(dt);
     this.updatePets(dt);
+    // countdown to the armed portal arrival (see beginArrival)
+    if (this.arrivalArmed) {
+      this.arrivalT -= dt;
+      if (this.arrivalT <= 0) this.fireArrival();
+    }
     this.updatePortal(dt);
     this.animateStatusFx(dt);
 
     for (const a of this.players.values()) {
-      // materializing out of the arrival portal: pop-in scale
+      // materializing out of the arrival portal: pop-in scale (spawnT
+      // starts slightly negative so the portal opens first)
       if (a.spawnT != null) {
         a.spawnT += dt;
-        const k = Math.min(a.spawnT / 0.55, 1);
-        const s = k * (1 + 0.16 * Math.sin(k * Math.PI));
-        a.group.scale.setScalar(Math.max(s, 0.01));
-        if (k >= 1) { a.spawnT = null; a.group.scale.setScalar(1); }
+        if (a.spawnT < 0) {
+          a.group.scale.setScalar(0.01);
+        } else {
+          const k = Math.min(a.spawnT / 0.55, 1);
+          const s = k * (1 + 0.16 * Math.sin(k * Math.PI));
+          a.group.scale.setScalar(Math.max(s, 0.01));
+          if (k >= 1) { a.spawnT = null; a.group.scale.setScalar(1); }
+        }
       }
       // orbiting stone slabs of the tanker's wall mode
       if (a.wallFx) {

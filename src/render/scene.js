@@ -109,6 +109,16 @@ export class GameScene {
     this.crystalLight = new THREE.PointLight(0x66e0ff, 30, 14, 1.8);
     this.crystalLight.position.set(CRYSTAL_POS.x, 2.6, CRYSTAL_POS.z);
     this.scene.add(this.crystalLight);
+
+    // face fill: the moon rakes in from the north, so anyone facing the
+    // portal (the NPCs, +z-ward) was left shadowed on the front. A soft
+    // warm directional from the south-and-above lifts their faces — no
+    // shadows, low intensity, so the battlefield's mood is untouched.
+    const fill = new THREE.DirectionalLight(0xfff0dc, 0.9);
+    fill.position.set(3, 13, HALF_H + 40);
+    fill.target.position.set(0, 1, HALF_H + 8);
+    this.scene.add(fill.target);
+    this.scene.add(fill);
   }
 
   buildTerrain() {
@@ -465,19 +475,42 @@ export class GameScene {
     rim.position.y = 0.54;
     g.add(rim);
 
-    // basin water
-    const water = new THREE.Mesh(
-      new THREE.CircleGeometry(R - 0.08, 24),
-      new THREE.MeshStandardMaterial({
-        color: 0x5fc8e8, emissive: 0x1e6e8c, emissiveIntensity: 0.6,
-        transparent: true, opacity: 0.9, roughness: 0.15,
-      })
-    );
+    // basin water: a custom shader for a light, simple water look — a
+    // calm blue body with a soft WHITE foam ring at the rim and gentle
+    // concentric ripples. Cheap (one plane, a few sin() in the frag).
+    const waterMat = new THREE.ShaderMaterial({
+      transparent: true, depthWrite: false,
+      uniforms: { uT: { value: 0 } },
+      vertexShader: `
+        varying vec2 vUv;
+        void main() {
+          vUv = uv * 2.0 - 1.0;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }`,
+      fragmentShader: `
+        varying vec2 vUv;
+        uniform float uT;
+        void main() {
+          float r = length(vUv);
+          if (r > 1.0) discard;
+          // gentle ripples travelling outward
+          float ripple = 0.5 + 0.5 * sin(r * 22.0 - uT * 2.2);
+          vec3 deep = vec3(0.29, 0.62, 0.80);
+          vec3 shallow = vec3(0.55, 0.82, 0.92);
+          vec3 col = mix(deep, shallow, ripple * 0.5);
+          // soft white foam hugging the rim
+          float foam = smoothstep(0.80, 0.99, r);
+          foam *= 0.6 + 0.4 * sin(atan(vUv.y, vUv.x) * 18.0 + uT * 1.5);
+          col = mix(col, vec3(1.0), clamp(foam, 0.0, 0.9));
+          gl_FragColor = vec4(col, 0.92);
+        }`,
+    });
+    const water = new THREE.Mesh(new THREE.CircleGeometry(R - 0.08, 32), waterMat);
     water.rotation.x = -Math.PI / 2;
     water.position.y = 0.42;
     g.add(water);
 
-    // center column + small upper bowl with its own water disc
+    // center column + small upper bowl with its own little water disc
     const col = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.24, 0.85, 8), stoneDark);
     col.position.y = 0.62;
     g.add(col);
@@ -485,33 +518,22 @@ export class GameScene {
     bowl.scale.setScalar(0.5);
     bowl.position.y = 1.0;
     g.add(bowl);
-    const upWater = new THREE.Mesh(new THREE.CircleGeometry(0.3, 16), water.material);
+    const upWater = new THREE.Mesh(new THREE.CircleGeometry(0.3, 20), waterMat);
     upWater.rotation.x = -Math.PI / 2;
     upWater.position.y = 1.24;
     g.add(upWater);
 
-    // central jet + four thin streams arcing from the upper bowl down
-    // into the basin — plain additive cylinders, feather-cheap
-    const streamMat = new THREE.MeshBasicMaterial({
-      color: 0x9fdcf0, transparent: true, opacity: 0.4,
-      blending: THREE.AdditiveBlending, depthWrite: false,
-    });
-    const jet = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.03, 0.5, 6), streamMat);
-    jet.position.y = 1.48;
+    // a single slim jet bubbling up from the upper bowl (the four odd
+    // side-streams were removed)
+    const jet = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.05, 0.03, 0.42, 6),
+      new THREE.MeshBasicMaterial({
+        color: 0xbfeeff, transparent: true, opacity: 0.4,
+        blending: THREE.AdditiveBlending, depthWrite: false,
+      })
+    );
+    jet.position.y = 1.46;
     g.add(jet);
-    const arcs = [];
-    for (let i = 0; i < 4; i++) {
-      const a = (i / 4) * Math.PI * 2 + Math.PI / 4;
-      const stream = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.03, 0.05, 1.05, 5), streamMat.clone()
-      );
-      const midR = (0.34 + (R - 0.2)) / 2;
-      stream.position.set(Math.cos(a) * midR, 0.85, Math.sin(a) * midR);
-      // tilt outward so the stream leans from the upper bowl to the basin
-      stream.rotation.set(Math.sin(a) * 0.75, 0, -Math.cos(a) * 0.75);
-      g.add(stream);
-      arcs.push(stream);
-    }
 
     // cool glow so the water reads as water from afar
     const glow = new THREE.PointLight(0x66c8e8, 5, 7, 2);
@@ -519,7 +541,7 @@ export class GameScene {
     g.add(glow);
 
     this.scene.add(g);
-    this.waters.push({ water, jet, arcs, phase: 0.7 });
+    this.waters.push({ waterMat, jet, phase: 0.7 });
   }
 
   buildCrystal() {
@@ -1116,18 +1138,14 @@ export class GameScene {
     }
     this.crystalLight.intensity = 26 + Math.sin(this.time * 2.2) * 7 + this.crystalHurt * 40;
 
-    // fountain water: shimmering surface + pulsing jet & streams —
+    // fountain water: advance the ripple/foam shader + bob the jet —
     // skipped entirely while the sanctuary is off-camera mid-wave
     if (this.sanctuaryActive) {
       for (const w of this.waters) {
-        w.water.material.emissiveIntensity = 0.55 + Math.sin(this.time * 2.4 + w.phase) * 0.2;
-        w.water.rotation.z += dt * 0.4;
+        w.waterMat.uniforms.uT.value = this.time;
         const k = 1 + Math.sin(this.time * 5 + w.phase) * 0.12;
         w.jet.scale.set(1, k, 1);
         w.jet.material.opacity = 0.32 + Math.sin(this.time * 5 + w.phase) * 0.1;
-        for (let i = 0; i < (w.arcs?.length || 0); i++) {
-          w.arcs[i].material.opacity = 0.3 + Math.sin(this.time * 4.2 + w.phase + i * 1.6) * 0.12;
-        }
       }
     }
 

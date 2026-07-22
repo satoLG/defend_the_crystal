@@ -1143,11 +1143,11 @@ input:focus { border-color: var(--gold); }
 #intro-overlay.hidden { display: none; }
 #intro-text {
   font-weight: 800; letter-spacing: 0.2em; text-align: center;
-  font-size: clamp(1.1rem, 4.2vw, 2rem); color: #e8e4f0; padding: 0 18px;
-  text-shadow: 0 0 22px rgba(154, 74, 224, 0.85);
+  font-size: clamp(1.1rem, 4.2vw, 2rem); color: #f2f2f2; padding: 0 18px;
+  text-shadow: 0 0 18px rgba(255, 255, 255, 0.35);
 }
 #intro-text::after {
-  content: '▌'; margin-left: 5px; color: #b27aff;
+  content: '▌'; margin-left: 5px; color: #f2f2f2;
   animation: intro-caret 0.8s steps(1) infinite;
 }
 @keyframes intro-caret { 50% { opacity: 0; } }

@@ -90,7 +90,7 @@ export const NPCS = {
   pets:      { name: 'Tonho', x: 5.4,  z: PZ + 17.2, yaw: 0 },
   weapons:   { name: 'Baru',  x: -5.4, z: PZ + 17.2, yaw: 0 },
   // the friendly guide by the fountain who explains the game
-  duvidas:   { name: 'Théo',  x: 1.9,  z: PZ + 14.8, yaw: 0.16 },
+  duvidas:   { name: 'Thea',  x: 1.9,  z: PZ + 14.8, yaw: 0.16 },
   // the cheerleader near the stairs, always shouting encouragement
   incentivo: { name: 'Nina',  x: -1.3, z: PZ + 6.6,  yaw: 0.12 },
   // the sanctuary cleric (future blessings vendor)
@@ -99,11 +99,9 @@ export const NPCS = {
   treino:    { name: 'Rocha', x: 6.2,  z: PZ + 9.6,  yaw: -0.48 },
 };
 
-// ambient dwellers pottering about (pure set dressing)
-export const AMBIENT_NPCS = [
-  { model: 'char-mage', name: 'Mira', tint: 0x8fd8c8, x: -2.8, z: PZ + 11.2, yaw: 0.6 },
-  { model: 'char-tanker', name: 'Bento', tint: 0xd8b06a, x: 2.9, z: PZ + 7.4, yaw: -0.35 },
-];
+// (the ambient strollers Mira & Bento were removed to keep the plaza
+// focused on the service NPCs)
+export const AMBIENT_NPCS = [];
 
 // training dummies flanking Rocha
 export const DUMMIES = [
@@ -121,6 +119,51 @@ for (const sx of [-1, 1]) {
   PLAZA_COLUMNS.push({ x: sx * (PLAZA.HALF_W - 0.6), z: PZ + PLAZA.DEPTH - 1 });
   PLAZA_LANTERNS.push({ x: sx * 7.0, z: PZ + 8.4 });
   PLAZA_LANTERNS.push({ x: sx * 3.4, z: PZ + 20.8 }); // flanking the portal
+}
+
+// colliders small & tall enough to actually vault over (NPCs, the
+// training dummy, the little lanterns) — the fountain and stalls are
+// too big to hop, so they stay walls
+export const JUMPABLE_COLLIDERS = [
+  ...Object.values(NPCS).map((n) => ({ x: n.x, z: n.z, r: 0.55 })),
+  ...DUMMIES.map((d) => ({ x: d.x, z: d.z, r: 0.5 })),
+  ...PLAZA_LANTERNS.map((l) => ({ x: l.x, z: l.z, r: 0.35 })),
+];
+
+// Can the player at (x,z) vault a plaza prop just ahead? Mirrors the
+// grid jump: pick a cardinal from the heading (or facing), find a
+// jumpable collider right in front, and land a clear step past it.
+// Returns { to:{x,z}, span:1, yaw } or null — shared by client & sim.
+const PLAZA_JUMP_DIRS = [
+  { dx: 0, dz: 1, yaw: 0 }, { dx: 1, dz: 0, yaw: Math.PI / 2 },
+  { dx: 0, dz: -1, yaw: Math.PI }, { dx: -1, dz: 0, yaw: -Math.PI / 2 },
+];
+export function findColliderJump(x, z, radius, heading = null) {
+  let best = null, bestScore = Infinity;
+  for (const d of PLAZA_JUMP_DIRS) {
+    for (const col of JUMPABLE_COLLIDERS) {
+      // how far ahead the prop sits along this cardinal, and how far
+      // off to the side — must be roughly straight in front and close
+      const ahead = (col.x - x) * d.dx + (col.z - z) * d.dz;
+      const side = Math.abs((col.x - x) * d.dz - (col.z - z) * d.dx);
+      const gap = ahead - (radius + col.r);
+      if (ahead <= 0 || gap > 0.55 || side > radius + col.r) continue;
+      // land a clear step past the far edge of the prop
+      const dist = ahead + col.r + radius + 0.35;
+      let score = gap + side;
+      if (heading != null) {
+        let diff = (d.yaw - heading) % (Math.PI * 2);
+        if (diff > Math.PI) diff -= Math.PI * 2;
+        if (diff < -Math.PI) diff += Math.PI * 2;
+        score += Math.abs(diff);
+      }
+      if (score < bestScore) {
+        bestScore = score;
+        best = { to: { x: x + d.dx * dist, z: z + d.dz * dist }, span: 1, yaw: d.yaw };
+      }
+    }
+  }
+  return best;
 }
 
 // static circle colliders on the sanctuary floor (props & NPCs) —

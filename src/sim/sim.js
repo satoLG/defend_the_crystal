@@ -12,7 +12,7 @@ import {
   Grid, cellToWorld, worldToCell, canJumpFrom, enemyJumpShortcut, idx, inBounds,
   computeDashEnd, CRYSTAL_POS, HALF_W, HALF_H,
 } from './grid.js';
-import { PORTAL, CROSS_Z, NPCS, DUMMIES, TRAIN } from '../sanctuary.js';
+import { PORTAL, CROSS_Z, NPCS, DUMMIES, TRAIN, findColliderJump } from '../sanctuary.js';
 import { buildWavePlan, enemyStats } from './waves.js';
 import { clamp, dist2d, nextId } from '../utils.js';
 
@@ -487,7 +487,12 @@ export class Sim {
     // onto a foe). Fall back to yaw/facing for older clients.
     const heading = typeof act?.jyaw === 'number' ? act.jyaw
       : typeof act?.yaw === 'number' ? act.yaw : p.yaw;
-    const info = canJumpFrom(this.grid, p.x, p.z, heading, p.jumpCells || 1);
+    let info = canJumpFrom(this.grid, p.x, p.z, heading, p.jumpCells || 1);
+    // down in the open sanctuary there are no blocked grid cells, but the
+    // props & NPCs are hoppable — vault them the same way
+    if (!info && this.freeRoamPhase()) {
+      info = findColliderJump(p.x, p.z, PLAYER.RADIUS, heading);
+    }
     if (!info) return;
     const dur = jumpDurFor(info.span);
     p.jumpT = dur;
