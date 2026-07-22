@@ -887,7 +887,7 @@ function stepSelf(dt) {
   const steps = Math.max(1, Math.ceil(Math.hypot(dxTot, dzTot) / PLAYER.KB_STEP));
   for (let i = 0; i < steps; i++) {
     const fixed = grid.resolveCircle(
-      s.x + dxTot / steps, s.z + dzTot / steps, PLAYER.RADIUS, state.allowPlaza
+      s.x + dxTot / steps, s.z + dzTot / steps, PLAYER.RADIUS, state.allowPlaza, true
     );
     s.x = fixed.x; s.z = fixed.z;
   }

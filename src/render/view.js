@@ -1443,12 +1443,12 @@ export class GameView {
   // players read them front-on) plus two ambient strollers
   spawnNpcs() {
     const defs = [
-      // Thea the guide: the mini-market employee, her green apron dyed
-      // yellow (recolor rules run instead of a flat tint)
-      { ...NPCS.duvidas, id: 'duvidas', model: 'char-employee',
+      // Theo the guide
+      { ...NPCS.duvidas, id: 'duvidas', model: 'char-male-e' },
+      // Nina the cheerleader: the mini-market employee, green apron dyed
+      // yellow — shouts a different encouragement every time you pass by
+      { ...NPCS.incentivo, id: 'incentivo', model: 'char-employee', rotate: true,
         recolor: [{ match: 'green', to: 0xf2c33a }] },
-      // Nina shouts a different encouragement every time you pass by
-      { ...NPCS.incentivo, id: 'incentivo', model: 'char-archer', tint: 0x8fb8ff, rotate: true },
       // Iris the cleric: white hair, blue robe & tiara
       { ...NPCS.blessings, id: 'blessings', model: 'char-mage',
         recolor: [

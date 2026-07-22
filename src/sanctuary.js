@@ -90,7 +90,7 @@ export const NPCS = {
   pets:      { name: 'Tonho', x: 5.4,  z: PZ + 17.2, yaw: 0 },
   weapons:   { name: 'Baru',  x: -5.4, z: PZ + 17.2, yaw: 0 },
   // the friendly guide by the fountain who explains the game
-  duvidas:   { name: 'Thea',  x: 1.9,  z: PZ + 14.8, yaw: 0.16 },
+  duvidas:   { name: 'Theo',  x: 1.9,  z: PZ + 14.8, yaw: 0.16 },
   // the cheerleader near the stairs, always shouting encouragement
   incentivo: { name: 'Nina',  x: -1.3, z: PZ + 6.6,  yaw: 0.12 },
   // the sanctuary cleric (future blessings vendor)

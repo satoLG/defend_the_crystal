@@ -240,7 +240,7 @@ export class Sim {
     // there's no walking back down until the next checkpoint.
     const fixed = p.jumpT > 0
       ? { x: clamp(x, -HALF_W + 0.3, HALF_W - 0.3), z: clamp(z, -HALF_H + 0.3, HALF_H - 0.3) }
-      : this.grid.resolveCircle(x, z, PLAYER.RADIUS, this.freeRoamPhase());
+      : this.grid.resolveCircle(x, z, PLAYER.RADIUS, this.freeRoamPhase(), true);
     p.x = fixed.x; p.z = fixed.z;
     p.moving = !!m;
     if (typeof yaw === 'number') p.yaw = yaw;

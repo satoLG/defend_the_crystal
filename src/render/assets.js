@@ -35,6 +35,7 @@ const MANIFEST = {
   // sanctuary-dweller bodies (Kenney mini-characters / mini-market —
   // they share one external colormap.png under characters/Textures/)
   'char-male-f': M('characters/character-male-f.glb', { char: true }),
+  'char-male-e': M('characters/character-male-e.glb', { char: true }),
   'char-employee': M('characters/character-employee.glb', { char: true }),
   // enemies (rigged + animated) — normal-size enemies share it too;
   // bosses/subbosses still scale up on top (per-entity scale in the sim)
