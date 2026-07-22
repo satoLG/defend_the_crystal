@@ -1554,7 +1554,49 @@ export class GameView {
     target.scale.setScalar(1.25);
     target.position.set(0, 0.62, 0.06); // centered on the chest, a hair proud
     g.add(target);
+    g.userData.target = target; // handle for the dev editor overlay
     return g;
+  }
+
+  // ---- dev overlay hooks: live-edit the training dummies & targets ----
+
+  // current editor state derived from where the props actually sit,
+  // expressed as an offset from the drill master (Rocha)
+  dummyEditState() {
+    const rx = NPCS.treino.x, rz = NPCS.treino.z;
+    const dummies = (this.dummyProps || []).map((g) => ({
+      dx: +(g.position.x - rx).toFixed(2),
+      dz: +(g.position.z - rz).toFixed(2),
+      yaw: +g.rotation.y.toFixed(3),
+      scale: +g.scale.x.toFixed(2),
+    }));
+    const tgt = this.dummyProps?.[0]?.userData.target;
+    const target = tgt ? {
+      px: +tgt.position.x.toFixed(2), py: +tgt.position.y.toFixed(2), pz: +tgt.position.z.toFixed(2),
+      rx: +tgt.rotation.x.toFixed(2), ry: +tgt.rotation.y.toFixed(2), rz: +tgt.rotation.z.toFixed(2),
+      scale: +tgt.scale.x.toFixed(2),
+    } : { px: 0, py: 0.62, pz: 0.06, rx: 0, ry: Math.PI / 2, rz: 0, scale: 1.25 };
+    return { dummies, target };
+  }
+
+  // apply an editor state to every live dummy prop (and remember the
+  // target transform so training-mode actors match)
+  applyDummyEdit(state) {
+    const rx = NPCS.treino.x, rz = NPCS.treino.z;
+    (this.dummyProps || []).forEach((g, i) => {
+      const d = state.dummies[i];
+      if (!d) return;
+      g.position.set(rx + d.dx, terrainY(rz + d.dz), rz + d.dz);
+      g.rotation.y = d.yaw;
+      g.scale.setScalar(d.scale);
+      const t = g.userData.target;
+      const s = state.target;
+      if (t) {
+        t.position.set(s.px, s.py, s.pz);
+        t.rotation.set(s.rx, s.ry, s.rz);
+        t.scale.setScalar(s.scale);
+      }
+    });
   }
 
   mkNpc(d) {
