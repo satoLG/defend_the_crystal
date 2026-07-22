@@ -12,6 +12,7 @@ import {
   Grid, cellToWorld, worldToCell, canJumpFrom, enemyJumpShortcut, idx, inBounds,
   computeDashEnd, CRYSTAL_POS, HALF_W, HALF_H,
 } from './grid.js';
+import { PORTAL, CROSS_Z } from '../sanctuary.js';
 import { buildWavePlan, enemyStats } from './waves.js';
 import { clamp, dist2d, nextId } from '../utils.js';
 
@@ -121,13 +122,36 @@ export class Sim {
     return this.players.entities.find((p) => p.id === id);
   }
 
+  // free-roam phases: the sanctuary is open (players may stroll down
+  // the stairs, spawn at the portal, meet the NPCs). Everywhere else —
+  // combat and the build pauses of a running match — it is locked.
+  freeRoamPhase() {
+    return this.phase === 'lobby' || this.phase === 'checkpoint' ||
+      this.phase === 'over' || (this.phase === 'build' && this.wave === 0);
+  }
+
   playerSpawnPos() {
     const n = this.playerCount();
+    // while the sanctuary is open, heroes arrive through the portal at
+    // its far end (facing the crystal all the way up the plaza); joiners
+    // mid-combat drop straight onto the field like before
+    if (this.freeRoamPhase()) {
+      return {
+        x: PORTAL.x + ((n % 3) - 1) * 1.2,
+        z: PORTAL.z - 0.3 - Math.floor(n / 3) * 1.0,
+      };
+    }
     const a = Math.PI * (0.35 + 0.3 * (n % 4));
     return {
       x: clamp(CRYSTAL_POS.x + Math.cos(a) * 2.2, -HALF_W + 1, HALF_W - 1),
       z: clamp(CRYSTAL_POS.z - Math.abs(Math.sin(a)) * 2.2 - 0.6, -HALF_H + 1, HALF_H - 1),
     };
+  }
+
+  // has every hero climbed the stairs and crossed past the crystal to
+  // the battlefield side? Required before the first wave can start.
+  allCrossed() {
+    return this.players.entities.every((p) => p.dead || p.z < CROSS_Z);
   }
 
   xpNext(lvl) { return Math.round(PLAYER.XP_BASE * Math.pow(lvl, PLAYER.XP_POW)); }
@@ -209,10 +233,12 @@ export class Sim {
       z = p.z + (z - p.z) * f;
     }
     // mid-jump the character sails over blocked cells, so skip the
-    // cell collision resolve (bounds are still enforced)
+    // cell collision resolve (bounds are still enforced). The sanctuary
+    // only opens during free-roam phases — once a match is running,
+    // there's no walking back down until the next checkpoint.
     const fixed = p.jumpT > 0
       ? { x: clamp(x, -HALF_W + 0.3, HALF_W - 0.3), z: clamp(z, -HALF_H + 0.3, HALF_H - 0.3) }
-      : this.grid.resolveCircle(x, z, PLAYER.RADIUS, true);
+      : this.grid.resolveCircle(x, z, PLAYER.RADIUS, this.freeRoamPhase());
     p.x = fixed.x; p.z = fixed.z;
     p.moving = !!m;
     if (typeof yaw === 'number') p.yaw = yaw;
@@ -249,6 +275,9 @@ export class Sim {
     this.pending = [];
     this.drops = [];
     this.contReady.clear();
+    // back to a free-roam phase BEFORE re-adding the roster, so every
+    // hero of the fresh defense arrives through the portal again
+    this.phase = 'lobby';
     for (const r of roster) this.addPlayer(r.id, r.name, r.cls, r.colors, r.pet, r.loadout);
     this.start();
     this.emit({ t: 'restart' });
@@ -256,6 +285,12 @@ export class Sim {
 
   startWave() {
     if (this.phase !== 'build' && this.phase !== 'checkpoint') return;
+    // the first wave only starts once EVERY hero has walked up from the
+    // sanctuary and crossed past the crystal onto the battlefield
+    if (this.wave === 0 && !this.allCrossed()) {
+      this.emit({ t: 'toast', k: 'toast.crossFirst', kind: 'error' });
+      return;
+    }
     this.wave += 1;
     this.phase = 'combat';
     this.waveStartCount = this.playerCount();

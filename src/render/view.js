@@ -5,6 +5,9 @@ import { iconPaths } from '../icons.js';
 import { CLASSES, TOWERS, JUMP, ENEMIES, BOSSES, PETS, WEAPONS, classStarterWeapons } from '../config.js';
 import { t, bossNameByKind } from '../i18n.js';
 import { cellToWorld, CRYSTAL_POS, HALF_H, PLAZA } from '../sim/grid.js';
+import {
+  ELEV, terrainY, NPCS, AMBIENT_NPCS, DUMMIES, PORTAL,
+} from '../sanctuary.js';
 import { lerp, angleLerp } from '../utils.js';
 import { sfx } from '../audio.js';
 
@@ -626,15 +629,13 @@ function paintSpecDetail(weapon, spec) {
   }
 }
 
-// the two sanctuary vendors stand where the old fountains were (±4.1,
-// mid-plaza), both turned to face the camera so the player reads them
-// clearly. main.js checks the local hero's distance to unlock each
-// shop, and projects these to screen to pin the shop button under the
-// vendor. Tonho (pets) on the right, Baru (weapons) on the left.
-const VENDOR_Z = HALF_H + PLAZA.DEPTH / 2;
-export const PET_SHOP_POS = { x: 4.1, z: VENDOR_Z };
+// the two sanctuary vendors live in the plaza's far corners now (see
+// sanctuary.js for the whole layout). main.js checks the local hero's
+// distance to unlock each shop, and projects these to screen to pin
+// the shop button under the vendor. Tonho (pets) right, Baru left.
+export const PET_SHOP_POS = { x: NPCS.pets.x, z: NPCS.pets.z };
 export const PET_SHOP_RADIUS = 3.2;
-export const WEAPON_SHOP_POS = { x: -4.1, z: VENDOR_Z };
+export const WEAPON_SHOP_POS = { x: NPCS.weapons.x, z: NPCS.weapons.z };
 export const WEAPON_SHOP_RADIUS = 3.2;
 
 export class GameView {
@@ -740,6 +741,11 @@ export class GameView {
     }
     this.npcs = [];
     this.showPets = []; // the vendor's display critters goofing around
+    // everything living on the sanctuary floor registers here so it can
+    // be hidden (and its updates skipped) while a wave rages — the
+    // sanctuary is far off-camera then, no need to render or animate it
+    this.sanctNodes = [];
+    this.sanctActive = true;
     this.spawnNpcs();
     this.spawnPetShop();
     this.spawnWeaponShop();
@@ -1098,16 +1104,21 @@ export class GameView {
       }
       pet.ownerJumping = ownerJumping;
 
+      // the companion walks the same terrain as its owner (plateau,
+      // stairs, sanctuary floor); the leap arc rides on top of it
+      const baseY = terrainY(g.position.z);
       if (pet.jumpT != null) {
         pet.jumpT += dt;
         if (pet.jumpT <= 0) {
-          g.position.y = 0; // still crouched, waiting out the lag
+          g.position.y = baseY; // still crouched, waiting out the lag
         } else {
           const k = Math.min(pet.jumpT / pet.jumpDur, 1);
-          g.position.y = Math.sin(k * Math.PI) * pet.jumpH;
+          g.position.y = baseY + Math.sin(k * Math.PI) * pet.jumpH;
           g.rotation.x = -Math.sin(k * Math.PI) * 0.35; // nose-down tuck mid-air
-          if (k >= 1) { pet.jumpT = null; g.position.y = 0; g.rotation.x = 0; }
+          if (k >= 1) { pet.jumpT = null; g.position.y = baseY; g.rotation.x = 0; }
         }
+      } else {
+        g.position.y = baseY;
       }
     }
   }
@@ -1301,21 +1312,72 @@ export class GameView {
 
   // ---------------- sanctuary NPCs ----------------
 
-  // two dwellers pottering around the plaza behind the crystal; pure
-  // set dressing for now — walk up to them and they greet you ("Oi!")
+  // the sanctuary's dwellers: the four service NPCs around the fountain
+  // (guide, cheerleader, cleric, drill master — positions & facing in
+  // sanctuary.js, all turned roughly toward the portal so arriving
+  // players read them front-on) plus two ambient strollers
   spawnNpcs() {
     const defs = [
-      // Mira used to idle in the south-west corner — the weapon smith's
-      // hut lives there now, so she strolls closer to the fountains
-      { model: 'char-mage', name: 'Mira', tint: 0x8fd8c8, x: -1.4, z: HALF_H + PLAZA.DEPTH * 0.45, yaw: 0.8 },
-      { model: 'char-tanker', name: 'Bento', tint: 0xd8b06a, x: 2.3, z: HALF_H + PLAZA.DEPTH * 0.24, yaw: -0.7 },
+      { ...NPCS.duvidas, id: 'duvidas', model: 'char-mage', tint: 0xd8c890 },
+      { ...NPCS.incentivo, id: 'incentivo', model: 'char-archer', tint: 0x8fb8ff },
+      { ...NPCS.blessings, id: 'blessings', model: 'char-mage', tint: 0xfff0c8 },
+      { ...NPCS.treino, id: 'treino', model: 'char-berserker', tint: 0xc86a5a },
+      ...AMBIENT_NPCS,
     ];
-    for (const d of defs) this.mkNpc(d);
+    this.npcById = {};
+    for (const d of defs) {
+      const a = this.mkNpc(d);
+      if (d.id) this.npcById[d.id] = a;
+    }
+    this.buildTrainingDummies();
+  }
+
+  // the drill master's target dummies: a wooden post with a crossbar
+  // and a painted target board, standing in his little training yard
+  buildTrainingDummies() {
+    this.dummyProps = [];
+    for (const d of DUMMIES) {
+      const g = this.makeDummyMesh();
+      g.position.set(d.x, terrainY(d.z), d.z);
+      g.rotation.y = Math.PI / 2 + 0.35; // targets angled toward the plaza
+      this.scene.add(g);
+      this.sanctNodes.push(g);
+      this.dummyProps.push(g);
+    }
+  }
+
+  makeDummyMesh() {
+    const g = new THREE.Group();
+    const wood = new THREE.MeshStandardMaterial({ color: 0x8a5a33, roughness: 1, flatShading: true });
+    const woodDark = new THREE.MeshStandardMaterial({ color: 0x6b431f, roughness: 1, flatShading: true });
+    const post = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.12, 1.25, 7), wood);
+    post.position.y = 0.62;
+    post.castShadow = true;
+    g.add(post);
+    const arms = new THREE.Mesh(new THREE.BoxGeometry(0.85, 0.09, 0.09), woodDark);
+    arms.position.y = 1.0;
+    g.add(arms);
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.17, 8, 8), woodDark);
+    head.position.y = 1.38;
+    g.add(head);
+    // the painted target board on the chest
+    const rings = [[0.26, 0xe8e4d8], [0.18, 0xd23b2e], [0.09, 0xe8e4d8], [0.04, 0xd23b2e]];
+    let rz = 0.101;
+    for (const [r, col] of rings) {
+      const disc = new THREE.Mesh(
+        new THREE.CircleGeometry(r, 20),
+        new THREE.MeshStandardMaterial({ color: col, roughness: 0.9 })
+      );
+      disc.position.set(0, 0.95, rz);
+      rz += 0.004;
+      g.add(disc);
+    }
+    return g;
   }
 
   mkNpc(d) {
     const a = this.makeAnimated(d.model);
-    a.group.position.set(d.x, 0, d.z);
+    a.group.position.set(d.x, terrainY(d.z), d.z);
     a.group.rotation.y = d.yaw;
     // dye the outfit so they don't read as one of the player classes
     for (const m of a.mats) m.color.multiply(new THREE.Color(d.tint));
@@ -1331,7 +1393,16 @@ export class GameView {
     this.scene.add(a.group);
     this.setLoco(a, 'idle');
     this.npcs.push(a);
+    this.sanctNodes.push(a.group);
     return a;
+  }
+
+  // hide the sanctuary's dwellers & props while a wave rages (their
+  // per-frame updates are skipped too — see updateNpcs/updateShowPets)
+  setSanctuaryActive(on) {
+    if (this.sanctActive === on) return;
+    this.sanctActive = on;
+    for (const n of this.sanctNodes) n.visible = on;
   }
 
   // ---------------- pet vendor's stall ----------------
@@ -1343,9 +1414,11 @@ export class GameView {
   spawnPetShop() {
     const { x, z } = PET_SHOP_POS;
 
-    // the stall sits just north of (behind) Tonho, opening toward camera
+    // the stall sits well behind Tonho now (he takes a full step out
+    // front so his name is never swallowed by the canopy), opening
+    // toward the portal like everything else on the sanctuary floor
     const stall = new THREE.Group();
-    stall.position.set(x, 0, z - 1.0);
+    stall.position.set(x, -ELEV, z - 1.8);
     const frame = instantiate('dungeon-stall').group;
     stall.add(frame);
     const frameBox = new THREE.Box3().setFromObject(frame);
@@ -1367,20 +1440,22 @@ export class GameView {
     stall.add(sign);
     this.petShopSign = sign;
     this.scene.add(stall);
+    this.sanctNodes.push(stall);
 
-    // Tonho stands out front, turned to face the camera
+    // Tonho stands a clear step out front, facing the portal
     this.mkNpc({
       model: 'char-berserker', name: 'Tonho', tint: 0x9ad86a,
       x, z, yaw: 0, bubble: t('npc.pets'),
     });
 
-    // his display critters potter about out front (camera side), never
+    // his display critters potter about out front (portal side), never
     // hidden by the canopy — idling / eating / dancing / strolling
     for (const [key, ox, oz] of [['pet-dog', -1.9, 1.1], ['pet-cat', 1.7, 1.3]]) {
       const actor = this.makeAnimated(key);
-      actor.group.position.set(x + ox, 0, z + oz);
+      actor.group.position.set(x + ox, -ELEV, z + oz);
       this.scene.add(actor.group);
       this.setLoco(actor, 'idle');
+      this.sanctNodes.push(actor.group);
       this.showPets.push({
         actor, ax: x + ox, az: z + oz,
         mode: 'idle', t: 1 + Math.random() * 2, ang: Math.random() * Math.PI * 2,
@@ -1400,10 +1475,11 @@ export class GameView {
     const { x, z } = WEAPON_SHOP_POS;
 
     // hut origin sits on Baru; the wall is built a bit north (−z) so it
-    // ends up behind him and the whole display opens toward the camera
+    // ends up behind him and the whole display opens toward the portal
     const hut = new THREE.Group();
-    hut.position.set(x, 0, z);
+    hut.position.set(x, -ELEV, z);
     this.scene.add(hut);
+    this.sanctNodes.push(hut);
 
     // measure one wall segment
     let wallH = 1.7, wallW = 2;
@@ -1473,14 +1549,16 @@ export class GameView {
     hut.add(sign);
     this.weaponShopSign = sign;
 
-    // Baru the smith stands out front, turned to face the camera
+    // Baru's wall line sits behind him; he stands a step out front of
+    // the anvil area, facing the portal like Tonho across the plaza
     this.mkNpc({
       model: 'char-tanker', name: 'Baru', tint: 0xd87a5a,
-      x, z, yaw: 0, bubble: t('npc.weapons'),
+      x, z: z + 0.5, yaw: 0, bubble: t('npc.weapons'),
     });
   }
 
   updateShowPets(dt) {
+    if (!this.sanctActive) return;
     const MODES = ['idle', 'eat', 'dance', 'walk', 'gesture-positive'];
     for (const p of this.showPets) {
       p.actor.mixer.update(dt);
@@ -1491,10 +1569,10 @@ export class GameView {
         this.setLoco(p.actor, p.mode === 'walk' ? 'walk' : p.mode, 1);
       }
       if (p.mode === 'walk') {
-        // amble a lazy circle around the home spot
+        // amble a lazy circle around the home spot (sanctuary floor)
         p.ang += dt * 1.1;
         const r = 0.65;
-        p.actor.group.position.set(p.ax + Math.cos(p.ang) * r, 0, p.az + Math.sin(p.ang) * r);
+        p.actor.group.position.set(p.ax + Math.cos(p.ang) * r, -ELEV, p.az + Math.sin(p.ang) * r);
         p.actor.group.rotation.y = Math.atan2(-Math.sin(p.ang), Math.cos(p.ang));
       }
     }
@@ -1503,6 +1581,7 @@ export class GameView {
   }
 
   updateNpcs(dt, selfPos) {
+    if (!this.sanctActive) return;
     for (const a of this.npcs) {
       a.mixer.update(dt);
       const near = !!selfPos && Math.hypot(
@@ -1640,6 +1719,10 @@ export class GameView {
       }
       a.group.position.x = x;
       a.group.position.z = z;
+      // heroes stand on the terrain: 0 on the battlefield plateau,
+      // ramping down the stairs to the sunken sanctuary floor
+      a.baseY = terrainY(z);
+      if (a.jumpT == null) a.group.position.y = a.baseY;
       a.group.rotation.y = yaw;
       if (!dead) {
         const spd = CLASSES[a.cls]?.speed || 4;
@@ -2363,8 +2446,8 @@ export class GameView {
       if (a.jumpT == null) continue;
       a.jumpT += dt;
       const k = Math.min(a.jumpT / a.jumpDur, 1);
-      a.group.position.y = Math.sin(k * Math.PI) * (a.jumpH || JUMP.HEIGHT);
-      if (k >= 1) { a.jumpT = null; a.group.position.y = 0; }
+      a.group.position.y = (a.baseY || 0) + Math.sin(k * Math.PI) * (a.jumpH || JUMP.HEIGHT);
+      if (k >= 1) { a.jumpT = null; a.group.position.y = a.baseY || 0; }
     }
     // vaulting vampires get the same arc (runs after applySnapshot, so
     // it overrides the grounded y the snapshot wrote)

@@ -1,6 +1,10 @@
 import * as THREE from 'three';
 import { GRID } from '../config.js';
 import { cellToWorld, CRYSTAL_POS, HALF_W, HALF_H, PLAZA } from '../sim/grid.js';
+import {
+  ELEV, STAIRS, FOUNTAIN, terrainY, PILLAR_CELLS, STATUE_CELLS,
+  PLAZA_COLUMNS, PLAZA_LANTERNS,
+} from '../sanctuary.js';
 import { instantiate } from './assets.js';
 
 // ============================================================
@@ -66,9 +70,13 @@ export class GameScene {
     this.waters = [];
     this.fogSprites = [];
 
+    this.sanctuaryActive = true;
+
     this.buildLights();
     this.buildTerrain();
+    this.buildStairs();
     this.buildPlaza();
+    this.buildChafariz();
     this.buildCrystal();
     this.buildForest();
     this.buildForestFill();
@@ -237,8 +245,9 @@ export class GameScene {
         }
       }
       if (kind === 2) {
+        // the sanctuary floor sits ELEV below the battlefield plateau
         for (const p of plazaCells) {
-          m.makeTranslation(p.x, -tileTop, p.z);
+          m.makeTranslation(p.x, -ELEV - tileTop, p.z);
           inst.setMatrixAt(i, m);
           inst.setColorAt(i, new THREE.Color(...p.color));
           i++;
@@ -252,18 +261,23 @@ export class GameScene {
     // mossy ground stretching out under the trees. Kept darker than the
     // board so the flanks read as gloom, and biased back in the depth
     // buffer (polygonOffset) so it never z-fights the grid tiles sitting
-    // just above it.
-    const base = new THREE.Mesh(
-      new THREE.PlaneGeometry(240, 240),
-      new THREE.MeshStandardMaterial({
-        color: 0x2b3a1f, roughness: 1,
-        polygonOffset: true, polygonOffsetFactor: 2, polygonOffsetUnits: 2,
-      })
-    );
-    base.rotation.x = -Math.PI / 2;
-    base.position.y = -tileTop - 0.06;
-    base.receiveShadow = true;
-    this.scene.add(base);
+    // just above it. It comes in TWO shelves now: the plateau the board
+    // sits on (north) and the sunken sanctuary level (south), meeting at
+    // the stair line — the cliff faces below cover the seam.
+    const baseMat = new THREE.MeshStandardMaterial({
+      color: 0x2b3a1f, roughness: 1,
+      polygonOffset: true, polygonOffsetFactor: 2, polygonOffsetUnits: 2,
+    });
+    const baseNorth = new THREE.Mesh(new THREE.PlaneGeometry(240, 135), baseMat);
+    baseNorth.rotation.x = -Math.PI / 2;
+    baseNorth.position.set(0, -tileTop - 0.06, STAIRS.TOP - 135 / 2 + 0.4);
+    baseNorth.receiveShadow = true;
+    this.scene.add(baseNorth);
+    const baseSouth = new THREE.Mesh(new THREE.PlaneGeometry(240, 110), baseMat);
+    baseSouth.rotation.x = -Math.PI / 2;
+    baseSouth.position.set(0, -ELEV - tileTop - 0.06, STAIRS.TOP + 110 / 2);
+    baseSouth.receiveShadow = true;
+    this.scene.add(baseSouth);
 
     // subtle color breakup so the surrounding ground reads as terrain.
     // Each patch is nudged a hair higher than the last so overlapping
@@ -282,7 +296,9 @@ export class GameScene {
       if (Math.abs(px) < HALF_W + 1 && pz > -HALF_H - 1 && pz < HALF_H + PLAZA.DEPTH + 1) continue;
       const patch = new THREE.Mesh(patchGeo, patchMats[Math.floor(rng() * patchMats.length)]);
       patch.rotation.x = -Math.PI / 2;
-      patch.position.set(px, -tileTop + 0.02 + i * 0.0004, pz);
+      // patches follow their shelf: plateau level north, sunken south
+      const shelfY = pz > STAIRS.TOP ? -ELEV : 0;
+      patch.position.set(px, shelfY - tileTop + 0.02 + i * 0.0004, pz);
       patch.scale.setScalar(1.5 + rng() * 3.5);
       this.scene.add(patch);
     }
@@ -312,12 +328,51 @@ export class GameScene {
     this.scene.add(vignette);
   }
 
-  // the crystal's pedestal is the ONLY prop on the grid; the sanctuary
-  // proper is a small plaza behind the south edge where players can
-  // stretch their legs between waves
+  // two full-width flights of stone steps drop from the battlefield
+  // plateau down to the sanctuary floor, with a landing between them;
+  // dark cliff faces run along the drop on both flanks so the seam
+  // between the two ground shelves never shows bare
+  buildStairs() {
+    const g = new THREE.Group();
+    const stepMats = [
+      new THREE.MeshStandardMaterial({ color: 0x8b8fa4, roughness: 0.95 }),
+      new THREE.MeshStandardMaterial({ color: 0x7d8296, roughness: 0.95 }),
+    ];
+    const W = PLAZA.HALF_W * 2 + 0.4; // a small lip past the plaza width
+    const stepD = STAIRS.FLIGHT / STAIRS.STEPS;
+    // every tread is a full-height box rising from the sanctuary floor,
+    // so there are no gaps to see under the staircase
+    const mkStep = (z0, top, depth, mi) => {
+      const h = ELEV + top;
+      if (h < 0.02) return;
+      const box = new THREE.Mesh(new THREE.BoxGeometry(W, h, depth), stepMats[mi % 2]);
+      box.position.set(0, -ELEV + h / 2, z0 + depth / 2);
+      box.receiveShadow = true;
+      g.add(box);
+    };
+    for (let i = 0; i < STAIRS.STEPS; i++) {
+      mkStep(STAIRS.TOP + i * stepD, -STAIRS.STEP_H * (i + 1), stepD, i);
+    }
+    mkStep(STAIRS.TOP + STAIRS.FLIGHT, -ELEV / 2, STAIRS.LANDING, 0);
+    const f2 = STAIRS.TOP + STAIRS.FLIGHT + STAIRS.LANDING;
+    for (let i = 0; i < STAIRS.STEPS; i++) {
+      mkStep(f2 + i * stepD, -ELEV / 2 - STAIRS.STEP_H * (i + 1), stepD, i + 1);
+    }
+    this.scene.add(g);
+
+    // cliff faces flanking the drop (outside the stairs' width)
+    const cliffMat = new THREE.MeshStandardMaterial({ color: 0x232032, roughness: 1 });
+    for (const side of [-1, 1]) {
+      const wall = new THREE.Mesh(new THREE.PlaneGeometry(46, ELEV + 0.8), cliffMat);
+      wall.position.set(side * (PLAZA.HALF_W + 0.2 + 23), -ELEV / 2 + 0.1, STAIRS.TOP + 0.02);
+      this.scene.add(wall);
+    }
+  }
+
+  // the crystal's pedestal and its colonnade are the ONLY props on the
+  // grid; the sanctuary proper is the sunken plaza south of the stairs
   buildPlaza() {
     const cz = CRYSTAL_POS.z;
-    const pz = HALF_H + PLAZA.DEPTH / 2; // plaza center line
 
     // pedestal the crystal hovers over
     const altar = instantiate('env-altar').group;
@@ -337,80 +392,134 @@ export class GameScene {
       return group;
     };
 
-    // (the twin fountains that used to sit at ±4.1 were removed — the
-    // two sanctuary vendors stand on those spots now, see GameView)
-
-    // statues guard the plaza entrance, facing the battlefield
-    for (const sx of [-1, 1]) {
+    // the colonnade on the crystal's row: pillars seal every cell except
+    // the single passage beside the crystal on each side, and the middle
+    // cell of each side carries a statue staring straight north — right
+    // at the woods the monsters march out of
+    for (const cell of PILLAR_CELLS) {
+      const w = cellToWorld(cell.c, cell.r);
+      const col = grayStone(instantiate('env-column').group);
+      col.position.set(w.x, 0, w.z);
+      col.scale.setScalar(0.92);
+      this.scene.add(col);
+    }
+    for (const cell of STATUE_CELLS) {
+      const w = cellToWorld(cell.c, cell.r);
       const statue = grayStone(instantiate('env-statue').group);
-      statue.position.set(sx * 5.9, 0, HALF_H + 1.1);
-      statue.rotation.y = Math.PI + sx * 0.25;
-      statue.scale.setScalar(1.15);
+      statue.position.set(w.x, 0, w.z);
+      statue.rotation.y = Math.PI; // staring at the monster woods
+      statue.scale.setScalar(1.12);
       this.scene.add(statue);
     }
 
-    // gray columns mark the plaza's four corners
-    for (const sx of [-1, 1]) {
-      for (const zz of [HALF_H + 0.8, HALF_H + PLAZA.DEPTH - 0.6]) {
-        const col = grayStone(instantiate('env-column').group);
-        col.position.set(sx * (PLAZA.HALF_W - 0.6), 0, zz);
-        this.scene.add(col);
-      }
+    // gray columns mark the sunken plaza's four corners
+    for (const c of PLAZA_COLUMNS) {
+      const col = grayStone(instantiate('env-column').group);
+      col.position.set(c.x, -ELEV, c.z);
+      this.scene.add(col);
     }
 
-    // lanterns light the resting spot and the clearing's bottom corners
+    // lanterns: the battlefield's bottom corners stay lit, and down on
+    // the sanctuary floor they mark the training yard and the portal
     for (const sx of [-1, 1]) {
-      for (const [lx, lz] of [[HALF_W + 0.9, HALF_H - 2], [2.9, HALF_H + PLAZA.DEPTH - 1]]) {
-        const lt = instantiate('env-lantern').group;
-        lt.position.set(sx * lx, 0, lz);
-        this.scene.add(lt);
-        const gl = new THREE.PointLight(0xffc06a, 6, 6, 2);
-        gl.position.set(sx * lx, 1.4, lz);
-        this.scene.add(gl);
-      }
+      const lt = instantiate('env-lantern').group;
+      lt.position.set(sx * (HALF_W + 0.9), 0, HALF_H - 2);
+      this.scene.add(lt);
+      const gl = new THREE.PointLight(0xffc06a, 6, 6, 2);
+      gl.position.set(sx * (HALF_W + 0.9), 1.4, HALF_H - 2);
+      this.scene.add(gl);
+    }
+    for (const l of PLAZA_LANTERNS) {
+      const lt = instantiate('env-lantern').group;
+      lt.position.set(l.x, -ELEV, l.z);
+      this.scene.add(lt);
+      const gl = new THREE.PointLight(0xffc06a, 6, 6, 2);
+      gl.position.set(l.x, -ELEV + 1.4, l.z);
+      this.scene.add(gl);
     }
   }
 
-  makeFountain(x, z, scale = 1) {
+  // the fountain at the heart of the plaza: a wide stone basin sitting
+  // straight on the paving (no pedestal), a low center column with an
+  // upper bowl, shimmering water and pulsing jets — animated only while
+  // the sanctuary is on camera (see setSanctuaryActive)
+  buildChafariz() {
     const g = new THREE.Group();
-    const base = instantiate('env-pillar-small').group;
-    g.add(base);
-    const baseTop = new THREE.Box3().setFromObject(base).max.y;
-    const bowl = instantiate('env-bowl').group;
-    bowl.position.y = baseTop - 0.04;
-    g.add(bowl);
-    const bowlBox = new THREE.Box3().setFromObject(bowl);
+    g.position.set(FOUNTAIN.x, -ELEV, FOUNTAIN.z);
 
+    const stone = new THREE.MeshStandardMaterial({
+      color: 0x9298ac, roughness: 0.9, flatShading: true,
+    });
+    const stoneDark = new THREE.MeshStandardMaterial({
+      color: 0x767b8e, roughness: 1, flatShading: true,
+    });
+    const R = FOUNTAIN.r;
+
+    // octagonal outer wall + flat rim cap
+    const wall = new THREE.Mesh(new THREE.CylinderGeometry(R + 0.1, R + 0.22, 0.52, 8), stone);
+    wall.position.y = 0.26;
+    wall.receiveShadow = true;
+    g.add(wall);
+    const rim = new THREE.Mesh(new THREE.TorusGeometry(R + 0.02, 0.09, 6, 8), stoneDark);
+    rim.rotation.x = -Math.PI / 2;
+    rim.position.y = 0.54;
+    g.add(rim);
+
+    // basin water
     const water = new THREE.Mesh(
-      new THREE.CircleGeometry(0.52, 20),
+      new THREE.CircleGeometry(R - 0.08, 24),
       new THREE.MeshStandardMaterial({
         color: 0x5fc8e8, emissive: 0x1e6e8c, emissiveIntensity: 0.6,
         transparent: true, opacity: 0.9, roughness: 0.15,
       })
     );
     water.rotation.x = -Math.PI / 2;
-    water.position.y = bowlBox.max.y - 0.08;
+    water.position.y = 0.42;
     g.add(water);
 
-    const jet = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.05, 0.028, 0.42, 6),
-      new THREE.MeshBasicMaterial({
-        color: 0x9fdcf0, transparent: true, opacity: 0.4,
-        blending: THREE.AdditiveBlending, depthWrite: false,
-      })
-    );
-    jet.position.y = water.position.y + 0.2;
-    g.add(jet);
+    // center column + small upper bowl with its own water disc
+    const col = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.24, 0.85, 8), stoneDark);
+    col.position.y = 0.62;
+    g.add(col);
+    const bowl = instantiate('env-bowl').group;
+    bowl.scale.setScalar(0.5);
+    bowl.position.y = 1.0;
+    g.add(bowl);
+    const upWater = new THREE.Mesh(new THREE.CircleGeometry(0.3, 16), water.material);
+    upWater.rotation.x = -Math.PI / 2;
+    upWater.position.y = 1.24;
+    g.add(upWater);
 
-    // faint cool glow so the water reads as water from afar
-    const glow = new THREE.PointLight(0x66c8e8, 2.2, 4, 2);
-    glow.position.y = water.position.y + 0.5;
+    // central jet + four thin streams arcing from the upper bowl down
+    // into the basin — plain additive cylinders, feather-cheap
+    const streamMat = new THREE.MeshBasicMaterial({
+      color: 0x9fdcf0, transparent: true, opacity: 0.4,
+      blending: THREE.AdditiveBlending, depthWrite: false,
+    });
+    const jet = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.03, 0.5, 6), streamMat);
+    jet.position.y = 1.48;
+    g.add(jet);
+    const arcs = [];
+    for (let i = 0; i < 4; i++) {
+      const a = (i / 4) * Math.PI * 2 + Math.PI / 4;
+      const stream = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.03, 0.05, 1.05, 5), streamMat.clone()
+      );
+      const midR = (0.34 + (R - 0.2)) / 2;
+      stream.position.set(Math.cos(a) * midR, 0.85, Math.sin(a) * midR);
+      // tilt outward so the stream leans from the upper bowl to the basin
+      stream.rotation.set(Math.sin(a) * 0.75, 0, -Math.cos(a) * 0.75);
+      g.add(stream);
+      arcs.push(stream);
+    }
+
+    // cool glow so the water reads as water from afar
+    const glow = new THREE.PointLight(0x66c8e8, 5, 7, 2);
+    glow.position.y = 1.6;
     g.add(glow);
 
-    g.position.set(x, 0, z);
-    g.scale.setScalar(scale);
     this.scene.add(g);
-    this.waters.push({ water, jet, phase: x * 1.7 });
+    this.waters.push({ water, jet, arcs, phase: 0.7 });
   }
 
   buildCrystal() {
@@ -464,7 +573,9 @@ export class GameScene {
     const placeTree = (x, z, scale, darkness, crooked) => {
       const key = crooked ? 'env-pine-crooked' : 'env-pine';
       const d = instantiate(key, { cloneMaterials: darkness < 0.96 }).group;
-      d.position.set(x, 0, z);
+      // trees south of the board step down the shelves with the terrain,
+      // gradually climbing the drop so the cliff seam stays hidden
+      d.position.set(x, terrainY(z), z);
       d.rotation.y = rng() * Math.PI * 2;
       d.scale.setScalar(scale);
       if (darkness < 0.96) {
@@ -498,7 +609,7 @@ export class GameScene {
       const x = side * (HALF_W + 0.9 + rng() * 6.5);
       if (rng() < 0.22) {
         const rock = instantiate('env-rocks-tall').group;
-        rock.position.set(x, 0, z);
+        rock.position.set(x, terrainY(z), z);
         rock.rotation.y = rng() * Math.PI * 2;
         rock.scale.setScalar(0.6 + rng() * 0.8);
         this.scene.add(rock);
@@ -582,7 +693,7 @@ export class GameScene {
         Math.max(0, z - (southZ + 8)) + Math.max(0, -z - (HALF_H + northD));
       const dark = Math.max(0.08, (base - north * 0.38 - out * 0.05) * (0.85 + rng() * 0.3));
       specs.push({
-        x, z, s: 0.72 + rng() * 0.9, dark,
+        x, z, y: terrainY(z), s: 0.72 + rng() * 0.9, dark,
         crooked: rng() < 0.3, rot: rng() * Math.PI * 2,
       });
     };
@@ -659,7 +770,7 @@ export class GameScene {
         inst.frustumCulled = false;
         list.forEach((t, i) => {
           q.setFromAxisAngle(up, t.rot);
-          m.compose(p.set(t.x, 0, t.z), q, s3.setScalar(t.s));
+          m.compose(p.set(t.x, t.y, t.z), q, s3.setScalar(t.s));
           inst.setMatrixAt(i, m);
           inst.setColorAt(i, col.setScalar(t.dark));
         });
@@ -764,7 +875,7 @@ export class GameScene {
     // edge from the forest mouth down to the plaza
     for (const side of [-1, 1]) {
       for (const [z, op] of [[-HALF_H + 2, 0.16], [-HALF_H + 8, 0.15], [-1, 0.14], [HALF_H - 5, 0.13], [HALF_H + 3, 0.12]]) {
-        mkFog(side * (HALF_W + 2.5), 1.0, z, 7, 3, op);
+        mkFog(side * (HALF_W + 2.5), 1.0 + terrainY(z), z, 7, 3, op);
       }
     }
   }
@@ -973,15 +1084,20 @@ export class GameScene {
   }
 
   // checkpoint stroll: while set, the camera glides off its board
-  // framing and tracks the given point (the local player) up close
-  setFollow(x, z) {
+  // framing and tracks the given point (the local player) up close.
+  // y follows the terrain so the camera dips down the sanctuary stairs.
+  setFollow(x, z, y = 0) {
     if (!this.followGoal) {
-      this.followGoal = new THREE.Vector3(x, 0, z);
-      this.followPos.set(x, 0, z);
+      this.followGoal = new THREE.Vector3(x, y, z);
+      this.followPos.set(x, y, z);
     } else {
-      this.followGoal.set(x, 0, z);
+      this.followGoal.set(x, y, z);
     }
   }
+
+  // while a wave rages the sanctuary is far off-camera — skip its
+  // water animation (and let the view hide its dwellers) for free perf
+  setSanctuaryActive(on) { this.sanctuaryActive = on; }
 
   clearFollow() { this.followGoal = null; }
 
@@ -1000,13 +1116,19 @@ export class GameScene {
     }
     this.crystalLight.intensity = 26 + Math.sin(this.time * 2.2) * 7 + this.crystalHurt * 40;
 
-    // fountain water: shimmering surface + pulsing jet
-    for (const w of this.waters) {
-      w.water.material.emissiveIntensity = 0.55 + Math.sin(this.time * 2.4 + w.phase) * 0.2;
-      w.water.rotation.z += dt * 0.4;
-      const k = 1 + Math.sin(this.time * 5 + w.phase) * 0.12;
-      w.jet.scale.set(1, k, 1);
-      w.jet.material.opacity = 0.32 + Math.sin(this.time * 5 + w.phase) * 0.1;
+    // fountain water: shimmering surface + pulsing jet & streams —
+    // skipped entirely while the sanctuary is off-camera mid-wave
+    if (this.sanctuaryActive) {
+      for (const w of this.waters) {
+        w.water.material.emissiveIntensity = 0.55 + Math.sin(this.time * 2.4 + w.phase) * 0.2;
+        w.water.rotation.z += dt * 0.4;
+        const k = 1 + Math.sin(this.time * 5 + w.phase) * 0.12;
+        w.jet.scale.set(1, k, 1);
+        w.jet.material.opacity = 0.32 + Math.sin(this.time * 5 + w.phase) * 0.1;
+        for (let i = 0; i < (w.arcs?.length || 0); i++) {
+          w.arcs[i].material.opacity = 0.3 + Math.sin(this.time * 4.2 + w.phase + i * 1.6) * 0.12;
+        }
+      }
     }
 
     // fog banks drift slowly between the trees

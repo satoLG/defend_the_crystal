@@ -1,4 +1,9 @@
 import { GRID } from '../config.js';
+import { PLAZA, BLOCKED_CELLS, SANCT_COLLIDERS } from '../sanctuary.js';
+
+// plaza dims re-exported so existing importers keep working — the
+// layout itself now lives in sanctuary.js alongside the rest
+export { PLAZA };
 
 // ============================================================
 // Grid model: blocked cells, buildability rules, and a BFS
@@ -24,12 +29,6 @@ export const worldToCell = (x, z) => ({
 export const CRYSTAL_POS = cellToWorld(CRYSTAL.c, CRYSTAL.r);
 export const HALF_W = (COLS * CELL) / 2;
 export const HALF_H = (ROWS * CELL) / 2;
-
-// sanctuary plaza behind the board's south edge — a paved resting
-// spot players can wander into between waves (enemies never path
-// there; their goal is the crystal, which lives on the board).
-// Deep enough to actually stroll around in during checkpoints.
-export const PLAZA = { HALF_W: 8, DEPTH: 13 };
 
 // Jump check: standing at (x,z) facing along yaw, can the character
 // vault over a run of consecutive blocked cells (towers/obstacles) and
@@ -182,7 +181,15 @@ export class Grid {
     this.blocked = new Uint8Array(COLS * ROWS);
     this.dist = new Int32Array(COLS * ROWS);
     this.next = new Int32Array(COLS * ROWS); // index of next cell toward crystal, -1 = none/goal
+    this.resetBlocked();
     this.computeFlow();
+  }
+
+  // wipe every dynamic block (towers/obstacles) but keep the permanent
+  // ones — the colonnade of pillars & statues flanking the crystal
+  resetBlocked() {
+    this.blocked.fill(0);
+    for (const b of BLOCKED_CELLS) this.blocked[idx(b.c, b.r)] = 1;
   }
 
   isBlocked(c, r) { return !inBounds(c, r) || this.blocked[idx(c, r)] === 1; }
@@ -330,6 +337,19 @@ export class Grid {
           x = px + (dx / d) * radius;
           z = pz + (dz / d) * radius;
         }
+      }
+    }
+    // sanctuary props & dwellers (fountain, stalls, NPCs, dummies) are
+    // solid too — plain circle push-outs, players only, plaza only
+    if (allowPlaza && z > HALF_H) {
+      for (const col of SANCT_COLLIDERS) {
+        const dx = x - col.x, dz = z - col.z;
+        const rr = radius + col.r;
+        const d2 = dx * dx + dz * dz;
+        if (d2 >= rr * rr || d2 < 1e-6) continue;
+        const d = Math.sqrt(d2);
+        x = col.x + (dx / d) * rr;
+        z = col.z + (dz / d) * rr;
       }
     }
     return { x, z };
