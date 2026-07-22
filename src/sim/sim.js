@@ -1874,7 +1874,10 @@ export class Sim {
       bt: this.buildTimerOn ? rnd2(Math.max(this.buildT, 0)) : -1,
       pts: Math.round(this.points),
       br: this.breaches,
-      left: this.spawnQueue.length + this.enemies.entities.length +
+      // training dummies are enemies mechanically but never part of a
+      // wave — keep them out of the "enemies left" counter
+      left: this.spawnQueue.length +
+        this.enemies.entities.filter((e) => !e.dummy).length +
         this.graves.reduce((s, g) => s + g.spawnsLeft, 0),
       cont: [...this.contReady],
       pl: this.players.entities.map((p) => [
