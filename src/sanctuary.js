@@ -85,10 +85,33 @@ export const BLOCKED_CELLS = [...PILLAR_CELLS, ...STATUE_CELLS];
 // ---- inhabitants -------------------------------------------------
 // Every NPC faces roughly toward the portal (south, +z) so arriving
 // players read them front-on. x/z are sanctuary-floor positions.
+// plaza-tile helpers (same lattice as the board, extended south) so the
+// stalls can snap onto whole floor tiles
+const tileX = (c) => (c - (COLS - 1) / 2) * CELL;
+const tileZ = (r) => (r - (ROWS - 1) / 2) * CELL;
+// the plaza's "inside" the NPCs turn to face (roughly the mid-plaza)
+const PLAZA_FOCUS = { x: 0, z: PZ + 9 };
+const faceInward = (x, z) => Math.atan2(PLAZA_FOCUS.x - x, PLAZA_FOCUS.z - z);
+
+// Tonho's stall snaps onto a 2×2 block of floor tiles in the back-right
+// corner; those four tiles are rendered as grass (see scene.js) and the
+// stall + elephant center on the block. Baru's forge mirrors it, back-left.
+export const PET_STALL_CELLS = [
+  { c: 6, r: 23 }, { c: 7, r: 23 }, { c: 6, r: 24 }, { c: 7, r: 24 },
+];
+export const PET_STALL = { x: (tileX(6) + tileX(7)) / 2, z: (tileZ(23) + tileZ(24)) / 2 };
+export const WEAPON_STALL = { x: -PET_STALL.x, z: PET_STALL.z };
+// each vendor steps a stride out in front of their stall toward the plaza
+const stallVendor = (stall) => {
+  const yaw = faceInward(stall.x, stall.z);
+  // step forward (toward the plaza) along the facing direction
+  return { x: stall.x + Math.sin(yaw) * 1.7, z: stall.z + Math.cos(yaw) * 1.7, yaw };
+};
+
 export const NPCS = {
-  // vendors moved to the far corners so the plaza floor stays roomy
-  pets:      { name: 'Tonho', x: 5.4,  z: PZ + 17.2, yaw: 0 },
-  weapons:   { name: 'Baru',  x: -5.4, z: PZ + 17.2, yaw: 0 },
+  // vendors tucked into the back corners, turned to face the plaza
+  pets:      { name: 'Tonho', ...stallVendor(PET_STALL) },
+  weapons:   { name: 'Baru',  ...stallVendor(WEAPON_STALL) },
   // the friendly guide by the fountain who explains the game
   duvidas:   { name: 'Theo',  x: 1.9,  z: PZ + 14.8, yaw: 0.16 },
   // the cheerleader near the stairs, always shouting encouragement
@@ -172,13 +195,10 @@ export function findColliderJump(x, z, radius, heading = null) {
 // walks through the fountain, the stalls or a dweller
 export const SANCT_COLLIDERS = [
   { x: FOUNTAIN.x, z: FOUNTAIN.z, r: FOUNTAIN.r + 0.15 },
-  // Tonho's stall canopy (behind him) & Baru's forge wall segments
-  { x: NPCS.pets.x, z: NPCS.pets.z - 1.8, r: 1.5 },
-  { x: NPCS.weapons.x - 1, z: NPCS.weapons.z - 1.5, r: 1.2 },
-  { x: NPCS.weapons.x + 1, z: NPCS.weapons.z - 1.5, r: 1.2 },
-  { x: NPCS.weapons.x + 1.15, z: NPCS.weapons.z + 0.35, r: 0.5 }, // anvil
+  // the stalls sit in the corners — a solid block over each canopy
+  { x: PET_STALL.x, z: PET_STALL.z, r: 1.6 },
+  { x: WEAPON_STALL.x, z: WEAPON_STALL.z, r: 1.6 },
   ...Object.values(NPCS).map((n) => ({ x: n.x, z: n.z, r: 0.55 })),
-  ...AMBIENT_NPCS.map((n) => ({ x: n.x, z: n.z, r: 0.5 })),
   ...DUMMIES.map((d) => ({ x: d.x, z: d.z, r: 0.5 })),
   ...PLAZA_COLUMNS.map((c) => ({ x: c.x, z: c.z, r: 0.55 })),
   ...PLAZA_LANTERNS.map((l) => ({ x: l.x, z: l.z, r: 0.35 })),

@@ -6,7 +6,7 @@ import { CLASSES, TOWERS, JUMP, ENEMIES, BOSSES, PETS, WEAPONS, classStarterWeap
 import { t, bossNameByKind } from '../i18n.js';
 import { cellToWorld, CRYSTAL_POS, HALF_H, PLAZA } from '../sim/grid.js';
 import {
-  ELEV, terrainY, NPCS, AMBIENT_NPCS, DUMMIES, PORTAL,
+  ELEV, terrainY, NPCS, AMBIENT_NPCS, DUMMIES, PORTAL, PET_STALL, WEAPON_STALL,
 } from '../sanctuary.js';
 import { lerp, angleLerp } from '../utils.js';
 import { sfx } from '../audio.js';
@@ -1764,16 +1764,29 @@ export class GameView {
   // and two of his critters loafing about out front — impossible to
   // mistake for anything but the pet shop.
   spawnPetShop() {
-    const { x, z } = PET_SHOP_POS;
+    const yaw = NPCS.pets.yaw;
 
-    // the stall sits well behind Tonho now (he takes a full step out
-    // front so his name is never swallowed by the canopy), opening
-    // toward the portal like everything else on the sanctuary floor
+    // the stall is snapped onto its grass block in the back corner and
+    // rotated to open toward the plaza (local +z = the facing direction);
+    // Tonho steps out in front of it
     const stall = new THREE.Group();
-    stall.position.set(x, -ELEV, z - 1.8);
+    stall.position.set(PET_STALL.x, -ELEV, PET_STALL.z);
+    stall.rotation.y = yaw;
     const frame = instantiate('dungeon-stall').group;
     stall.add(frame);
     const frameBox = new THREE.Box3().setFromObject(frame);
+
+    // a big elephant loafing in the middle of the stall
+    const elephant = this.makeAnimated('pet-elephant');
+    elephant.group.scale.setScalar(1.7);
+    elephant.group.position.set(0, 0, 0.1);
+    // local +z is the stall's facing (toward the plaza), so leave it at 0
+    stall.add(elephant.group);
+    this.setLoco(elephant, 'idle');
+    this.showPets.push({
+      actor: elephant, ax: null, az: null, mode: 'idle',
+      t: 3 + Math.random() * 3, ang: 0, stationary: true,
+    });
     // banners hang off the canopy's front corners (facing the camera)
     for (const sx of [-1, 1]) {
       const banner = instantiate('dungeon-banner', { shadows: false }).group;
@@ -1794,22 +1807,26 @@ export class GameView {
     this.scene.add(stall);
     this.sanctNodes.push(stall);
 
-    // Tonho stands a clear step out front, facing the portal
+    // Tonho stands a clear step out front, turned to face the plaza
     this.mkNpc({
       model: 'char-male-f', name: 'Tonho',
-      x, z, yaw: 0, bubble: t('npc.pets'),
+      x: NPCS.pets.x, z: NPCS.pets.z, yaw, bubble: t('npc.pets'),
     });
 
-    // his display critters potter about out front (portal side), never
-    // hidden by the canopy — idling / eating / dancing / strolling
-    for (const [key, ox, oz] of [['pet-dog', -1.9, 1.1], ['pet-cat', 1.7, 1.3]]) {
+    // his display critters potter about out front of the stall (plaza
+    // side) — offsets rotated into world space by the stall's facing
+    const fwd = { x: Math.sin(yaw), z: Math.cos(yaw) };     // toward plaza
+    const rgt = { x: Math.cos(yaw), z: -Math.sin(yaw) };    // stall's right
+    for (const [key, of, os] of [['pet-dog', 2.0, -0.9], ['pet-cat', 2.2, 0.8]]) {
+      const wx = PET_STALL.x + fwd.x * of + rgt.x * os;
+      const wz = PET_STALL.z + fwd.z * of + rgt.z * os;
       const actor = this.makeAnimated(key);
-      actor.group.position.set(x + ox, -ELEV, z + oz);
+      actor.group.position.set(wx, -ELEV, wz);
       this.scene.add(actor.group);
       this.setLoco(actor, 'idle');
       this.sanctNodes.push(actor.group);
       this.showPets.push({
-        actor, ax: x + ox, az: z + oz,
+        actor, ax: wx, az: wz,
         mode: 'idle', t: 1 + Math.random() * 2, ang: Math.random() * Math.PI * 2,
       });
     }
@@ -1824,12 +1841,14 @@ export class GameView {
   // ground out front, and a spinning trophy for a shop sign. Everything
   // is laid out so no two models overlap. Same trade rules as the pets.
   spawnWeaponShop() {
-    const { x, z } = WEAPON_SHOP_POS;
+    const yaw = NPCS.weapons.yaw;
 
-    // hut origin sits on Baru; the wall is built a bit north (−z) so it
-    // ends up behind him and the whole display opens toward the portal
+    // hut anchored on its corner block and rotated to open toward the
+    // plaza (local +z = facing); the wall builds behind (local −z), so
+    // the whole forge opens inward. Baru steps out in front.
     const hut = new THREE.Group();
-    hut.position.set(x, -ELEV, z);
+    hut.position.set(WEAPON_STALL.x, -ELEV, WEAPON_STALL.z);
+    hut.rotation.y = yaw;
     this.scene.add(hut);
     this.sanctNodes.push(hut);
 
@@ -1901,11 +1920,11 @@ export class GameView {
     hut.add(sign);
     this.weaponShopSign = sign;
 
-    // Baru's wall line sits behind him; he stands a step out front of
-    // the anvil area, facing the portal like Tonho across the plaza
+    // Baru's wall line sits behind him; he stands a step out front,
+    // turned to face the plaza like Tonho across the way
     this.mkNpc({
       model: 'char-tanker', name: 'Baru', tint: 0xd87a5a,
-      x, z: z + 0.5, yaw: 0, bubble: t('npc.weapons'),
+      x: NPCS.weapons.x, z: NPCS.weapons.z, yaw, bubble: t('npc.weapons'),
     });
   }
 
@@ -1917,9 +1936,13 @@ export class GameView {
       p.t -= dt;
       if (p.t <= 0) {
         p.t = 2.2 + Math.random() * 3.2;
-        p.mode = MODES[(Math.random() * MODES.length) | 0];
+        // the stall elephant just loafs — idle / eat, never walks off
+        p.mode = p.stationary
+          ? (Math.random() < 0.5 ? 'idle' : 'eat')
+          : MODES[(Math.random() * MODES.length) | 0];
         this.setLoco(p.actor, p.mode === 'walk' ? 'walk' : p.mode, 1);
       }
+      if (p.stationary) continue; // parented into the stall — no wandering
       if (p.mode === 'walk') {
         // amble a lazy circle around the home spot (sanctuary floor)
         p.ang += dt * 1.1;

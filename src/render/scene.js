@@ -3,7 +3,7 @@ import { GRID } from '../config.js';
 import { cellToWorld, CRYSTAL_POS, HALF_W, HALF_H, PLAZA } from '../sim/grid.js';
 import {
   ELEV, STAIRS, FOUNTAIN, terrainY, PILLAR_CELLS, STATUE_CELLS,
-  PLAZA_COLUMNS, PLAZA_LANTERNS,
+  PLAZA_COLUMNS, PLAZA_LANTERNS, PET_STALL_CELLS,
 } from '../sanctuary.js';
 import { instantiate } from './assets.js';
 
@@ -218,13 +218,23 @@ export class GameScene {
       }
     }
 
-    // stone paving continues past the south edge as the plaza floor
+    // stone paving continues past the south edge as the plaza floor —
+    // except the 2×2 block under Tonho's stall, which is a patch of grass
+    const isGrassTile = (c, r) => PET_STALL_CELLS.some((t) => t.c === c && t.r === r);
     const plazaCells = [];
+    const plazaGrassCells = [];
     const plazaRows = Math.round(PLAZA.DEPTH / CELL);
     for (let pr = 0; pr < plazaRows; pr++) {
       for (let c = 0; c < COLS; c++) {
-        const w = cellToWorld(c, ROWS + pr);
+        const r = ROWS + pr;
+        const w = cellToWorld(c, r);
         if (Math.abs(w.x) > PLAZA.HALF_W) continue;
+        if (isGrassTile(c, r)) {
+          const tone = GRASS_TONES[Math.floor(rng() * GRASS_TONES.length)];
+          const jit = 0.9 + rng() * 0.18;
+          plazaGrassCells.push({ x: w.x, z: w.z, color: [tone[0] * jit, tone[1] * jit, tone[2] * jit] });
+          continue;
+        }
         const tone = STONE_TONES[Math.floor(rng() * STONE_TONES.length)];
         const jit = 0.9 + rng() * 0.16;
         plazaCells.push({ x: w.x, z: w.z, color: [tone[0] * jit, tone[1] * jit, tone[2] * jit] });
@@ -263,6 +273,19 @@ export class GameScene {
           i++;
         }
       }
+      inst.instanceColor.needsUpdate = true;
+      this.scene.add(inst);
+    }
+
+    // the grass patch under Tonho's stall (its own little instanced mesh)
+    if (plazaGrassCells.length) {
+      const inst = new THREE.InstancedMesh(grass.geo, grass.mat, plazaGrassCells.length);
+      inst.receiveShadow = true;
+      plazaGrassCells.forEach((p, gi) => {
+        m.makeTranslation(p.x, -ELEV - tileTop, p.z);
+        inst.setMatrixAt(gi, m);
+        inst.setColorAt(gi, new THREE.Color(...p.color));
+      });
       inst.instanceColor.needsUpdate = true;
       this.scene.add(inst);
     }
