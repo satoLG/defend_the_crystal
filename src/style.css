@@ -1107,6 +1107,26 @@ input:focus { border-color: var(--gold); }
   50% { box-shadow: 0 4px 16px rgba(0, 0, 0, 0.55), 0 0 26px rgba(242, 242, 245, 0.7); }
 }
 
+/* black-screen intro: the crystal's plea typed out letter by letter
+   just before the hero materializes at the sanctuary portal */
+#intro-overlay {
+  position: fixed; inset: 0; z-index: 220; background: #000;
+  display: flex; align-items: center; justify-content: center;
+  opacity: 1; transition: opacity 0.75s ease; pointer-events: all;
+}
+#intro-overlay.fade { opacity: 0; pointer-events: none; }
+#intro-overlay.hidden { display: none; }
+#intro-text {
+  font-weight: 800; letter-spacing: 0.2em; text-align: center;
+  font-size: clamp(1.1rem, 4.2vw, 2rem); color: #e8e4f0; padding: 0 18px;
+  text-shadow: 0 0 22px rgba(154, 74, 224, 0.85);
+}
+#intro-text::after {
+  content: '▌'; margin-left: 5px; color: #b27aff;
+  animation: intro-caret 0.8s steps(1) infinite;
+}
+@keyframes intro-caret { 50% { opacity: 0; } }
+
 /* weapon tier badges: Normal → Gold → Crystal */
 .wpn-tier {
   display: inline-block; padding: 1px 7px; border-radius: 8px;

@@ -981,6 +981,14 @@ export class GameView {
       a.group.add(a.label);
     }
 
+    // arriving through the sanctuary portal: flare it open and let the
+    // hero materialize out of it (scale-in handled per-frame in update)
+    if (Math.hypot(row[PL.X] - PORTAL.x, row[PL.Z] - PORTAL.z) < 3.5) {
+      this.spawnPortalFx();
+      a.spawnT = 0;
+      a.group.scale.setScalar(0.01);
+    }
+
     this.scene.add(a.group);
     this.players.set(id, a);
     this.setLoco(a, 'idle');
@@ -1403,6 +1411,102 @@ export class GameView {
     if (this.sanctActive === on) return;
     this.sanctActive = on;
     for (const n of this.sanctNodes) n.visible = on;
+  }
+
+  // ---------------- the arrival portal ----------------
+
+  // swirling vortex shader for the round portal plane — arms spiraling
+  // into a bright core, ringed by a purple glow; uOpen drives both the
+  // flare-open and the fade-out so one uniform animates the whole life
+  makePortalMaterial() {
+    return new THREE.ShaderMaterial({
+      transparent: true, depthWrite: false, side: THREE.DoubleSide,
+      blending: THREE.AdditiveBlending,
+      uniforms: { uT: { value: 0 }, uOpen: { value: 0 } },
+      vertexShader: `
+        varying vec2 vUv;
+        void main() {
+          vUv = uv * 2.0 - 1.0;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }`,
+      fragmentShader: `
+        varying vec2 vUv;
+        uniform float uT, uOpen;
+        void main() {
+          float r = length(vUv);
+          if (r > 1.0) discard;
+          float ang = atan(vUv.y, vUv.x);
+          float swirl = 0.5 + 0.5 * sin(ang * 3.0 + uT * 3.2 - r * 10.0);
+          float rings = 0.5 + 0.5 * sin(r * 20.0 - uT * 6.0);
+          float core = smoothstep(0.4, 0.0, r);
+          float edge = smoothstep(1.0, 0.78, r) * smoothstep(0.5, 0.9, r);
+          vec3 purple = vec3(0.62, 0.35, 0.95);
+          vec3 blue = vec3(0.42, 0.55, 1.0);
+          vec3 col = mix(purple, blue, rings * 0.5) * (0.4 + 0.6 * swirl);
+          col += vec3(0.92, 0.82, 1.0) * core * 1.5;
+          col += purple * edge * 1.4;
+          float alpha = uOpen * clamp(edge + core + swirl * 0.35 * (1.0 - r), 0.0, 1.0);
+          gl_FragColor = vec4(col * uOpen, alpha);
+        }`,
+    });
+  }
+
+  // flare the arrival portal open: it expands under the spawning hero,
+  // holds while they materialize, then shrinks away to nothing. Called
+  // once per arriving player — an already-open portal just lingers.
+  spawnPortalFx() {
+    if (this.portalFx) { this.portalFx.hold = Math.max(this.portalFx.hold, 1.1); return; }
+    if (!this._portalMat) this._portalMat = this.makePortalMaterial();
+    const y = terrainY(PORTAL.z);
+    const disc = new THREE.Mesh(new THREE.CircleGeometry(PORTAL.r, 48), this._portalMat);
+    disc.rotation.x = -Math.PI / 2;
+    disc.position.set(PORTAL.x, y + 0.06, PORTAL.z);
+    disc.renderOrder = 3;
+    // soft light column rising off the vortex
+    const beam = new THREE.Mesh(
+      new THREE.CylinderGeometry(PORTAL.r * 0.5, PORTAL.r * 0.92, 2.8, 20, 1, true),
+      new THREE.MeshBasicMaterial({
+        color: 0xb27aff, transparent: true, opacity: 0,
+        blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide,
+      })
+    );
+    beam.position.set(PORTAL.x, y + 1.4, PORTAL.z);
+    const light = new THREE.PointLight(0x9a4ae0, 0, 10, 2);
+    light.position.set(PORTAL.x, y + 1.2, PORTAL.z);
+    this.scene.add(disc, beam, light);
+    this.portalFx = { disc, beam, light, t: 0, hold: 1.1, closing: 0 };
+  }
+
+  // per-frame portal life-cycle: flare open (with a little overshoot),
+  // hold while heroes step through, shrink & die
+  updatePortal(dt) {
+    const fx = this.portalFx;
+    if (!fx) return;
+    fx.t += dt;
+    this._portalMat.uniforms.uT.value = this.time;
+    const OPEN = 0.38, CLOSE = 0.5;
+    let open;
+    if (fx.t < OPEN) {
+      const k = fx.t / OPEN;
+      open = 1 - Math.pow(1 - k, 3);
+      open *= 1 + 0.18 * Math.sin(k * Math.PI); // overshoot pop
+    } else if (fx.hold > 0) {
+      fx.hold -= dt;
+      open = 1;
+    } else {
+      fx.closing += dt;
+      open = Math.max(1 - fx.closing / CLOSE, 0);
+      if (open <= 0) {
+        this.scene.remove(fx.disc, fx.beam, fx.light);
+        this.portalFx = null;
+        return;
+      }
+    }
+    this._portalMat.uniforms.uOpen.value = Math.min(open, 1);
+    fx.disc.scale.setScalar(Math.max(open, 0.001));
+    fx.beam.scale.set(open, 0.55 + open * 0.45, open);
+    fx.beam.material.opacity = 0.32 * open;
+    fx.light.intensity = 24 * open;
   }
 
   // ---------------- pet vendor's stall ----------------
@@ -1950,6 +2054,12 @@ export class GameView {
       }
       case 'respawn': {
         this.burst(ev.x, ev.z, 1.4, 0x8fe98f);
+        // checkpoint respawns come back through the sanctuary portal
+        if (Math.hypot(ev.x - PORTAL.x, ev.z - PORTAL.z) < 3.5) {
+          this.spawnPortalFx();
+          const a = this.players.get(ev.id);
+          if (a) { a.spawnT = 0; a.group.scale.setScalar(0.01); }
+        }
         break;
       }
       case 'crit': {
@@ -2086,7 +2196,8 @@ export class GameView {
   // one-shot rising text callout ("CRIT!") anchored in world space
   spawnFloatText(text, x, z, color) {
     const spr = this.makeTextSprite(text, color, 1.7);
-    spr.position.set(x, 1.35, z);
+    spr.position.set(x, terrainY(z) + 1.35, z);
+    spr.userData.baseY = terrainY(z);
     this.scene.add(spr);
     this.effects.push({ type: 'float-text', mesh: spr, t: 0, dur: 0.7 });
   }
@@ -2157,7 +2268,7 @@ export class GameView {
     lance.position.z = 0.65;
     const holder = new THREE.Group();
     holder.add(lance);
-    holder.position.set(x, 0.85, z);
+    holder.position.set(x, terrainY(z) + 0.85, z);
     holder.rotation.y = yaw;
     this.scene.add(holder);
     this.effects.push({ mesh: holder, inner: lance, t: 0, dur: 0.2, type: 'thrust' });
@@ -2167,6 +2278,7 @@ export class GameView {
   // impact spot out front plus a quick vertical slam streak, no slicing
   spawnBash(x, z, yaw, color) {
     const ix = x + Math.sin(yaw) * 0.95, iz = z + Math.cos(yaw) * 0.95;
+    const gy = terrainY(iz);
     // ground shockwave
     const ring = new THREE.Mesh(
       this._ringGeo,
@@ -2176,7 +2288,7 @@ export class GameView {
       })
     );
     ring.rotation.x = -Math.PI / 2;
-    ring.position.set(ix, 0.06, iz);
+    ring.position.set(ix, gy + 0.06, iz);
     ring.scale.setScalar(0.2);
     this.scene.add(ring);
     this.effects.push({ mesh: ring, t: 0, dur: 0.32, type: 'burst', r: 1.5 });
@@ -2188,7 +2300,7 @@ export class GameView {
         depthWrite: false, blending: THREE.AdditiveBlending,
       })
     );
-    slam.position.set(ix, 0.6, iz);
+    slam.position.set(ix, gy + 0.6, iz);
     this.scene.add(slam);
     this.effects.push({ mesh: slam, inner: slam, t: 0, dur: 0.16, type: 'slam' });
   }
@@ -2208,7 +2320,7 @@ export class GameView {
     arc.renderOrder = 8;
     const holder = new THREE.Group();
     holder.add(arc);
-    holder.position.set(x, 0, z);
+    holder.position.set(x, terrainY(z), z);
     arc.position.set(0, 0.75, 0);
     // ring theta 0 is +X; rotate so the arc opens toward the facing direction
     holder.rotation.y = yaw - Math.PI / 2;
@@ -2238,10 +2350,14 @@ export class GameView {
       );
       bolt.add(core, halo);
       this.scene.add(bolt);
+      const from = new THREE.Vector3(...ev.f);
+      const to = new THREE.Vector3(...ev.to);
+      from.y += terrainY(from.z);
+      to.y += terrainY(to.z);
       this.projectiles.push({
         mesh: bolt,
-        from: new THREE.Vector3(...ev.f),
-        to: new THREE.Vector3(...ev.to),
+        from,
+        to,
         ft: Math.max(ev.ft, 0.05),
         t: 0, lob: false, kind: 'magic',
       });
@@ -2267,10 +2383,16 @@ export class GameView {
       });
     }
     this.scene.add(mesh);
+    const from = new THREE.Vector3(...ev.f);
+    const to = new THREE.Vector3(...ev.to);
+    // the sim's heights are relative to the local ground — offset them
+    // by the terrain so training shots down in the sanctuary fly level
+    from.y += terrainY(from.z);
+    to.y += terrainY(to.z);
     this.projectiles.push({
       mesh,
-      from: new THREE.Vector3(...ev.f),
-      to: new THREE.Vector3(...ev.to),
+      from,
+      to,
       ft: Math.max(ev.ft, 0.05),
       t: 0,
       lob: !!ev.lob,
@@ -2291,7 +2413,7 @@ export class GameView {
         new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.22, depthWrite: false })
       );
       warn.rotation.x = -Math.PI / 2;
-      warn.position.set(ev.x, 0.05, ev.z);
+      warn.position.set(ev.x, terrainY(ev.z) + 0.05, ev.z);
       warn.scale.setScalar(ev.r);
       this.scene.add(warn);
       this.effects.push({ mesh: warn, t: 0, dur: ev.ft, type: 'warn' });
@@ -2307,7 +2429,8 @@ export class GameView {
       new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.85, depthWrite: false, side: THREE.DoubleSide })
     );
     ring.rotation.x = -Math.PI / 2;
-    ring.position.set(x, 0.08, z);
+    // bursts land on the ground wherever it is — board or sanctuary floor
+    ring.position.set(x, terrainY(z) + 0.08, z);
     ring.scale.setScalar(0.2);
     this.scene.add(ring);
     this.effects.push({ mesh: ring, t: 0, dur: 0.35, type: 'burst', r });
@@ -2435,9 +2558,18 @@ export class GameView {
     this.updateNpcs(dt, selfPos);
     this.updateShowPets(dt);
     this.updatePets(dt);
+    this.updatePortal(dt);
     this.animateStatusFx(dt);
 
     for (const a of this.players.values()) {
+      // materializing out of the arrival portal: pop-in scale
+      if (a.spawnT != null) {
+        a.spawnT += dt;
+        const k = Math.min(a.spawnT / 0.55, 1);
+        const s = k * (1 + 0.16 * Math.sin(k * Math.PI));
+        a.group.scale.setScalar(Math.max(s, 0.01));
+        if (k >= 1) { a.spawnT = null; a.group.scale.setScalar(1); }
+      }
       // orbiting stone slabs of the tanker's wall mode
       if (a.wallFx) {
         a.wallFx.rotation.y += dt * 1.7;
@@ -2557,7 +2689,7 @@ export class GameView {
       } else if (e.type === 'grave-sink') {
         e.mesh.position.y = -1.3 * easeOut(k);
       } else if (e.type === 'float-text') {
-        e.mesh.position.y = 1.35 + easeOut(k) * 0.85;
+        e.mesh.position.y = (e.mesh.userData.baseY || 0) + 1.35 + easeOut(k) * 0.85;
         e.mesh.material.opacity = 1 - k * k;
       } else if (e.type === 'slash') {
         // sweep the arc across the front and fade it out
@@ -2632,6 +2764,10 @@ export class GameView {
     this.projectiles = []; this.effects = []; this.corpses = [];
     this.xpOrbs.count = 0; this.ptsOrbs.count = 0; this.goldOrbs.count = 0;
     this.goldSparkle.count = 0;
+    if (this.portalFx) {
+      this.scene.remove(this.portalFx.disc, this.portalFx.beam, this.portalFx.light);
+      this.portalFx = null;
+    }
     this.clearGhost();
   }
 }

@@ -326,6 +326,30 @@ export class UI {
     setTimeout(() => el.remove(), 2800);
   }
 
+  // full-black screen typing the crystal's plea, letter by letter, just
+  // before the hero materializes at the sanctuary portal
+  playIntro() {
+    const ov = $('intro-overlay'), txt = $('intro-text');
+    if (!ov) return;
+    clearTimeout(this._introT);
+    clearInterval(this._introI);
+    ov.classList.remove('hidden', 'fade');
+    txt.textContent = '';
+    const msg = t('intro.defend');
+    let i = 0;
+    this._introI = setInterval(() => {
+      i += 1;
+      txt.textContent = msg.slice(0, i);
+      if (i >= msg.length) {
+        clearInterval(this._introI);
+        this._introT = setTimeout(() => {
+          ov.classList.add('fade');
+          this._introT = setTimeout(() => ov.classList.add('hidden'), 780);
+        }, 950);
+      }
+    }, 62);
+  }
+
   // huge dramatic splash when a (mini-)boss stomps onto the field
   showBossBanner(name, flavor, mini = false) {
     const b = $('boss-banner');

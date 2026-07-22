@@ -299,6 +299,9 @@ function startMatch() {
 function enterGame() {
   state.started = true;
   state.over = false;
+  // black screen typing the crystal's plea while the portal flares
+  // open behind it — every player entering the match gets the moment
+  ui.playIntro();
   ui.showHud();
   sfx.notify();
 }
@@ -706,6 +709,7 @@ function handleEvent(ev) {
       ui.hideGameOver();
       view.reset();
       syncSelfFromSim();
+      ui.playIntro(); // the party re-enters through the portal
       ui.toast(t('toast.newDefense'), 'gold');
       break;
   }
