@@ -76,23 +76,50 @@ const JUMP_DIRS = [
 
 // Proximity jump: standing at (x,z), is there ANY adjacent wall we can
 // vault, regardless of which way the character is facing? So the hero can
-// hop a block just by being next to it while looking at a foe. When
-// `preferYaw` is given (the player's movement heading) and several walls
-// are jumpable, the one most aligned with it wins. Returns the same shape
-// as canJumpFrom plus `yaw` (the cardinal jumped along), or null.
+// hop a block just by being next to it while looking at a foe.
+//
+// When more than one wall is jumpable (the player is wedged near two
+// obstacles), the tie is broken the way the player reads it:
+//   1. mostly by the way they're pushing — the movement heading `preferYaw`;
+//   2. and, when two walls line up about equally with that push, by which
+//      wall they've actually crept closest to.
+// Facing is intentionally left out: mid-fight the model may be twisted
+// toward a foe, so it says nothing about which block they mean to hop —
+// the stick direction plus proximity do. With no movement heading we simply
+// take the nearest wall, which keeps the pick predictable while standing
+// still. Returns the same shape as canJumpFrom plus `yaw` (the cardinal
+// jumped along), or null.
 export function findJump(grid, x, z, maxCells = 1, preferYaw = null) {
   const { c, r } = worldToCell(x, z);
   if (!inBounds(c, r)) return null;
-  let best = null, bestScore = Infinity;
+
+  // every wall we could vault from here, in any cardinal
+  const cands = [];
   for (const d of JUMP_DIRS) {
     const info = jumpAlong(grid, c, r, x, z, d.dc, d.dr, maxCells);
-    if (!info) continue;
-    if (preferYaw == null) return { ...info, yaw: d.yaw };
-    let diff = (d.yaw - preferYaw) % (Math.PI * 2);
-    if (diff > Math.PI) diff -= Math.PI * 2;
-    if (diff < -Math.PI) diff += Math.PI * 2;
-    const score = Math.abs(diff);
-    if (score < bestScore) { bestScore = score; best = { ...info, yaw: d.yaw }; }
+    if (info) cands.push({ ...info, yaw: d.yaw, dc: d.dc, dr: d.dr });
+  }
+  if (cands.length <= 1) return cands[0] || null;
+
+  // radians of extra "pull" charged per world-unit that a wall sits
+  // farther away. Small enough that a square push at one cardinal always
+  // beats a perpendicular wall (movement stays the dominant, predictable
+  // signal), large enough that near a diagonal the closer wall wins.
+  const PROX_WEIGHT = 0.5;
+  let best = null, bestScore = Infinity;
+  for (const cand of cands) {
+    const ow = cellToWorld(cand.over.c, cand.over.r);
+    // gap from the player to the vaulted wall along its jump axis:
+    // smaller means they've pressed harder up against this one
+    const gap = cand.dc !== 0 ? Math.abs(x - ow.x) : Math.abs(z - ow.z);
+    let score = PROX_WEIGHT * gap;
+    if (preferYaw != null) {
+      let diff = (cand.yaw - preferYaw) % (Math.PI * 2);
+      if (diff > Math.PI) diff -= Math.PI * 2;
+      if (diff < -Math.PI) diff += Math.PI * 2;
+      score += Math.abs(diff);
+    }
+    if (score < bestScore) { bestScore = score; best = cand; }
   }
   return best;
 }
