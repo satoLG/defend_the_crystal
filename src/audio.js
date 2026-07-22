@@ -134,6 +134,19 @@ export const sfx = {
   levelUp: () => ready && throttled('lvl', 200, () => tiks.success()),
   wave: () => ready && throttled('wave', 400, () => tiks.notify()),
   notify: () => ready && throttled('notify', 200, () => tiks.notify()),
+  // soft per-character tick for the typewriter intro
+  type: () => ready && throttled('type', 25, () => tiks.hover()),
+  // the arrival portal flaring open + the hero materializing
+  portal: () => ready && throttled('portal', 300, () => {
+    tiks.swoosh();
+    setTimeout(() => { try { tiks.success(); } catch { /* ok */ } }, 180);
+  }),
+  // gentle "start of a conversation" chime when stepping up to an NPC —
+  // softer & less jarring than the old notify
+  chat: () => ready && throttled('chat', 350, () => {
+    tiks.hover();
+    setTimeout(() => { try { tiks.hover(); } catch { /* ok */ } }, 90);
+  }),
   breach: () => ready && throttled('breach', 250, () => tiks.warning()),
   error: () => ready && throttled('err', 150, () => tiks.error()),
   success: () => ready && throttled('ok', 150, () => tiks.success()),

@@ -1705,39 +1705,39 @@ export class GameView {
     });
   }
 
-  // flare the arrival portal open: it expands under the spawning hero,
-  // holds while they materialize, then shrinks away to nothing. Called
-  // once per arriving player — an already-open portal just lingers.
+  // flare the arrival portal open: a round vortex standing UPRIGHT at
+  // the back of the sanctuary, facing the plaza, its swirl spinning.
+  // It expands, holds while the hero steps out of its FRONT, then
+  // shrinks away. Called once per arrival — an open portal just lingers.
   spawnPortalFx() {
     if (this.portalFx) { this.portalFx.hold = Math.max(this.portalFx.hold, 1.1); return; }
     if (!this._portalMat) this._portalMat = this.makePortalMaterial();
+    const R = PORTAL.r;
     const y = terrainY(PORTAL.z);
-    const disc = new THREE.Mesh(new THREE.CircleGeometry(PORTAL.r, 48), this._portalMat);
-    disc.rotation.x = -Math.PI / 2;
-    disc.position.set(PORTAL.x, y + 0.06, PORTAL.z);
+    // parent group stands the disc up and turns it to face the plaza
+    // (−z), so the vortex looks straight at the arriving hero
+    const group = new THREE.Group();
+    group.position.set(PORTAL.x, y + R * 0.98, PORTAL.z + 0.65);
+    group.rotation.y = Math.PI;
+    const disc = new THREE.Mesh(new THREE.CircleGeometry(R, 48), this._portalMat);
     disc.renderOrder = 3;
-    // soft light column rising off the vortex
-    const beam = new THREE.Mesh(
-      new THREE.CylinderGeometry(PORTAL.r * 0.5, PORTAL.r * 0.92, 2.8, 20, 1, true),
-      new THREE.MeshBasicMaterial({
-        color: 0xb27aff, transparent: true, opacity: 0,
-        blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide,
-      })
-    );
-    beam.position.set(PORTAL.x, y + 1.4, PORTAL.z);
-    const light = new THREE.PointLight(0x9a4ae0, 0, 10, 2);
-    light.position.set(PORTAL.x, y + 1.2, PORTAL.z);
-    this.scene.add(disc, beam, light);
-    this.portalFx = { disc, beam, light, t: 0, hold: 1.1, closing: 0 };
+    group.add(disc);
+    // a soft glow pooling in front of the portal mouth
+    const light = new THREE.PointLight(0x9a4ae0, 0, 9, 2);
+    light.position.set(PORTAL.x, y + 1.1, PORTAL.z - 0.2);
+    this.scene.add(group, light);
+    this.portalFx = { group, disc, light, t: 0, hold: 1.1, closing: 0 };
+    sfx.portal();
   }
 
   // per-frame portal life-cycle: flare open (with a little overshoot),
-  // hold while heroes step through, shrink & die
+  // spin the vortex, hold while the hero steps through, shrink & die
   updatePortal(dt) {
     const fx = this.portalFx;
     if (!fx) return;
     fx.t += dt;
     this._portalMat.uniforms.uT.value = this.time;
+    fx.disc.rotation.z += dt * 1.6; // the vortex turns
     const OPEN = 0.38, CLOSE = 0.5;
     let open;
     if (fx.t < OPEN) {
@@ -1751,16 +1751,14 @@ export class GameView {
       fx.closing += dt;
       open = Math.max(1 - fx.closing / CLOSE, 0);
       if (open <= 0) {
-        this.scene.remove(fx.disc, fx.beam, fx.light);
+        this.scene.remove(fx.group, fx.light);
         this.portalFx = null;
         return;
       }
     }
     this._portalMat.uniforms.uOpen.value = Math.min(open, 1);
-    fx.disc.scale.setScalar(Math.max(open, 0.001));
-    fx.beam.scale.set(open, 0.55 + open * 0.45, open);
-    fx.beam.material.opacity = 0.32 * open;
-    fx.light.intensity = 24 * open;
+    fx.group.scale.setScalar(Math.max(open, 0.001));
+    fx.light.intensity = 22 * open;
   }
 
   // ---------------- pet vendor's stall ----------------
@@ -1804,14 +1802,15 @@ export class GameView {
     chest.position.set(-(frameBox.max.x - 0.15), 0, 0.5);
     chest.rotation.y = 0.5;
     stall.add(chest);
-    // a big slowly-spinning coin as the shop sign
-    const sign = instantiate('dungeon-coin', { shadows: false }).group;
-    sign.scale.setScalar(2.2);
-    sign.position.set(0, frameBox.max.y + 0.42, 0);
-    stall.add(sign);
-    this.petShopSign = sign;
     this.scene.add(stall);
     this.sanctNodes.push(stall);
+
+    // a basket of fruit sitting on the grass out front of the pet stall
+    const fruit = instantiate('kit-fruit').group;
+    fruit.position.set(PET_STALL.x - 1.3, -ELEV, PET_STALL.z + 0.4);
+    fruit.rotation.y = -0.5;
+    this.scene.add(fruit);
+    this.sanctNodes.push(fruit);
 
     // Tonho stands a clear step out front, turned to face the plaza
     this.mkNpc({
@@ -1876,17 +1875,17 @@ export class GameView {
     // two weapon racks half-set into the wall (one per segment), a touch
     // in front of the wall line so they read as embedded in it
     const rackZ = WALLZ + 0.28;
-    // left rack — spears; right rack — swords
-    for (const [side, mk, n] of [[-1, makeSpear, 2], [1, () => instantiate('prop-sword', { shadows: false }).group, 2]]) {
+    // each rack has two slots — stand a weapon upright in each. Left rack
+    // holds spears, right rack swords, seated straight in their slots.
+    for (const [side, mk] of [[-1, makeSpear], [1, () => instantiate('prop-sword', { shadows: false }).group]]) {
       const rack = instantiate('arena-rack').group;
       rack.position.set(side * wallW * 0.5, 0, rackZ);
       hut.add(rack);
-      for (let i = 0; i < n; i++) {
+      for (let i = 0; i < 2; i++) {
         const w = mk();
-        const dx = (i - (n - 1) / 2) * 0.16;
-        w.position.set(side * wallW * 0.5 + dx, 0.5, rackZ + 0.06);
-        w.rotation.z = dx * 1.2; // fan them slightly in the rack
-        if (mk !== makeSpear) w.scale.setScalar(1.1);
+        w.scale.multiplyScalar(1.25);
+        const dx = (i - 0.5) * 0.26; // one weapon per slot
+        w.position.set(side * wallW * 0.5 + dx, 0.62, rackZ + 0.14);
         hut.add(w);
       }
     }
@@ -1919,19 +1918,21 @@ export class GameView {
     floorAxe.rotation.set(Math.PI / 2 - 0.08, 0, 0.9);
     hut.add(floorAxe);
 
-    // spinning trophy = the shop sign (mirrors the pet stall's coin)
-    const sign = instantiate('arena-trophy', { shadows: false }).group;
-    sign.scale.setScalar(1.6);
-    sign.position.set(0, wallH + 0.5, WALLZ);
-    hut.add(sign);
-    this.weaponShopSign = sign;
-
     // Baru's wall line sits behind him; he stands a step out front,
     // turned to face the plaza like Tonho across the way
     this.mkNpc({
       model: 'char-tanker', name: 'Baru', tint: 0xd87a5a,
       x: NPCS.weapons.x, z: NPCS.weapons.z, yaw, bubble: t('npc.weapons'),
     });
+
+    // a basket of fruit on the ground to Iris's left (she tends the
+    // sanctuary just across from the forge)
+    const iris = NPCS.blessings;
+    const fruit = instantiate('kit-fruit').group;
+    fruit.position.set(iris.x - 1.2, terrainY(iris.z), iris.z + 0.3);
+    fruit.rotation.y = 0.6;
+    this.scene.add(fruit);
+    this.sanctNodes.push(fruit);
   }
 
   updateShowPets(dt) {
@@ -1957,8 +1958,6 @@ export class GameView {
         p.actor.group.rotation.y = Math.atan2(-Math.sin(p.ang), Math.cos(p.ang));
       }
     }
-    if (this.petShopSign) this.petShopSign.rotation.y += dt * 1.2;
-    if (this.weaponShopSign) this.weaponShopSign.rotation.y += dt * 1.2;
   }
 
   updateNpcs(dt, selfPos) {
@@ -2869,15 +2868,20 @@ export class GameView {
 
     for (const a of this.players.values()) {
       // materializing out of the arrival portal: pop-in scale (spawnT
-      // starts slightly negative so the portal opens first)
+      // starts slightly negative so the portal opens first) plus a short
+      // forward nudge — the hero steps OUT of the portal's front, so it
+      // starts back at the portal mouth and slides a teco toward the plaza
       if (a.spawnT != null) {
         a.spawnT += dt;
         if (a.spawnT < 0) {
           a.group.scale.setScalar(0.01);
+          a.group.position.z = PORTAL.z + 0.5; // waiting inside the portal
         } else {
           const k = Math.min(a.spawnT / 0.55, 1);
+          const e = 1 - Math.pow(1 - k, 3);
           const s = k * (1 + 0.16 * Math.sin(k * Math.PI));
           a.group.scale.setScalar(Math.max(s, 0.01));
+          a.group.position.z += (1 - e) * 0.7; // slide out from the portal
           if (k >= 1) { a.spawnT = null; a.group.scale.setScalar(1); }
         }
       }

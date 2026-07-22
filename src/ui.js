@@ -355,6 +355,7 @@ export class UI {
     this._introI = setInterval(() => {
       i += 1;
       txt.textContent = msg.slice(0, i);
+      if (msg[i - 1] !== ' ') sfx.type(); // soft tick per visible glyph
       if (i >= msg.length) {
         clearInterval(this._introI);
         this._introT = setTimeout(() => {
@@ -393,7 +394,7 @@ export class UI {
     $('npc-prompt').classList.toggle('hidden', !id);
     if (id) {
       $('npc-prompt-label').textContent = t('npc.talkTo', { name: NPCS[id]?.name || '' });
-      sfx.notify();
+      sfx.chat();
     } else if (this.dlgId) {
       this.closeNpcDialog(); // walked away mid-conversation
     }
@@ -1234,7 +1235,7 @@ export class UI {
     if (near === this.shopNear) return;
     this.shopNear = near;
     $('petshop-prompt').classList.toggle('hidden', !near);
-    if (near) sfx.notify();
+    if (near) sfx.chat();
     else if (this.petPanelOpen) this.closePetPanel();
     if (this.petPanelOpen) this.renderPetPanel();
   }
@@ -1428,7 +1429,7 @@ export class UI {
     if (near === this.smithNear) return;
     this.smithNear = near;
     $('weaponshop-prompt').classList.toggle('hidden', !near);
-    if (near) sfx.notify();
+    if (near) sfx.chat();
     else if (this.weaponPanelOpen) this.closeWeaponPanel();
     if (this.weaponPanelOpen) this.renderWeaponPanel();
   }

@@ -138,9 +138,12 @@ export class Sim {
     // its far end (facing the crystal all the way up the plaza); joiners
     // mid-combat drop straight onto the field like before
     if (this.freeRoamPhase()) {
+      // the first hero arrives dead-centre on the portal; extras fan out
+      // symmetrically to either side so the group stays centered on X
+      const off = [0, -1.4, 1.4, -2.8, 2.8][n % 5] || 0;
       return {
-        x: PORTAL.x + ((n % 3) - 1) * 1.2,
-        z: PORTAL.z - 0.3 - Math.floor(n / 3) * 1.0,
+        x: PORTAL.x + off,
+        z: PORTAL.z - 0.3 - Math.floor(n / 5) * 1.0,
       };
     }
     const a = Math.PI * (0.35 + 0.3 * (n % 4));

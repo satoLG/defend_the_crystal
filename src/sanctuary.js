@@ -97,15 +97,15 @@ const faceInward = (x) => Math.atan2(-x, 0);
 // corner; those four tiles are rendered as grass (see scene.js) and the
 // stall + elephant center on the block. Baru's forge mirrors it, back-left.
 export const PET_STALL_CELLS = [
-  { c: 6, r: 23 }, { c: 7, r: 23 }, { c: 6, r: 24 }, { c: 7, r: 24 },
+  { c: 7, r: 23 }, { c: 8, r: 23 }, { c: 7, r: 24 }, { c: 8, r: 24 },
 ];
-export const PET_STALL = { x: (tileX(6) + tileX(7)) / 2, z: (tileZ(23) + tileZ(24)) / 2 };
+export const PET_STALL = { x: (tileX(7) + tileX(8)) / 2, z: (tileZ(23) + tileZ(24)) / 2 };
 export const WEAPON_STALL = { x: -PET_STALL.x, z: PET_STALL.z };
-// each vendor steps a stride out in front of their stall toward the plaza
+// each vendor stands a short step out in front of their stall (kept
+// close so they read as tending it) facing the plaza
 const stallVendor = (stall) => {
   const yaw = faceInward(stall.x);
-  // step forward (toward the plaza center) along the facing direction
-  return { x: stall.x + Math.sin(yaw) * 1.7, z: stall.z + Math.cos(yaw) * 1.7, yaw };
+  return { x: stall.x + Math.sin(yaw) * 1.15, z: stall.z + Math.cos(yaw) * 1.15, yaw };
 };
 
 export const NPCS = {

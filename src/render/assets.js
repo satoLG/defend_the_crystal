@@ -83,6 +83,8 @@ const MANIFEST = {
   'obstacle-rocks': M('env/rocks-tall.glb', { h: 1.5 }),
   // round archery target strapped to the training dummy's chest
   'kit-target': M('kit/target-a-round.glb', { fp: 0.5 }),
+  // a basket of fruit for the sanctuary floor (mini-market kit)
+  'kit-fruit': M('kit/display-fruit.glb', { fp: 1.0 }),
   // companion pets (Kenney Cube Pets — node-animated: idle/walk/run/
   // eat/dance/gestures). Heights tuned per animal so they read as small
   // critters trotting at their hero's heels.
