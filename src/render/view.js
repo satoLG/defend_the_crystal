@@ -1554,8 +1554,9 @@ export class GameView {
     // The kit board stands upright with its face along local +X, so a
     // quarter-turn points that face forward (+Z), centered on the body.
     const target = instantiate('kit-target', { shadows: false }).group;
-    // transform dialed in with the in-game dev editor
-    target.rotation.set(0, -1.44, 0);
+    // transform dialed in with the in-game dev editor (+180° on Y so the
+    // painted face points out toward the training hero)
+    target.rotation.set(0, -1.44 + Math.PI, 0);
     target.scale.setScalar(1.25);
     target.position.set(0, 0.62, 0.28);
     g.add(target);

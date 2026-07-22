@@ -89,9 +89,9 @@ export const BLOCKED_CELLS = [...PILLAR_CELLS, ...STATUE_CELLS];
 // stalls can snap onto whole floor tiles
 const tileX = (c) => (c - (COLS - 1) / 2) * CELL;
 const tileZ = (r) => (r - (ROWS - 1) / 2) * CELL;
-// the plaza's "inside" the NPCs turn to face (roughly the mid-plaza)
-const PLAZA_FOCUS = { x: 0, z: PZ + 9 };
-const faceInward = (x, z) => Math.atan2(PLAZA_FOCUS.x - x, PLAZA_FOCUS.z - z);
+// the stalls sit in opposite back corners and look STRAIGHT across the
+// plaza at each other (along the X axis) — not angled at the fountain
+const faceInward = (x) => Math.atan2(-x, 0);
 
 // Tonho's stall snaps onto a 2×2 block of floor tiles in the back-right
 // corner; those four tiles are rendered as grass (see scene.js) and the
@@ -103,8 +103,8 @@ export const PET_STALL = { x: (tileX(6) + tileX(7)) / 2, z: (tileZ(23) + tileZ(2
 export const WEAPON_STALL = { x: -PET_STALL.x, z: PET_STALL.z };
 // each vendor steps a stride out in front of their stall toward the plaza
 const stallVendor = (stall) => {
-  const yaw = faceInward(stall.x, stall.z);
-  // step forward (toward the plaza) along the facing direction
+  const yaw = faceInward(stall.x);
+  // step forward (toward the plaza center) along the facing direction
   return { x: stall.x + Math.sin(yaw) * 1.7, z: stall.z + Math.cos(yaw) * 1.7, yaw };
 };
 
@@ -112,8 +112,9 @@ export const NPCS = {
   // vendors tucked into the back corners, turned to face the plaza
   pets:      { name: 'Tonho', ...stallVendor(PET_STALL) },
   weapons:   { name: 'Baru',  ...stallVendor(WEAPON_STALL) },
-  // the friendly guide by the fountain who explains the game
-  duvidas:   { name: 'Theo',  x: 1.9,  z: PZ + 14.8, yaw: 0.16 },
+  // the friendly guide by the fountain who explains the game — nearer
+  // the middle of the plaza's width now
+  duvidas:   { name: 'Theo',  x: 0.5,  z: PZ + 14.8, yaw: 0.16 },
   // the cheerleader near the stairs, always shouting encouragement
   incentivo: { name: 'Nina',  x: -1.3, z: PZ + 6.6,  yaw: 0.12 },
   // the sanctuary cleric (future blessings vendor)
