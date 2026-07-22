@@ -1076,11 +1076,39 @@ export class GameView {
         g.position.z += (dz / dist) * step;
       }
       pet.smSpeed = lerp(pet.smSpeed, spd, Math.min(dt * 7, 1));
-      if (pet.smSpeed > 3.4) this.setLoco(pet.actor, 'run', 0.9 + pet.smSpeed * 0.06);
+      // while airborne keep the legs churning (run) so it reads as a leap,
+      // otherwise fall back to the ground gaits
+      if (pet.jumpT != null && pet.jumpT > 0) this.setLoco(pet.actor, 'run', 1.3);
+      else if (pet.smSpeed > 3.4) this.setLoco(pet.actor, 'run', 0.9 + pet.smSpeed * 0.06);
       else if (pet.smSpeed > 0.4) this.setLoco(pet.actor, 'walk', 1.1);
       else this.setLoco(pet.actor, 'idle', 1);
       const wantYaw = dist > 0.06 && pet.smSpeed > 0.4 ? Math.atan2(dx, dz) : yaw;
       g.rotation.y = angleLerp(g.rotation.y, wantYaw, Math.min(dt * 8, 1));
+
+      // hop along whenever the hero vaults an obstacle. The cube pets have
+      // no jump clip (idle/walk/run/eat/…), so the leap is procedural: a
+      // sine arc with a playful forward tuck, kicked off the frame the hero
+      // leaves the ground — a hair later so the pet reads as following over.
+      const ownerJumping = owner.jumpT != null;
+      if (ownerJumping && !pet.ownerJumping) {
+        pet.jumpDur = owner.jumpDur || JUMP.DUR;
+        pet.jumpT = -0.08 * (pet.jumpDur / JUMP.DUR); // brief lag behind the hero
+        pet.jumpH = (owner.jumpH || JUMP.HEIGHT) * 0.8; // smaller critter, smaller hop
+        if (pet.actor.actions.jump) this.playOnce(pet.actor, 'jump', pet.jumpDur);
+      }
+      pet.ownerJumping = ownerJumping;
+
+      if (pet.jumpT != null) {
+        pet.jumpT += dt;
+        if (pet.jumpT <= 0) {
+          g.position.y = 0; // still crouched, waiting out the lag
+        } else {
+          const k = Math.min(pet.jumpT / pet.jumpDur, 1);
+          g.position.y = Math.sin(k * Math.PI) * pet.jumpH;
+          g.rotation.x = -Math.sin(k * Math.PI) * 0.35; // nose-down tuck mid-air
+          if (k >= 1) { pet.jumpT = null; g.position.y = 0; g.rotation.x = 0; }
+        }
+      }
     }
   }
 
