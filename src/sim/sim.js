@@ -12,6 +12,7 @@ import {
   Grid, cellToWorld, worldToCell, canJumpFrom, enemyJumpShortcut, idx, inBounds,
   computeDashEnd, CRYSTAL_POS, HALF_W, HALF_H,
 } from './grid.js';
+import { PORTAL, CROSS_Z, NPCS, DUMMIES, TRAIN, findColliderJump } from '../sanctuary.js';
 import { buildWavePlan, enemyStats } from './waves.js';
 import { clamp, dist2d, nextId } from '../utils.js';
 
@@ -59,6 +60,7 @@ export class Sim {
     this.pending = [];      // scheduled callbacks [{at, fn}]
     this.events = [];
     this.contReady = new Set();
+    this.trainers = new Set(); // players currently in training mode
     this.waveStartCount = 1; // player count captured at wave start
   }
 
@@ -113,6 +115,7 @@ export class Sim {
     if (!p) return;
     this.world.remove(p);
     this.contReady.delete(id);
+    this.exitTraining(id);
     if (this.phase !== 'lobby') this.emit({ t: 'toast', k: 'toast.left', pr: { name: p.name } });
     this.checkContinue();
   }
@@ -121,13 +124,39 @@ export class Sim {
     return this.players.entities.find((p) => p.id === id);
   }
 
+  // free-roam phases: the sanctuary is open (players may stroll down
+  // the stairs, spawn at the portal, meet the NPCs). Everywhere else —
+  // combat and the build pauses of a running match — it is locked.
+  freeRoamPhase() {
+    return this.phase === 'lobby' || this.phase === 'checkpoint' ||
+      this.phase === 'over' || (this.phase === 'build' && this.wave === 0);
+  }
+
   playerSpawnPos() {
     const n = this.playerCount();
+    // while the sanctuary is open, heroes arrive through the portal at
+    // its far end (facing the crystal all the way up the plaza); joiners
+    // mid-combat drop straight onto the field like before
+    if (this.freeRoamPhase()) {
+      // the first hero arrives dead-centre on the portal; extras fan out
+      // symmetrically to either side so the group stays centered on X
+      const off = [0, -1.4, 1.4, -2.8, 2.8][n % 5] || 0;
+      return {
+        x: PORTAL.x + off,
+        z: PORTAL.z - 0.3 - Math.floor(n / 5) * 1.0,
+      };
+    }
     const a = Math.PI * (0.35 + 0.3 * (n % 4));
     return {
       x: clamp(CRYSTAL_POS.x + Math.cos(a) * 2.2, -HALF_W + 1, HALF_W - 1),
       z: clamp(CRYSTAL_POS.z - Math.abs(Math.sin(a)) * 2.2 - 0.6, -HALF_H + 1, HALF_H - 1),
     };
+  }
+
+  // has every hero climbed the stairs and crossed past the crystal to
+  // the battlefield side? Required before the first wave can start.
+  allCrossed() {
+    return this.players.entities.every((p) => p.dead || p.z < CROSS_Z);
   }
 
   xpNext(lvl) { return Math.round(PLAYER.XP_BASE * Math.pow(lvl, PLAYER.XP_POW)); }
@@ -209,10 +238,12 @@ export class Sim {
       z = p.z + (z - p.z) * f;
     }
     // mid-jump the character sails over blocked cells, so skip the
-    // cell collision resolve (bounds are still enforced)
+    // cell collision resolve (bounds are still enforced). The sanctuary
+    // only opens during free-roam phases — once a match is running,
+    // there's no walking back down until the next checkpoint.
     const fixed = p.jumpT > 0
       ? { x: clamp(x, -HALF_W + 0.3, HALF_W - 0.3), z: clamp(z, -HALF_H + 0.3, HALF_H - 0.3) }
-      : this.grid.resolveCircle(x, z, PLAYER.RADIUS, true);
+      : this.grid.resolveCircle(x, z, PLAYER.RADIUS, this.freeRoamPhase(), true);
     p.x = fixed.x; p.z = fixed.z;
     p.moving = !!m;
     if (typeof yaw === 'number') p.yaw = yaw;
@@ -249,6 +280,10 @@ export class Sim {
     this.pending = [];
     this.drops = [];
     this.contReady.clear();
+    this.trainers.clear();
+    // back to a free-roam phase BEFORE re-adding the roster, so every
+    // hero of the fresh defense arrives through the portal again
+    this.phase = 'lobby';
     for (const r of roster) this.addPlayer(r.id, r.name, r.cls, r.colors, r.pet, r.loadout);
     this.start();
     this.emit({ t: 'restart' });
@@ -256,6 +291,14 @@ export class Sim {
 
   startWave() {
     if (this.phase !== 'build' && this.phase !== 'checkpoint') return;
+    // the first wave only starts once EVERY hero has walked up from the
+    // sanctuary and crossed past the crystal onto the battlefield
+    if (this.wave === 0 && !this.allCrossed()) {
+      this.emit({ t: 'toast', k: 'toast.crossFirst', kind: 'error' });
+      return;
+    }
+    // training ends the moment a wave marches in
+    for (const id of [...this.trainers]) this.exitTraining(id);
     this.wave += 1;
     this.phase = 'combat';
     this.waveStartCount = this.playerCount();
@@ -327,6 +370,7 @@ export class Sim {
       case 'sell': return this.trySell(p, act);
       case 'jump': return this.tryJump(p, act);
       case 'skill': return this.trySkill(p, act);
+      case 'train': return this.tryTrain(p, act);
       case 'pet': return this.trySetPet(p, act);
       case 'loadout': return this.trySetLoadout(p, act);
       case 'start': if (this.phase === 'build') this.startWave(); return;
@@ -446,11 +490,75 @@ export class Sim {
     // onto a foe). Fall back to yaw/facing for older clients.
     const heading = typeof act?.jyaw === 'number' ? act.jyaw
       : typeof act?.yaw === 'number' ? act.yaw : p.yaw;
-    const info = canJumpFrom(this.grid, p.x, p.z, heading, p.jumpCells || 1);
+    let info = canJumpFrom(this.grid, p.x, p.z, heading, p.jumpCells || 1);
+    // down in the open sanctuary there are no blocked grid cells, but the
+    // props & NPCs are hoppable — vault them the same way
+    if (!info && this.freeRoamPhase()) {
+      info = findColliderJump(p.x, p.z, PLAYER.RADIUS, heading);
+    }
     if (!info) return;
     const dur = jumpDurFor(info.span);
     p.jumpT = dur;
     this.emit({ t: 'jump', id: p.id, dur });
+  }
+
+  // ---------------- training mode ----------------
+
+  // talk to the drill master while the sanctuary is open to spar with
+  // his target dummies: they become real (attackable) enemies until the
+  // last trainer leaves — by button, by distance or when a wave starts
+  tryTrain(p, act) {
+    if (act?.on) {
+      if (!this.freeRoamPhase() || this.phase === 'over') return;
+      if (this.trainers.has(p.id)) return;
+      this.trainers.add(p.id);
+      this.ensureDummies();
+      this.emit({ t: 'train', id: p.id, on: 1 });
+    } else {
+      this.exitTraining(p.id);
+    }
+  }
+
+  exitTraining(id) {
+    if (!this.trainers.delete(id)) return;
+    this.emit({ t: 'train', id, on: 0 });
+    if (this.trainers.size === 0) this.removeDummies();
+  }
+
+  ensureDummies() {
+    if (this.enemies.entities.some((e) => e.dummy)) return;
+    for (const d of DUMMIES) this.spawnDummy(d.x, d.z);
+  }
+
+  removeDummies() {
+    for (const e of [...this.enemies.entities]) {
+      if (e.dummy) this.removeEnemy(e);
+    }
+  }
+
+  // a stationary, harmless enemy entity standing exactly where the
+  // static yard props are — full HP pool, no drops, springs back to
+  // full whenever depleted (see damageEnemy)
+  spawnDummy(x, z) {
+    const vehicle = new Vehicle();
+    vehicle.position.set(x, 0, z);
+    vehicle.maxSpeed = 0;
+    vehicle.updateOrientation = false;
+    this.ai.add(vehicle);
+    const e = this.world.add({
+      enemy: true, dummy: true, id: nextId(), kind: 'dummy', vehicle,
+      hp: 600, maxHp: 600, dmg: 0, speed: 0, pts: 0, xp: 0,
+      scale: 1, breach: 0, boss: 0, flying: false, state: 'path', targetId: null,
+      atkCd: 0, kbx: 0, kbz: 0, yaw: -Math.PI / 2, stunT: 0,
+      aggroCd: 0, chaseBestD: 0, dragT: 0,
+      slowT: 0, slowF: 1, burnT: 0, burnDps: 0, poisonT: 0, poisonDps: 0,
+      dotTick: 0, armor: 0, revives: 0, horde: null, variant: null, vr: 0,
+      archer: null, jumper: false, jump: null, jumpCd: 9999,
+      chainJumps: 0, chainLeft: 0, chainT: 0,
+      summoner: false, summonCd: 9999, pumpkin: null, movingFlag: false,
+    });
+    this.emit({ t: 'spawn', id: e.id, kind: 'dummy', boss: 0 });
+    return e;
   }
 
   // ---------------- class special attacks ----------------
@@ -725,6 +833,17 @@ export class Sim {
     // heavy armor (Brutus): flat reduction on every hit, any source
     if (e.armor > 0) dmg *= 1 - e.armor;
     e.hp -= dmg;
+    // training dummies never die (or aggro, or get knocked around):
+    // on depletion they spring straight back to full
+    if (e.dummy) {
+      this.emit({ t: 'hit', id: e.id });
+      if (e.hp <= 0) {
+        e.hp = e.maxHp;
+        const pos = e.vehicle.position;
+        this.emit({ t: 'dreset', x: rnd2(pos.x), z: rnd2(pos.z) });
+      }
+      return;
+    }
     // knockback shoves the enemy BACKWARD along the direction the hit
     // travelled — away from whoever landed it, whatever side that is (a
     // stab in the back sends it forward, not blindly away from the crystal).
@@ -1160,6 +1279,18 @@ export class Sim {
       }
     }
 
+    // training mode ends on its own when a trainer strays too far from
+    // the drill master's yard (or falls, or leaves)
+    if (this.trainers.size) {
+      for (const id of [...this.trainers]) {
+        const p = this.getPlayer(id);
+        if (!p || p.dead ||
+            dist2d(p.x, p.z, NPCS.treino.x, NPCS.treino.z) > TRAIN.RADIUS) {
+          this.exitTraining(id);
+        }
+      }
+    }
+
     this.stepPlayers(dt);
     this.stepDrops(dt);
     this.stepGraves();
@@ -1279,6 +1410,8 @@ export class Sim {
   stepEnemies(dt) {
     const alive = this.players.entities.filter((p) => !p.dead);
     for (const e of this.enemies) {
+      // training dummies just stand there soaking hits — no AI at all
+      if (e.dummy) continue;
       const pos = e.vehicle.position;
 
       // status effects: burn/poison ticks + the chill slow, which
@@ -1495,6 +1628,7 @@ export class Sim {
   postAiFixup(dt) {
     // keep enemies on the board and compute their facing from velocity
     for (const e of this.enemies) {
+      if (e.dummy) continue; // dummies live off-board, on the plaza floor
       const pos = e.vehicle.position;
       pos.x = clamp(pos.x, -HALF_W + 0.3, HALF_W - 0.3);
       // enemies may exist a little north of the board (the dark woods
@@ -1748,7 +1882,10 @@ export class Sim {
       bt: this.buildTimerOn ? rnd2(Math.max(this.buildT, 0)) : -1,
       pts: Math.round(this.points),
       br: this.breaches,
-      left: this.spawnQueue.length + this.enemies.entities.length +
+      // training dummies are enemies mechanically but never part of a
+      // wave — keep them out of the "enemies left" counter
+      left: this.spawnQueue.length +
+        this.enemies.entities.filter((e) => !e.dummy).length +
         this.graves.reduce((s, g) => s + g.spawnsLeft, 0),
       cont: [...this.contReady],
       pl: this.players.entities.map((p) => [

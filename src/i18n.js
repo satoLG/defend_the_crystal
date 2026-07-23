@@ -196,6 +196,10 @@ const STRINGS = {
     start: {
       play: 'Play', summoning: 'Summoning models…', ready: 'Ready!',
     },
+    intro: {
+      defend: 'PLEASE, DEFEND IT...',
+      templeName: 'Crystal Temple', templeFlavor: 'Temple of the last light',
+    },
     invite: {
       joiningMatch: "You're joining a specific match",
       openedLink: 'You opened a link to a specific match',
@@ -246,7 +250,7 @@ const STRINGS = {
       points: 'Crystal points — fragments from slain foes, spent on towers',
       crystalHp: 'Crystal health',
       room: 'Room code — allies can join mid-match',
-      settings: 'Settings', gold: 'Gold coins — spend them at the sanctuary pet vendor',
+      settings: 'Settings', gold: 'Gold coins — spend them at the temple pet vendor',
       stats: 'View character stats', petDetails: 'Pet details',
       jump: 'Jump over the block ahead (J / Space)',
       skill: 'Class special attack (K)',
@@ -297,26 +301,26 @@ const STRINGS = {
       stun: '{v}% chance to stun enemies', bolts: '{v} guided bolts per cast',
     },
     petd: {
-      hint: "Visit Tonho's stall in the sanctuary to switch or buy pets.",
+      hint: "Visit Tonho's stall in the temple to switch or buy pets.",
       xpToLevel: '{xp} / {next} XP to level {lvl}', maxedOut: 'Maxed out',
     },
     petp: {
       pets: 'Pets', goldCoins: 'gold coins', myPets: 'My pets', shop: 'Shop',
-      shopHint: 'Gold coins drop from mini-bosses and bosses.<br/>Visit Tonho\'s stall in the sanctuary plaza to buy.',
-      noPetsYet: "No pets yet — buy one at Tonho's stall in the sanctuary.",
+      shopHint: 'Gold coins drop from mini-bosses and bosses.<br/>Visit Tonho\'s stall in the temple plaza to buy.',
+      noPetsYet: "No pets yet — buy one at Tonho's stall in the temple.",
       withYou: 'With you', equip: 'Equip', owned: 'Owned', starter: 'STARTER',
       lvToLv: 'Lv 1: {a} → Lv {cap}: {b}',
     },
     wpnp: {
       weapons: 'Weapons', myArsenal: 'My arsenal',
-      shopHint: 'Gold coins drop from mini-bosses and bosses.<br/>Visit Baru\'s smithy in the sanctuary plaza to buy &amp; upgrade.',
+      shopHint: 'Gold coins drop from mini-bosses and bosses.<br/>Visit Baru\'s smithy in the temple plaza to buy &amp; upgrade.',
       equipped: 'Equipped', fullyForged: 'Fully forged — Crystal is the final tier.',
       next: 'Next ({tier}): {stat}',
     },
     cp: {
       checkpoint: 'Checkpoint', wavePrefix: 'Wave',
       waveSuffix: 'cleared — everyone is healed.',
-      stroll: 'Stroll the sanctuary behind the crystal, then push on.',
+      stroll: 'Stroll the temple behind the crystal, then push on.',
     },
     over: {
       crystalShattered: 'The crystal shattered', tryAgain: 'Try again',
@@ -331,7 +335,39 @@ const STRINGS = {
       defaultFlavor: 'The ground trembles…',
       subbossFlavor: 'A monstrous champion joins the wave!',
     },
-    npc: { greeting: 'Hi!', pets: 'Pets!', weapons: 'Weapons!' },
+    npc: {
+      greeting: 'Hi!', pets: 'Pets!', weapons: 'Weapons!',
+      talkTo: 'Talk to {name}',
+      // Nina's rotating shouts of encouragement (one per pass-by)
+      inc0: 'Protect the crystal!',
+      inc1: 'You can do this, hero!',
+      inc2: 'The crystal believes in you!',
+      inc3: 'Hold the line up there!',
+      inc4: 'Every wall counts — build smart!',
+      inc5: 'We are all counting on you!',
+    },
+    dlg: {
+      next: 'Next', train: 'Start training',
+      duvidas: {
+        0: 'Welcome, hero! I am Theo, keeper of this temple. Up those stairs, past the colonnade, lies the crystal we all live to protect.',
+        1: 'Monsters pour out of the dark woods to the north. Your duty is to stop them before they reach the crystal — with your weapon, your towers and your walls.',
+        2: 'Slain foes drop crystal fragments and experience. Spend the fragments on towers, place blocks to bend the monsters\' path, and grow stronger every wave.',
+        3: 'Between waves — at checkpoints — this temple opens again: rest, talk to us, visit Tonho and Baru. When everyone has crossed past the crystal, the battle begins.',
+      },
+      blessings: {
+        0: 'Blessings upon you, defender. I am Iris, cleric of this temple. The crystal you guard is no mere gem — it is the heart of this forest.',
+        1: 'Its light holds back the darkness beyond the trees. Should it shatter, everything you see — the temple, the woods, all of us — fades with it.',
+        2: 'In time I will be able to channel its light into blessings for worthy heroes. Prove yourselves on the field, and return to me.',
+      },
+      treino: {
+        0: 'I am Rocha, drill master. Those dummies beside me? Hit them as hard as you like — they always spring back up.',
+        1: 'One day I will also help you climb the ranks of your class. Not yet, though — care for a round of training?',
+      },
+    },
+    train: {
+      exit: 'Exit training',
+      enter: 'Training mode! Hit the dummies — walk away to stop.',
+    },
     toast: {
       joined: '{name} joined the defense!', left: '{name} left.',
       noBlocks: 'No blocks left — earn more each wave',
@@ -340,6 +376,7 @@ const STRINGS = {
       someoneStanding: 'Someone is standing there', alreadyMaxLevel: 'Already at max level',
       towerHasSpecial: 'This tower already has its special',
       noEnemiesInRange: 'No enemies in range',
+      crossFirst: 'Everyone must climb up and cross past the crystal first!',
       checkpointHeal: 'Checkpoint! +{bonus} crystals, everyone healed',
       crystalHit: 'The crystal was hit!', defenderFallen: 'A defender has fallen!',
       bossDefeated: 'Boss defeated!', levelUp: 'Level {n}!',
@@ -350,11 +387,11 @@ const STRINGS = {
       weaponAdded: '{name} added to your arsenal!',
       weaponForged: '{name} forged to {tier}!',
       onlyTonhoSwitch: "Only at Tonho's stall can you switch pets",
-      visitTonhoBuy: "Visit Tonho's stall in the sanctuary to buy",
+      visitTonhoBuy: "Visit Tonho's stall in the temple to buy",
       notEnoughGold: 'Not enough gold coins',
       onlyBaruSwitch: "Only at Baru's smithy can you switch weapons",
-      visitBaruBuy: "Visit Baru's smithy in the sanctuary to buy",
-      visitBaruUpgrade: "Visit Baru's smithy in the sanctuary to upgrade",
+      visitBaruBuy: "Visit Baru's smithy in the temple to buy",
+      visitBaruUpgrade: "Visit Baru's smithy in the temple to upgrade",
     },
     entity: {
       // class names double as static [data-i18n] labels on the cc-cards,
@@ -401,6 +438,10 @@ const STRINGS = {
     },
     start: {
       play: 'Jogar', summoning: 'Invocando modelos…', ready: 'Pronto!',
+    },
+    intro: {
+      defend: 'POR FAVOR, DEFENDA-O...',
+      templeName: 'Templo do Cristal', templeFlavor: 'Templo da última luz',
     },
     invite: {
       joiningMatch: 'Você está entrando em uma partida específica',
@@ -452,7 +493,7 @@ const STRINGS = {
       points: 'Pontos de cristal — fragmentos dos inimigos abatidos, gastos em torres',
       crystalHp: 'Vida do cristal',
       room: 'Código da sala — aliados podem entrar durante a partida',
-      settings: 'Configurações', gold: 'Moedas de ouro — gaste-as no vendedor de pets do santuário',
+      settings: 'Configurações', gold: 'Moedas de ouro — gaste-as no vendedor de pets do templo',
       stats: 'Ver atributos do personagem', petDetails: 'Detalhes do pet',
       jump: 'Pule sobre o bloco à frente (J / Espaço)',
       skill: 'Ataque especial da classe (K)',
@@ -504,26 +545,26 @@ const STRINGS = {
       stun: '{v}% de chance de atordoar inimigos', bolts: '{v} projéteis guiados por lançamento',
     },
     petd: {
-      hint: 'Visite a barraca do Tonho no santuário para trocar ou comprar pets.',
+      hint: 'Visite a barraca do Tonho no templo para trocar ou comprar pets.',
       xpToLevel: '{xp} / {next} XP para o nível {lvl}', maxedOut: 'No nível máximo',
     },
     petp: {
       pets: 'Pets', goldCoins: 'moedas de ouro', myPets: 'Meus pets', shop: 'Loja',
-      shopHint: 'Moedas de ouro caem de minichefes e chefes.<br/>Visite a barraca do Tonho na praça do santuário para comprar.',
-      noPetsYet: 'Nenhum pet ainda — compre um na barraca do Tonho no santuário.',
+      shopHint: 'Moedas de ouro caem de minichefes e chefes.<br/>Visite a barraca do Tonho na praça do templo para comprar.',
+      noPetsYet: 'Nenhum pet ainda — compre um na barraca do Tonho no templo.',
       withYou: 'Com você', equip: 'Equipar', owned: 'Adquirido', starter: 'INICIAL',
       lvToLv: 'Nv 1: {a} → Nv {cap}: {b}',
     },
     wpnp: {
       weapons: 'Armas', myArsenal: 'Meu arsenal',
-      shopHint: 'Moedas de ouro caem de minichefes e chefes.<br/>Visite a ferraria do Baru na praça do santuário para comprar &amp; melhorar.',
+      shopHint: 'Moedas de ouro caem de minichefes e chefes.<br/>Visite a ferraria do Baru na praça do templo para comprar &amp; melhorar.',
       equipped: 'Equipado', fullyForged: 'Totalmente forjada — Cristal é o nível final.',
       next: 'Próx. ({tier}): {stat}',
     },
     cp: {
       checkpoint: 'Checkpoint', wavePrefix: 'Onda',
       waveSuffix: 'concluída — todos foram curados.',
-      stroll: 'Passeie pelo santuário atrás do cristal e depois avance.',
+      stroll: 'Passeie pelo templo atrás do cristal e depois avance.',
     },
     over: {
       crystalShattered: 'O cristal se estilhaçou', tryAgain: 'Tentar de novo',
@@ -538,7 +579,38 @@ const STRINGS = {
       defaultFlavor: 'O chão treme…',
       subbossFlavor: 'Um campeão monstruoso entra na onda!',
     },
-    npc: { greeting: 'Oi!', pets: 'Pets!', weapons: 'Armas!' },
+    npc: {
+      greeting: 'Oi!', pets: 'Pets!', weapons: 'Armas!',
+      talkTo: 'Falar com {name}',
+      inc0: 'Proteja o cristal!',
+      inc1: 'Você consegue, herói!',
+      inc2: 'O cristal acredita em você!',
+      inc3: 'Segure a linha lá em cima!',
+      inc4: 'Cada muralha conta — construa direito!',
+      inc5: 'Estamos todos contando com você!',
+    },
+    dlg: {
+      next: 'Próximo', train: 'Começar treino',
+      duvidas: {
+        0: 'Bem-vindo, herói! Eu sou Theo, guardião deste templo. Subindo aquelas escadas, além da colunata, está o cristal que vivemos para proteger.',
+        1: 'Monstros brotam da mata escura ao norte. Seu dever é detê-los antes que alcancem o cristal — com sua arma, suas torres e suas muralhas.',
+        2: 'Inimigos abatidos soltam fragmentos de cristal e experiência. Gaste os fragmentos em torres, posicione blocos para desviar o caminho deles e fique mais forte a cada onda.',
+        3: 'Entre as ondas — nos checkpoints — este templo se abre de novo: descanse, fale conosco, visite Tonho e Baru. Quando todos tiverem atravessado além do cristal, a batalha começa.',
+      },
+      blessings: {
+        0: 'Bênçãos sobre você, defensor. Eu sou Iris, clériga deste templo. O cristal que você guarda não é uma joia qualquer — é o coração desta floresta.',
+        1: 'A luz dele mantém a escuridão além das árvores sob controle. Se ele se estilhaçar, tudo o que você vê — o templo, a mata, todos nós — se apaga junto.',
+        2: 'Com o tempo, poderei canalizar a luz dele em bênçãos para heróis dignos. Provem seu valor em campo e voltem até mim.',
+      },
+      treino: {
+        0: 'Eu sou Rocha, mestre de treino. Aqueles bonecos do meu lado? Bata neles à vontade — eles sempre voltam a ficar de pé.',
+        1: 'Um dia também vou te ajudar a subir os níveis da sua classe. Ainda não, porém — que tal uma rodada de treino?',
+      },
+    },
+    train: {
+      exit: 'Sair do treino',
+      enter: 'Modo treino! Bata nos bonecos — afaste-se para parar.',
+    },
     toast: {
       joined: '{name} entrou na defesa!', left: '{name} saiu.',
       noBlocks: 'Sem blocos — ganhe mais a cada onda',
@@ -547,6 +619,7 @@ const STRINGS = {
       someoneStanding: 'Alguém está parado aí', alreadyMaxLevel: 'Já está no nível máximo',
       towerHasSpecial: 'Esta torre já tem seu especial',
       noEnemiesInRange: 'Nenhum inimigo no alcance',
+      crossFirst: 'Todos precisam subir e atravessar além do cristal primeiro!',
       checkpointHeal: 'Checkpoint! +{bonus} cristais, todos curados',
       crystalHit: 'O cristal foi atingido!', defenderFallen: 'Um defensor caiu!',
       bossDefeated: 'Chefe derrotado!', levelUp: 'Nível {n}!',
@@ -557,11 +630,11 @@ const STRINGS = {
       weaponAdded: '{name} adicionada ao seu arsenal!',
       weaponForged: '{name} forjada para {tier}!',
       onlyTonhoSwitch: 'Só na barraca do Tonho você pode trocar de pet',
-      visitTonhoBuy: 'Visite a barraca do Tonho no santuário para comprar',
+      visitTonhoBuy: 'Visite a barraca do Tonho no templo para comprar',
       notEnoughGold: 'Moedas de ouro insuficientes',
       onlyBaruSwitch: 'Só na ferraria do Baru você pode trocar de arma',
-      visitBaruBuy: 'Visite a ferraria do Baru no santuário para comprar',
-      visitBaruUpgrade: 'Visite a ferraria do Baru no santuário para melhorar',
+      visitBaruBuy: 'Visite a ferraria do Baru no templo para comprar',
+      visitBaruUpgrade: 'Visite a ferraria do Baru no templo para melhorar',
     },
     entity: {
       class: {

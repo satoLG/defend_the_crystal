@@ -19,6 +19,7 @@ import { music } from './music.js';
 import { isInstalled, hasNativePrompt, promptInstall, onInstallChange } from './pwa.js';
 import { loadRoster, saveRoster, defaultCharacter, petRefOf, grantPetXp, loadoutOf } from './character.js';
 import { getSlots } from './render/customize.js';
+import { NPCS } from './sanctuary.js';
 
 // class accent colours (mirror the 3D CLASS_TINT) used to tint the
 // class glyph in the roster, lobby and HUD chrome
@@ -59,12 +60,22 @@ const $ = (id) => document.getElementById(id);
 // down, so trigger on that (falling back to click for keyboard/
 // assistive-tech activation, which never fires pointerdown).
 const bindTap = (el, fn) => {
-  el.addEventListener('pointerdown', (e) => {
-    if (e.pointerType === 'mouse' && e.button !== 0) return;
-    e.preventDefault();
+  // pointerdown fires first (snappy on touch); the browser then fires a
+  // synthesized click right after. Dedupe so the handler runs ONCE per
+  // tap — otherwise everything bound here double-fires on touch (which,
+  // for one-shot actions like "start wave", showed the toast twice).
+  // Assistive tech that only emits click still works via the same guard.
+  let last = 0;
+  const run = (e) => {
+    if (e.type === 'pointerdown' && e.pointerType === 'mouse' && e.button !== 0) return;
+    const now = performance.now();
+    if (now - last < 500) return; // the paired click after a pointerdown
+    last = now;
+    if (e.type === 'pointerdown') e.preventDefault();
     fn();
-  });
-  el.addEventListener('click', fn);
+  };
+  el.addEventListener('pointerdown', run);
+  el.addEventListener('click', run);
 };
 
 // real render of the 3D model (Kenney preview) instead of a generic glyph
@@ -126,6 +137,7 @@ export class UI {
     this.bindHud();
     this.bindPets();
     this.bindWeapons();
+    this.bindNpcDialog();
     this.bindOverlays();
     this.bindSettings();
     this.bindLang();
@@ -324,6 +336,127 @@ export class UI {
     el.textContent = msg;
     $('toasts').appendChild(el);
     setTimeout(() => el.remove(), 2800);
+  }
+
+  // full-black screen typing the crystal's plea, letter by letter, then
+  // fading to reveal the sanctuary. Returns how many seconds until the
+  // overlay is fully gone, so the caller can time the portal arrival to
+  // land a beat AFTER the scene is actually visible.
+  playIntro() {
+    const ov = $('intro-overlay'), txt = $('intro-text');
+    const STEP = 62, HOLD = 900, FADE = 780;
+    if (!ov) return 0;
+    clearTimeout(this._introT);
+    clearInterval(this._introI);
+    ov.classList.remove('hidden', 'fade');
+    txt.textContent = '';
+    const msg = t('intro.defend');
+    let i = 0;
+    this._introI = setInterval(() => {
+      i += 1;
+      txt.textContent = msg.slice(0, i);
+      if (msg[i - 1] !== ' ') sfx.type(); // soft tick per visible glyph
+      if (i >= msg.length) {
+        clearInterval(this._introI);
+        this._introT = setTimeout(() => {
+          ov.classList.add('fade');
+          this._introT = setTimeout(() => ov.classList.add('hidden'), FADE);
+        }, HOLD);
+      }
+    }, STEP);
+    return (msg.length * STEP + HOLD + FADE) / 1000;
+  }
+
+  // ---------------- sanctuary NPC dialogs ----------------
+
+  bindNpcDialog() {
+    bindTap($('npc-prompt'), () => {
+      if (this.npcNear) { sfx.click(); this.openNpcDialog(this.npcNear); }
+    });
+    $('nd-next').addEventListener('click', () => { sfx.click(); this.dlgPage(1); });
+    $('nd-close').addEventListener('click', () => { sfx.click(); this.closeNpcDialog(); });
+    $('npc-dialog').addEventListener('click', (e) => {
+      if (e.target === $('npc-dialog')) this.closeNpcDialog();
+    });
+    $('nd-train').addEventListener('click', () => {
+      sfx.success();
+      this.closeNpcDialog();
+      this.cb.onTrain?.(true);
+    });
+    bindTap($('train-exit'), () => { sfx.click(); this.cb.onTrain?.(false); });
+  }
+
+  // main.js flips this as the hero walks up to / away from a talkable
+  // NPC; the floating prompt is pinned under the NPC by pinPrompt
+  setNpcNear(id) {
+    if (id === this.npcNear) return;
+    this.npcNear = id;
+    $('npc-prompt').classList.toggle('hidden', !id);
+    if (id) {
+      $('npc-prompt-label').textContent = t('npc.talkTo', { name: NPCS[id]?.name || '' });
+      sfx.chat();
+    } else if (this.dlgId) {
+      this.closeNpcDialog(); // walked away mid-conversation
+    }
+  }
+
+  // paged, translated conversation; pages live under dlg.<id>.<n> and
+  // the page count is discovered by probing the dictionary
+  openNpcDialog(id) {
+    this.dlgId = id;
+    this.dlgIdx = 0;
+    this.renderDlgPage();
+    this.show('npc-dialog');
+  }
+
+  dlgPage(step) {
+    this.dlgIdx += step;
+    this.renderDlgPage();
+  }
+
+  renderDlgPage() {
+    const id = this.dlgId;
+    if (!id) return;
+    $('nd-name').textContent = NPCS[id]?.name || '';
+    $('nd-text').textContent = t(`dlg.${id}.${this.dlgIdx}`);
+    const hasNext = t(`dlg.${id}.${this.dlgIdx + 1}`) !== `dlg.${id}.${this.dlgIdx + 1}`;
+    $('nd-next').classList.toggle('hidden', !hasNext);
+    $('nd-next').textContent = t('dlg.next');
+    $('nd-close').textContent = t('common.close');
+    // the drill master offers a round of training on his last page
+    const train = id === 'treino' && !hasNext;
+    $('nd-train').classList.toggle('hidden', !train);
+    if (train) $('nd-train').textContent = t('dlg.train');
+  }
+
+  closeNpcDialog() {
+    this.dlgId = null;
+    this.hide('npc-dialog');
+  }
+
+  // the on-screen "exit training" button while training mode is active
+  setTraining(on) {
+    $('train-exit').classList.toggle('hidden', !on);
+    if (on) {
+      $('train-exit').textContent = t('train.exit');
+      this.toast(t('train.enter'), 'gold');
+    }
+  }
+
+  // location title card in the boss-banner style, shown once the intro
+  // clears — bridges into the portal arrival. Returns its lifetime (ms).
+  showLocationBanner() {
+    const b = $('boss-banner');
+    clearTimeout(this._bannerT);
+    $('bb-tag').textContent = '';       // just the ornamental flourish
+    $('bb-name').textContent = t('intro.templeName');
+    $('bb-flavor').textContent = '';    // no subtitle
+    b.classList.remove('hidden', 'boss', 'mini', 'location');
+    void b.offsetWidth;
+    b.classList.add('location');
+    const DUR = 2600;
+    this._bannerT = setTimeout(() => b.classList.add('hidden'), DUR);
+    return DUR;
   }
 
   // huge dramatic splash when a (mini-)boss stomps onto the field
@@ -1118,7 +1251,7 @@ export class UI {
     if (near === this.shopNear) return;
     this.shopNear = near;
     $('petshop-prompt').classList.toggle('hidden', !near);
-    if (near) sfx.notify();
+    if (near) sfx.chat();
     else if (this.petPanelOpen) this.closePetPanel();
     if (this.petPanelOpen) this.renderPetPanel();
   }
@@ -1312,7 +1445,7 @@ export class UI {
     if (near === this.smithNear) return;
     this.smithNear = near;
     $('weaponshop-prompt').classList.toggle('hidden', !near);
-    if (near) sfx.notify();
+    if (near) sfx.chat();
     else if (this.weaponPanelOpen) this.closeWeaponPanel();
     if (this.weaponPanelOpen) this.renderWeaponPanel();
   }

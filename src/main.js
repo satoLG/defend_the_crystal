@@ -6,6 +6,7 @@ import {
 import { CharacterPreview } from './render/preview.js';
 import { Sim } from './sim/sim.js';
 import { Grid, worldToCell, cellToWorld, findJump, computeDashEnd } from './sim/grid.js';
+import { terrainY, ELEV, NPCS, findColliderJump } from './sanctuary.js';
 import { Net, selfId } from './net.js';
 import { SnapBuffer } from './net_interp.js';
 import { Input } from './input.js';
@@ -53,6 +54,9 @@ const state = {
   lastInputSend: 0,
   lastSnapSend: 0,
   lastStaticSend: 0,
+  // mirrors the sim's free-roam rule: the sanctuary only opens during
+  // checkpoints / before wave 1 — local prediction clamps the same way
+  allowPlaza: true,
   // clients cache the static geometry (towers/obstacles/graves) from the
   // last snapshot that carried it, and re-merge it into the lean per-tick
   // snapshots so the rest of the pipeline still sees a full snapshot.
@@ -125,6 +129,8 @@ async function boot() {
     onDragEnd: (item, drop) => onDragEnd(item, drop),
     onPanelClose: () => gs.hideRange(),
     onLeaveLobby: () => leaveLobby(),
+    // enter/leave training mode at the drill master's yard
+    onTrain: (on) => sendAction({ t: 'train', on: on ? 1 : 0 }),
     // the equipped pet changed (swap / rename / level-up) — tell the
     // host so the buffs & the follower everyone sees update live
     onPetChange: (pet) => { if (state.started) sendAction({ t: 'pet', pet }); },
@@ -295,6 +301,14 @@ function startMatch() {
 function enterGame() {
   state.started = true;
   state.over = false;
+  // black screen typing the crystal's plea, then a "Crystal Temple"
+  // title card as the scene fades in, and the hero steps out of the
+  // portal the moment that card clears — no dead wait
+  const introDur = ui.playIntro();
+  // the title card appears right as the black screen clears, and the
+  // hero steps out of the portal the moment the card fades
+  setTimeout(() => { if (state.started && !state.over) ui.showLocationBanner(); }, introDur * 1000);
+  view.beginArrival(introDur + 2.6);
   ui.showHud();
   sfx.notify();
 }
@@ -533,11 +547,21 @@ function jumpHeading() {
   return Math.hypot(dir.x, dir.z) > 0.15 ? Math.atan2(dir.x, dir.z) : null;
 }
 
+// a jump the local hero can currently make: a blocked grid cell in
+// front, or — in the open sanctuary — a hoppable prop/NPC/lantern
+function findAnyJump() {
+  const s = state.self;
+  const info = findJump(clientGridRef(), s.x, s.z, localJumpCells(), jumpHeading());
+  if (info) return info;
+  if (state.allowPlaza) return findColliderJump(s.x, s.z, PLAYER.RADIUS, jumpHeading());
+  return null;
+}
+
 function doJump() {
   const s = state.self;
   if (!state.started || state.over || s.dead || s.jump || s.dash) return false;
   if (state.role === 'client' && !state.selfInit) return false;
-  const info = findJump(clientGridRef(), s.x, s.z, localJumpCells(), jumpHeading());
+  const info = findAnyJump();
   if (!info) return false;
   const dur = jumpDurFor(info.span);
   s.jump = { fx: s.x, fz: s.z, tx: info.to.x, tz: info.to.z, t: 0, dur };
@@ -554,7 +578,8 @@ function updateJumpButton() {
   const s = state.self;
   const ok = state.started && !state.over && !s.dead && !s.jump && !s.dash &&
     (state.role === 'host' || state.selfInit) &&
-    !!findJump(clientGridRef(), s.x, s.z, localJumpCells());
+    (!!findJump(clientGridRef(), s.x, s.z, localJumpCells()) ||
+      (state.allowPlaza && !!findColliderJump(s.x, s.z, PLAYER.RADIUS)));
   if (ok !== jumpWasEnabled) {
     jumpWasEnabled = ok;
     ui.setJumpEnabled(ok);
@@ -666,6 +691,11 @@ function handleEvent(ev) {
         }
       }
       break;
+    case 'train':
+      // the on-screen "exit training" button follows the sim's word —
+      // it also ends by distance or when a wave starts
+      if (ev.id === selfId) ui.setTraining(ev.on === 1);
+      break;
     case 'petswap':
       if (ev.id === selfId) sfx.notify();
       break;
@@ -702,6 +732,11 @@ function handleEvent(ev) {
       ui.hideGameOver();
       view.reset();
       syncSelfFromSim();
+      { // the party re-enters through the portal after the plea + title
+        const dur = ui.playIntro();
+        setTimeout(() => { if (state.started && !state.over) ui.showLocationBanner(); }, dur * 1000);
+        view.beginArrival(dur + 2.6);
+      }
       ui.toast(t('toast.newDefense'), 'gold');
       break;
   }
@@ -748,11 +783,12 @@ function reconcileSelf(snap) {
 }
 
 function syncClientGrid(snap) {
-  // rebuild blocked cells only when the structure set changes
+  // rebuild blocked cells only when the structure set changes;
+  // resetBlocked keeps the permanent colonnade cells in place
   const key = snap.tw.map((t) => `${t[2]},${t[3]}`).concat(snap.ob.map((o) => `${o[2]},${o[3]}`)).sort().join(';');
   if (key === state.blockedKey) return;
   state.blockedKey = key;
-  state.clientGrid.blocked.fill(0);
+  state.clientGrid.resetBlocked();
   for (const t of snap.tw) state.clientGrid.blocked[t[3] * GRID.COLS + t[2]] = 1;
   for (const o of snap.ob) state.clientGrid.blocked[o[3] * GRID.COLS + o[2]] = 1;
   state.clientGrid.computeFlow();
@@ -855,7 +891,9 @@ function stepSelf(dt) {
   const dxTot = vx * dt, dzTot = vz * dt;
   const steps = Math.max(1, Math.ceil(Math.hypot(dxTot, dzTot) / PLAYER.KB_STEP));
   for (let i = 0; i < steps; i++) {
-    const fixed = grid.resolveCircle(s.x + dxTot / steps, s.z + dzTot / steps, PLAYER.RADIUS, true);
+    const fixed = grid.resolveCircle(
+      s.x + dxTot / steps, s.z + dzTot / steps, PLAYER.RADIUS, state.allowPlaza, true
+    );
     s.x = fixed.x; s.z = fixed.z;
   }
 }
@@ -872,6 +910,15 @@ function frame(t) {
   const now = t / 1000;
   const dt = Math.min(now - (lastT || now), 0.1);
   lastT = now;
+
+  // free-roam = the sanctuary is open (checkpoints / before wave 1).
+  // Resolved up front because self-prediction needs it: once a match is
+  // running there's no walking back down until the next checkpoint.
+  const uiSnap = state.role === 'host' ? null : state.snaps.latest();
+  const phase = state.role === 'host' ? state.sim?.phase : uiSnap?.ph;
+  const waveN = state.role === 'host' ? state.sim?.wave : uiSnap?.w;
+  const freeRoam = phase === 'checkpoint' || (phase === 'build' && waveN === 0);
+  state.allowPlaza = !state.started || state.over || freeRoam;
 
   if (state.started && !state.over) stepSelf(dt);
   updateJumpButton();
@@ -934,24 +981,29 @@ function frame(t) {
   // checkpoints are free time: the camera leaves the board framing and
   // follows the hero while they stroll (and rest) around the sanctuary.
   // The match start counts as the first checkpoint — the pre-wave-1
-  // build phase gets the same free-roam camera.
-  const uiSnap = state.role === 'host' ? null : state.snaps.latest();
-  const phase = state.role === 'host' ? state.sim?.phase : uiSnap?.ph;
-  const waveN = state.role === 'host' ? state.sim?.wave : uiSnap?.w;
-  const freeRoam = phase === 'checkpoint' || (phase === 'build' && waveN === 0);
+  // build phase gets the same free-roam camera. The follow target rides
+  // the terrain height so the camera dips down the sanctuary stairs.
   if (state.started && !state.over && freeRoam &&
       (state.role === 'host' || state.selfInit) && !state.self.dead) {
-    gs.setFollow(state.self.x, state.self.z);
+    gs.setFollow(state.self.x, state.self.z, terrainY(state.self.z));
   } else {
     gs.clearFollow();
   }
+
+  // while a wave rages the sanctuary is far off-camera: hide its
+  // dwellers & skip their updates. Kept on while the follow-cam is
+  // still blending back up so nothing pops out mid-glide.
+  const sanctOn = !state.started || state.over || freeRoam || gs.followBlend > 0.03;
+  view.setSanctuaryActive(sanctOn);
+  gs.setSanctuaryActive(sanctOn);
 
   // background music follows the situation: calm at the checkpoint,
   // the normal loop mid-wave, and heavier beds while a (mini-)boss lives
   music.setMode(pickMusicMode(freeRoam));
 
   // standing at Tonho's stall in the plaza unlocks buying at the shop
-  const canRoam = state.started && !state.over && !state.self.dead &&
+  // (vendors are only reachable while the sanctuary is open anyway)
+  const canRoam = state.started && !state.over && !state.self.dead && freeRoam &&
     (state.role === 'host' || state.selfInit);
   const atShop = canRoam &&
     dist2d(state.self.x, state.self.z, PET_SHOP_POS.x, PET_SHOP_POS.z) < PET_SHOP_RADIUS;
@@ -960,10 +1012,24 @@ function frame(t) {
   const atSmith = canRoam &&
     dist2d(state.self.x, state.self.z, WEAPON_SHOP_POS.x, WEAPON_SHOP_POS.z) < WEAPON_SHOP_RADIUS;
   ui.setSmithNear(atSmith);
+  // …and walking up to one of the talkable NPCs (guide / cleric /
+  // drill master) surfaces a "talk" prompt under them — conversations
+  // are checkpoint-only, same as the shops
+  let nearNpc = null;
+  if (canRoam) {
+    for (const id of ['duvidas', 'blessings', 'treino']) {
+      if (dist2d(state.self.x, state.self.z, NPCS[id].x, NPCS[id].z) < 2.7) {
+        nearNpc = id;
+        break;
+      }
+    }
+  }
+  ui.setNpcNear(nearNpc);
   // pin each shop button under its vendor's model (screen-space) rather
   // than at a fixed corner — project the NPC's feet and drop it below
   pinPrompt('petshop-prompt', PET_SHOP_POS);
   pinPrompt('weaponshop-prompt', WEAPON_SHOP_POS);
+  if (nearNpc) pinPrompt('npc-prompt', NPCS[nearNpc]);
 
   gs.update(dt);
   if (view) view.update(dt, gs.camera, selfPose());
@@ -997,13 +1063,13 @@ function pickMusicMode(freeRoam) {
   return boss === 2 ? 'boss' : boss === 1 ? 'subboss' : 'wave';
 }
 
-// pin a shop's HTML prompt just under its vendor's model. Skips work
-// while the button is hidden (not near the shop) or the vendor is
-// behind the camera.
+// pin a shop's HTML prompt just under its vendor's model (vendors live
+// on the sunken sanctuary floor, hence the -ELEV). Skips work while the
+// button is hidden (not near the shop) or the vendor is behind the camera.
 function pinPrompt(id, worldPos) {
   const el = document.getElementById(id);
   if (!el || el.classList.contains('hidden')) return;
-  const s = gs.projectToScreen(worldPos.x, 0.1, worldPos.z);
+  const s = gs.projectToScreen(worldPos.x, -ELEV + 0.1, worldPos.z);
   if (!s) return;
   el.style.left = `${s.x}px`;
   el.style.top = `${s.y + 12}px`;

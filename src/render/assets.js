@@ -32,6 +32,11 @@ const MANIFEST = {
   'char-tanker': M('characters/character-soldier.glb', { char: true }),
   'char-archer': M('characters/archer.glb', { char: true }),
   'char-mage': M('characters/mage.glb', { char: true }),
+  // sanctuary-dweller bodies (Kenney mini-characters / mini-market —
+  // they share one external colormap.png under characters/Textures/)
+  'char-male-f': M('characters/character-male-f.glb', { char: true }),
+  'char-male-e': M('characters/character-male-e.glb', { char: true }),
+  'char-employee': M('characters/character-employee.glb', { char: true }),
   // enemies (rigged + animated) — normal-size enemies share it too;
   // bosses/subbosses still scale up on top (per-entity scale in the sim)
   'enemy-skeleton': M('enemies/skeleton.glb', { char: true }),
@@ -76,6 +81,10 @@ const MANIFEST = {
   // obstacles — big and chunky so they read as impassable
   'obstacle-barrel': M('obstacles/barrel.glb', { fp: 1.6 }),
   'obstacle-rocks': M('env/rocks-tall.glb', { h: 1.5 }),
+  // round archery target strapped to the training dummy's chest
+  'kit-target': M('kit/target-a-round.glb', { fp: 0.5 }),
+  // a basket of fruit for the sanctuary floor (mini-market kit)
+  'kit-fruit': M('kit/display-fruit.glb', { fp: 1.0 }),
   // companion pets (Kenney Cube Pets — node-animated: idle/walk/run/
   // eat/dance/gestures). Heights tuned per animal so they read as small
   // critters trotting at their hero's heels.

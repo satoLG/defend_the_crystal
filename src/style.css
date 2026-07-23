@@ -777,6 +777,23 @@ input:focus { border-color: var(--gold); }
   animation: banner-in 0.4s cubic-bezier(0.18, 1.3, 0.4, 1),
     banner-out 0.5s ease-in 1.9s forwards;
 }
+/* calm location title card: white, no shake, smooth fade in & out, the
+   ornamental flourish sits UNDER the name, and it wraps + shrinks so the
+   name always fits on a phone */
+#boss-banner.location {
+  gap: 8px;
+  animation: loc-in 0.7s ease both, loc-out 0.7s ease 1.9s forwards;
+}
+#boss-banner.location #bb-name {
+  order: 1; color: #fff; text-transform: none; white-space: normal;
+  font-size: clamp(1.5rem, 6.4vw, 2.7rem); letter-spacing: 1px; font-weight: 800;
+  text-shadow: 0 0 18px rgba(255, 255, 255, 0.35), 0 3px 12px rgba(0, 0, 0, 0.9);
+}
+#boss-banner.location #bb-tag { order: 2; min-height: 18px; }
+#boss-banner.location #bb-flavor { display: none; }
+@keyframes loc-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes loc-out { from { opacity: 1; } to { opacity: 0; } }
+
 @keyframes banner-in { from { opacity: 0; transform: scale(1.9); } }
 @keyframes banner-shake {
   20% { transform: translate(-7px, 2px) rotate(-1deg); }
@@ -1106,6 +1123,51 @@ input:focus { border-color: var(--gold); }
   0%, 100% { box-shadow: 0 4px 16px rgba(0, 0, 0, 0.55), 0 0 14px rgba(242, 242, 245, 0.35); }
   50% { box-shadow: 0 4px 16px rgba(0, 0, 0, 0.55), 0 0 26px rgba(242, 242, 245, 0.7); }
 }
+
+/* floating "talk" prompt pinned under the nearest sanctuary NPC —
+   same projection treatment as the two shop prompts */
+#npc-prompt {
+  position: fixed; left: 0; top: 0; transform: translate(-50%, 0);
+  background: linear-gradient(180deg, rgba(22, 22, 26, 0.96), rgba(12, 12, 15, 0.96));
+  color: var(--text); border: 1.5px solid var(--line); border-radius: 20px;
+  padding: 8px 16px; font-family: inherit; font-weight: 500; font-size: 0.9rem;
+  cursor: pointer; display: flex; align-items: center; gap: 8px; white-space: nowrap;
+  animation: petshop-glow 1.6s infinite; touch-action: none;
+}
+
+/* NPC conversation panel */
+.npc-dialog-panel { max-width: 420px; text-align: left; }
+.nd-name {
+  font-weight: 800; font-size: 1.05rem; color: #e8b84b; margin-bottom: 8px;
+}
+.nd-text { min-height: 84px; line-height: 1.5; font-size: 0.95rem; }
+.nd-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; }
+
+/* exit button while training mode runs at the dummies */
+#train-exit {
+  position: fixed; left: 50%; bottom: 132px; transform: translateX(-50%);
+  z-index: 40;
+}
+
+/* black-screen intro: the crystal's plea typed out letter by letter
+   just before the hero materializes at the sanctuary portal */
+#intro-overlay {
+  position: fixed; inset: 0; z-index: 220; background: #000;
+  display: flex; align-items: center; justify-content: center;
+  opacity: 1; transition: opacity 0.75s ease; pointer-events: all;
+}
+#intro-overlay.fade { opacity: 0; pointer-events: none; }
+#intro-overlay.hidden { display: none; }
+#intro-text {
+  font-weight: 800; letter-spacing: 0.2em; text-align: center;
+  font-size: clamp(1.1rem, 4.2vw, 2rem); color: #f2f2f2; padding: 0 18px;
+  text-shadow: 0 0 18px rgba(255, 255, 255, 0.35);
+}
+#intro-text::after {
+  content: '▌'; margin-left: 5px; color: #f2f2f2;
+  animation: intro-caret 0.8s steps(1) infinite;
+}
+@keyframes intro-caret { 50% { opacity: 0; } }
 
 /* weapon tier badges: Normal → Gold → Crystal */
 .wpn-tier {

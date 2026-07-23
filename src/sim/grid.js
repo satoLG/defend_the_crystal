@@ -1,4 +1,13 @@
 import { GRID } from '../config.js';
+import { PLAZA, BLOCKED_CELLS, SANCT_COLLIDERS, CROSS_Z } from '../sanctuary.js';
+
+// the pedestal + crystal are solid to players (they walk around it via
+// the passage tile on each side, never through it)
+const CRYSTAL_R = 1.25;
+
+// plaza dims re-exported so existing importers keep working — the
+// layout itself now lives in sanctuary.js alongside the rest
+export { PLAZA };
 
 // ============================================================
 // Grid model: blocked cells, buildability rules, and a BFS
@@ -24,12 +33,6 @@ export const worldToCell = (x, z) => ({
 export const CRYSTAL_POS = cellToWorld(CRYSTAL.c, CRYSTAL.r);
 export const HALF_W = (COLS * CELL) / 2;
 export const HALF_H = (ROWS * CELL) / 2;
-
-// sanctuary plaza behind the board's south edge — a paved resting
-// spot players can wander into between waves (enemies never path
-// there; their goal is the crystal, which lives on the board).
-// Deep enough to actually stroll around in during checkpoints.
-export const PLAZA = { HALF_W: 8, DEPTH: 13 };
 
 // Jump check: standing at (x,z) facing along yaw, can the character
 // vault over a run of consecutive blocked cells (towers/obstacles) and
@@ -182,7 +185,15 @@ export class Grid {
     this.blocked = new Uint8Array(COLS * ROWS);
     this.dist = new Int32Array(COLS * ROWS);
     this.next = new Int32Array(COLS * ROWS); // index of next cell toward crystal, -1 = none/goal
+    this.resetBlocked();
     this.computeFlow();
+  }
+
+  // wipe every dynamic block (towers/obstacles) but keep the permanent
+  // ones — the colonnade of pillars & statues flanking the crystal
+  resetBlocked() {
+    this.blocked.fill(0);
+    for (const b of BLOCKED_CELLS) this.blocked[idx(b.c, b.r)] = 1;
   }
 
   isBlocked(c, r) { return !inBounds(c, r) || this.blocked[idx(c, r)] === 1; }
@@ -293,9 +304,12 @@ export class Grid {
   }
 
   // Circle-vs-blocked-cells collision resolve for characters.
-  // Returns corrected {x,z}. allowPlaza lets players (not enemies)
-  // step off the south edge into the sanctuary plaza.
-  resolveCircle(x, z, radius, allowPlaza = false) {
+  // Returns corrected {x,z}. allowPlaza lets players (not enemies) step
+  // off the south edge into the sanctuary plaza. `player` gates the
+  // player-only rules: the crystal/pedestal is solid to them, and while
+  // the sanctuary is locked (mid-match) they can't slip south past the
+  // crystal into it — that's checkpoint-only.
+  resolveCircle(x, z, radius, allowPlaza = false, player = false) {
     const margin = 0.05;
     if (allowPlaza && z > HALF_H - radius) {
       // already south of the battlefield: confined to the plaza's width
@@ -303,9 +317,10 @@ export class Grid {
     } else {
       x = Math.min(Math.max(x, -HALF_W + radius + margin), HALF_W - radius - margin);
     }
-    const southMax = allowPlaza && Math.abs(x) < PLAZA.HALF_W - radius
-      ? HALF_H + PLAZA.DEPTH
-      : HALF_H;
+    let southMax;
+    if (allowPlaza && Math.abs(x) < PLAZA.HALF_W - radius) southMax = HALF_H + PLAZA.DEPTH;
+    else if (player && !allowPlaza) southMax = CROSS_Z; // no going behind the crystal mid-wave
+    else southMax = HALF_H;
     z = Math.min(Math.max(z, -HALF_H + radius + margin), southMax - radius - margin);
     const { c, r } = worldToCell(x, z);
     for (let rr = r - 1; rr <= r + 1; rr++) {
@@ -329,6 +344,30 @@ export class Grid {
           const d = Math.sqrt(d2);
           x = px + (dx / d) * radius;
           z = pz + (dz / d) * radius;
+        }
+      }
+    }
+    if (player) {
+      // the crystal's pedestal is solid — push the hero out of it
+      const cdx = x - CRYSTAL_POS.x, cdz = z - CRYSTAL_POS.z;
+      const crr = radius + CRYSTAL_R;
+      const cd2 = cdx * cdx + cdz * cdz;
+      if (cd2 < crr * crr && cd2 > 1e-6) {
+        const d = Math.sqrt(cd2);
+        x = CRYSTAL_POS.x + (cdx / d) * crr;
+        z = CRYSTAL_POS.z + (cdz / d) * crr;
+      }
+      // sanctuary props & dwellers (fountain, stalls, NPCs, dummies) are
+      // solid too — plain circle push-outs, only down on the plaza floor
+      if (z > HALF_H) {
+        for (const col of SANCT_COLLIDERS) {
+          const dx = x - col.x, dz = z - col.z;
+          const rr = radius + col.r;
+          const d2 = dx * dx + dz * dz;
+          if (d2 >= rr * rr || d2 < 1e-6) continue;
+          const d = Math.sqrt(d2);
+          x = col.x + (dx / d) * rr;
+          z = col.z + (dz / d) * rr;
         }
       }
     }

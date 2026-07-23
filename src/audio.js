@@ -11,6 +11,7 @@ import { music } from './music.js';
 
 let ready = false;
 let sfxVolume = 0.45;
+let synthCtx = null; // our own WebAudio context for synthesized sounds
 const lastPlayed = {};
 
 export function initAudio() {
@@ -51,6 +52,83 @@ export function resumeSfx() {
   if (ctx && ctx.state !== 'running') {
     try { ctx.resume().catch(() => {}); } catch { /* ok */ }
   }
+  // keep our own synth context alive too (portal sound)
+  if (synthCtx && synthCtx.state === 'suspended') {
+    try { synthCtx.resume().catch(() => {}); } catch { /* ok */ }
+  }
+}
+
+// the tiks context is dug out heuristically and often isn't reachable,
+// which is why the portal was silent — so synthesized sounds get their
+// own context, created lazily and resumed on every gesture.
+function getSynthCtx() {
+  try {
+    if (!synthCtx) {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return null;
+      synthCtx = new AC();
+    }
+    if (synthCtx.state === 'suspended') synthCtx.resume().catch(() => {});
+  } catch { synthCtx = null; }
+  return synthCtx;
+}
+
+// A synthesized ETHEREAL portal sound (tiks' little blips can't do this):
+// a stack of detuned oscillators that glide UP in pitch while a lowpass
+// filter opens, swelling in and fading out over the whole ~2s portal
+// animation — one continuous magical rise, no beeps.
+function playPortalTone() {
+  if (sfxVolume <= 0) return; // respect the sfx mute
+  const ctx = getSynthCtx();
+  if (!ctx) return;
+  const t0 = ctx.currentTime;
+  const dur = 2.0;
+  const vol = sfxVolume * 0.6;
+
+  const master = ctx.createGain();
+  master.gain.setValueAtTime(0.0001, t0);
+  master.gain.exponentialRampToValueAtTime(vol, t0 + 0.4);   // swell open
+  master.gain.setValueAtTime(vol, t0 + 1.25);                // hold
+  master.gain.exponentialRampToValueAtTime(0.0001, t0 + dur); // fade closed
+  master.connect(ctx.destination);
+
+  const filter = ctx.createBiquadFilter();
+  filter.type = 'lowpass';
+  filter.Q.value = 7;
+  filter.frequency.setValueAtTime(350, t0);
+  filter.frequency.exponentialRampToValueAtTime(4200, t0 + 1.35); // shimmer opens up
+  filter.connect(master);
+
+  // three voices gliding up an octave-and-a-bit, each a hair louder low
+  const voices = [
+    { type: 'sine', from: 174, to: 523, gain: 0.5 },
+    { type: 'triangle', from: 262, to: 784, gain: 0.28 },
+    { type: 'sine', from: 349, to: 1046, gain: 0.16 },
+  ];
+  const stops = [];
+  for (const v of voices) {
+    const osc = ctx.createOscillator();
+    osc.type = v.type;
+    osc.frequency.setValueAtTime(v.from, t0);
+    osc.frequency.exponentialRampToValueAtTime(v.to, t0 + 1.45);
+    const g = ctx.createGain();
+    g.gain.value = v.gain;
+    osc.connect(g); g.connect(filter);
+    osc.start(t0); osc.stop(t0 + dur + 0.1);
+    stops.push(osc);
+  }
+  // a gentle vibrato on a high sparkle voice for the "magical" shimmer
+  const lfo = ctx.createOscillator(); lfo.frequency.value = 6;
+  const lfoGain = ctx.createGain(); lfoGain.gain.value = 10;
+  const spark = ctx.createOscillator();
+  spark.type = 'sine';
+  spark.frequency.setValueAtTime(880, t0);
+  spark.frequency.exponentialRampToValueAtTime(1760, t0 + 1.45);
+  lfo.connect(lfoGain); lfoGain.connect(spark.frequency);
+  const sg = ctx.createGain(); sg.gain.value = 0.07;
+  spark.connect(sg); sg.connect(filter);
+  lfo.start(t0); spark.start(t0);
+  lfo.stop(t0 + dur + 0.1); spark.stop(t0 + dur + 0.1);
 }
 
 const isIOS = () =>
@@ -85,6 +163,7 @@ export function armAudioOnFirstGesture(onGesture) {
   const arm = () => {
     initAudio();
     ensurePlaybackSession();
+    getSynthCtx(); // create/unlock the synth context inside the gesture
     onGesture?.();
     resumeSfx();
     music.unlock();
@@ -134,6 +213,17 @@ export const sfx = {
   levelUp: () => ready && throttled('lvl', 200, () => tiks.success()),
   wave: () => ready && throttled('wave', 400, () => tiks.notify()),
   notify: () => ready && throttled('notify', 200, () => tiks.notify()),
+  // soft per-character tick for the typewriter intro
+  type: () => ready && throttled('type', 25, () => tiks.hover()),
+  // the arrival portal: a continuous ethereal rise (synthesized, see
+  // playPortalTone) that swells open and fades closed over the animation
+  portal: () => ready && throttled('portal', 400, () => playPortalTone()),
+  // gentle "start of a conversation" chime when stepping up to an NPC —
+  // softer & less jarring than the old notify
+  chat: () => ready && throttled('chat', 350, () => {
+    tiks.hover();
+    setTimeout(() => { try { tiks.hover(); } catch { /* ok */ } }, 90);
+  }),
   breach: () => ready && throttled('breach', 250, () => tiks.warning()),
   error: () => ready && throttled('err', 150, () => tiks.error()),
   success: () => ready && throttled('ok', 150, () => tiks.success()),

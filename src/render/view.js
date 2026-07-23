@@ -1,10 +1,13 @@
 import * as THREE from 'three';
 import { instantiate, getTemplate } from './assets.js';
-import { buildTexture, applyTexture } from './customize.js';
+import { buildTexture, applyTexture, getSlots } from './customize.js';
 import { iconPaths } from '../icons.js';
 import { CLASSES, TOWERS, JUMP, ENEMIES, BOSSES, PETS, WEAPONS, classStarterWeapons } from '../config.js';
 import { t, bossNameByKind } from '../i18n.js';
 import { cellToWorld, CRYSTAL_POS, HALF_H, PLAZA } from '../sim/grid.js';
+import {
+  ELEV, terrainY, NPCS, AMBIENT_NPCS, DUMMIES, PORTAL, PET_STALL, WEAPON_STALL,
+} from '../sanctuary.js';
 import { lerp, angleLerp } from '../utils.js';
 import { sfx } from '../audio.js';
 
@@ -96,6 +99,55 @@ function tierTexture(modelKey, kind, stage /* 0 = stage-2, 1 = stage-3 */) {
     }
   }
   tierTexCache.set(key, tex);
+  return tex;
+}
+
+// Recolor a mini-character atlas by hue rule (currently only 'green' →
+// a target colour), preserving per-pixel shading. Cached per model+rules
+// and cloned so no other actor wearing the shared colormap is affected.
+const npcHueCache = new Map();
+function npcHueTexture(modelKey, rules) {
+  const key = modelKey + '|' + rules.map((r) => r.match + r.to).join(',');
+  if (npcHueCache.has(key)) return npcHueCache.get(key);
+  let src = null;
+  getTemplate(modelKey).group.traverse((o) => {
+    if (!src && (o.isMesh || o.isSkinnedMesh)) {
+      const m = Array.isArray(o.material) ? o.material[0] : o.material;
+      if (m?.map?.image) src = m.map;
+    }
+  });
+  let tex = null;
+  if (src?.image) {
+    const img = src.image;
+    const cv = document.createElement('canvas');
+    cv.width = img.width; cv.height = img.height;
+    const ctx = cv.getContext('2d');
+    ctx.drawImage(img, 0, 0);
+    const data = ctx.getImageData(0, 0, cv.width, cv.height);
+    const d = data.data;
+    const cl = (v) => Math.min(Math.max(Math.round(v), 0), 255);
+    for (const rule of rules) {
+      if (rule.match !== 'green') continue;
+      const to = new THREE.Color(rule.to);
+      const tr = to.r * 255, tg = to.g * 255, tb = to.b * 255;
+      for (let i = 0; i < d.length; i += 4) {
+        const r = d[i], g = d[i + 1], b = d[i + 2];
+        if (d[i + 3] > 8 && g > r + 12 && g > b + 12) {
+          const f = lumOf(r, g, b) / Math.max(lumOf(0, 200, 0), 1);
+          d[i] = cl(tr * f); d[i + 1] = cl(tg * f); d[i + 2] = cl(tb * f);
+        }
+      }
+    }
+    ctx.putImageData(data, 0, 0);
+    tex = new THREE.CanvasTexture(cv);
+    tex.flipY = src.flipY;
+    tex.colorSpace = src.colorSpace;
+    tex.wrapS = src.wrapS; tex.wrapT = src.wrapT;
+    tex.magFilter = src.magFilter; tex.minFilter = src.minFilter;
+    tex.generateMipmaps = src.generateMipmaps;
+    tex.needsUpdate = true;
+  }
+  npcHueCache.set(key, tex);
   return tex;
 }
 
@@ -626,15 +678,13 @@ function paintSpecDetail(weapon, spec) {
   }
 }
 
-// the two sanctuary vendors stand where the old fountains were (±4.1,
-// mid-plaza), both turned to face the camera so the player reads them
-// clearly. main.js checks the local hero's distance to unlock each
-// shop, and projects these to screen to pin the shop button under the
-// vendor. Tonho (pets) on the right, Baru (weapons) on the left.
-const VENDOR_Z = HALF_H + PLAZA.DEPTH / 2;
-export const PET_SHOP_POS = { x: 4.1, z: VENDOR_Z };
+// the two sanctuary vendors live in the plaza's far corners now (see
+// sanctuary.js for the whole layout). main.js checks the local hero's
+// distance to unlock each shop, and projects these to screen to pin
+// the shop button under the vendor. Tonho (pets) right, Baru left.
+export const PET_SHOP_POS = { x: NPCS.pets.x, z: NPCS.pets.z };
 export const PET_SHOP_RADIUS = 3.2;
-export const WEAPON_SHOP_POS = { x: -4.1, z: VENDOR_Z };
+export const WEAPON_SHOP_POS = { x: NPCS.weapons.x, z: NPCS.weapons.z };
 export const WEAPON_SHOP_RADIUS = 3.2;
 
 export class GameView {
@@ -740,6 +790,11 @@ export class GameView {
     }
     this.npcs = [];
     this.showPets = []; // the vendor's display critters goofing around
+    // everything living on the sanctuary floor registers here so it can
+    // be hidden (and its updates skipped) while a wave rages — the
+    // sanctuary is far off-camera then, no need to render or animate it
+    this.sanctNodes = [];
+    this.sanctActive = true;
     this.spawnNpcs();
     this.spawnPetShop();
     this.spawnWeaponShop();
@@ -850,6 +905,35 @@ export class GameView {
     fg.position.x = -width * (1 - frac) / 2;
     if (color) fg.material.color.set(color);
     else fg.material.color.setHSL(lerp(0, 0.33, frac), 0.75, 0.5);
+  }
+
+  // auto-sized speech bubble for longer NPC lines (the fixed-canvas
+  // makeTextSprite would clip them) — width follows the text
+  makeBubbleSprite(text) {
+    const ss = 2, H = 64, pad = 18;
+    const font = 'bold 36px "Trebuchet MS", sans-serif';
+    const meas = document.createElement('canvas').getContext('2d');
+    meas.font = font;
+    const W = Math.max(120, Math.ceil(meas.measureText(text).width) + pad * 2);
+    const canvas = document.createElement('canvas');
+    canvas.width = W * ss; canvas.height = H * ss;
+    const ctx = canvas.getContext('2d');
+    ctx.scale(ss, ss);
+    ctx.font = font;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.lineWidth = 7;
+    ctx.strokeStyle = 'rgba(0,0,0,0.78)';
+    ctx.strokeText(text, W / 2, H / 2);
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText(text, W / 2, H / 2);
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    const spr = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthWrite: false }));
+    const worldW = W * 0.0065;
+    spr.scale.set(worldW, worldW * H / W, 1);
+    spr.renderOrder = 11;
+    return spr;
   }
 
   makeTextSprite(text, tint, width = 3.1) {
@@ -975,6 +1059,21 @@ export class GameView {
       a.group.add(a.label);
     }
 
+    // arriving through the sanctuary portal. While an arrival is armed
+    // (the intro is playing) the hero stays hidden until the timer fires
+    // so the whole flare-open + step-out reads AFTER the scene appears;
+    // otherwise (a late checkpoint join) it plays right away.
+    if (Math.hypot(row[PL.X] - PORTAL.x, row[PL.Z] - PORTAL.z) < 3.5) {
+      if (this.arrivalArmed) {
+        a.arrivalPending = true;
+        a.group.visible = false;
+      } else {
+        this.spawnPortalFx();
+        a.spawnT = -0.22; // let the portal open a touch before the pop-in
+        a.group.scale.setScalar(0.01);
+      }
+    }
+
     this.scene.add(a.group);
     this.players.set(id, a);
     this.setLoco(a, 'idle');
@@ -1098,16 +1197,21 @@ export class GameView {
       }
       pet.ownerJumping = ownerJumping;
 
+      // the companion walks the same terrain as its owner (plateau,
+      // stairs, sanctuary floor); the leap arc rides on top of it
+      const baseY = terrainY(g.position.z);
       if (pet.jumpT != null) {
         pet.jumpT += dt;
         if (pet.jumpT <= 0) {
-          g.position.y = 0; // still crouched, waiting out the lag
+          g.position.y = baseY; // still crouched, waiting out the lag
         } else {
           const k = Math.min(pet.jumpT / pet.jumpDur, 1);
-          g.position.y = Math.sin(k * Math.PI) * pet.jumpH;
+          g.position.y = baseY + Math.sin(k * Math.PI) * pet.jumpH;
           g.rotation.x = -Math.sin(k * Math.PI) * 0.35; // nose-down tuck mid-air
-          if (k >= 1) { pet.jumpT = null; g.position.y = 0; g.rotation.x = 0; }
+          if (k >= 1) { pet.jumpT = null; g.position.y = baseY; g.rotation.x = 0; }
         }
+      } else {
+        g.position.y = baseY;
       }
     }
   }
@@ -1137,11 +1241,49 @@ export class GameView {
     actor.customTex = tex;
   }
 
+  // a live, attackable training dummy (sim-side enemy) — looks exactly
+  // like the static yard props it temporarily replaces
+  makeDummyActor(x, z) {
+    const group = this.makeDummyMesh();
+    // match the static yard prop nearest this spawn (same yaw & scale)
+    let near = DUMMIES[0];
+    let bestD = Infinity;
+    for (const d of DUMMIES) {
+      const dd = (d.x - x) ** 2 + (d.z - z) ** 2;
+      if (dd < bestD) { bestD = dd; near = d; }
+    }
+    group.rotation.y = near.yaw;
+    group.scale.setScalar(near.scale);
+    const mixer = new THREE.AnimationMixer(group); // no clips — API compat
+    const mats = [];
+    group.traverse((o) => {
+      if (o.isMesh && o.material) { o.material = o.material.clone(); mats.push(o.material); }
+    });
+    return {
+      group, mixer, actions: {}, mats, factor: 1,
+      current: null, currentName: null, oneShot: null, flashT: 0,
+    };
+  }
+
   ensureEnemy(row) {
     const id = row[EN.ID];
     let a = this.enemies.get(id);
     if (a) return a;
     const kind = row[EN.KIND];
+    if (kind === 'dummy') {
+      a = this.makeDummyActor(row[EN.X], row[EN.Z]);
+      a.kind = kind;
+      a.hpBar = this.makeHpBar(0.85, 1.75);
+      a.hpBar.visible = false;
+      a.group.add(a.hpBar);
+      a.statusMask = 0;
+      a.statusFx = {};
+      a.topLocal = 1.75;
+      a.fade = 1;
+      this.scene.add(a.group);
+      this.enemies.set(id, a);
+      return a;
+    }
     const def = ENEMIES[kind] || {};
     const isBoss = row[EN.BOSS] === 2;
     a = this.makeAnimated(def.model || `enemy-${kind}`);
@@ -1301,37 +1443,317 @@ export class GameView {
 
   // ---------------- sanctuary NPCs ----------------
 
-  // two dwellers pottering around the plaza behind the crystal; pure
-  // set dressing for now — walk up to them and they greet you ("Oi!")
+  // the sanctuary's dwellers: the four service NPCs around the fountain
+  // (guide, cheerleader, cleric, drill master — positions & facing in
+  // sanctuary.js, all turned roughly toward the portal so arriving
+  // players read them front-on) plus two ambient strollers
   spawnNpcs() {
     const defs = [
-      // Mira used to idle in the south-west corner — the weapon smith's
-      // hut lives there now, so she strolls closer to the fountains
-      { model: 'char-mage', name: 'Mira', tint: 0x8fd8c8, x: -1.4, z: HALF_H + PLAZA.DEPTH * 0.45, yaw: 0.8 },
-      { model: 'char-tanker', name: 'Bento', tint: 0xd8b06a, x: 2.3, z: HALF_H + PLAZA.DEPTH * 0.24, yaw: -0.7 },
+      // Theo the guide
+      { ...NPCS.duvidas, id: 'duvidas', model: 'char-male-e' },
+      // Nina the cheerleader: the mini-market employee, green apron dyed
+      // yellow — shouts a different encouragement every time you pass by
+      { ...NPCS.incentivo, id: 'incentivo', model: 'char-employee', rotate: true,
+        recolor: [{ match: 'green', to: 0xf2c33a }] },
+      // Iris the cleric: white hair, blue robe & tiara
+      { ...NPCS.blessings, id: 'blessings', model: 'char-mage',
+        recolor: [
+          { match: 'hair', to: 0xeef0f4 },
+          { match: 'outfit', to: 0x3f6fd8 },
+        ] },
+      { ...NPCS.treino, id: 'treino', model: 'char-berserker', tint: 0xc86a5a },
+      ...AMBIENT_NPCS,
     ];
-    for (const d of defs) this.mkNpc(d);
+    this.npcById = {};
+    for (const d of defs) {
+      const a = this.mkNpc(d);
+      if (d.id) this.npcById[d.id] = a;
+    }
+    // a glowing crystal shard stands at Iris's side (chest-high, so it
+    // reads clearly next to her)
+    const iris = NPCS.blessings;
+    const shard = instantiate('prop-crystal', { cloneMaterials: true }).group;
+    shard.scale.setScalar(1.9);
+    shard.position.set(iris.x + 0.95, terrainY(iris.z) + 0.15, iris.z + 0.35);
+    shard.traverse((o) => {
+      if (o.isMesh && o.material?.emissive) {
+        o.material.emissive.set(0x39b6e0);
+        o.material.emissiveIntensity = 0.85;
+      }
+    });
+    this.scene.add(shard);
+    this.sanctNodes.push(shard);
+    const shardGlow = new THREE.PointLight(0x66c8e8, 4, 5, 2);
+    shardGlow.position.set(iris.x + 0.95, terrainY(iris.z) + 1.0, iris.z + 0.35);
+    this.scene.add(shardGlow);
+    this.sanctNodes.push(shardGlow);
+
+    // a little stack of two books on the floor beside Theo, the guide
+    const theo = NPCS.duvidas;
+    const books = this.makeBookStack();
+    books.position.set(theo.x + 0.85, terrainY(theo.z), theo.z + 0.35);
+    books.rotation.y = -0.4;
+    this.scene.add(books);
+    this.sanctNodes.push(books);
+
+    this.buildTrainingDummies();
+  }
+
+  // two chunky books stacked on the ground (no kit has one, so it's a
+  // couple of coloured slabs with cream page edges)
+  makeBookStack() {
+    const g = new THREE.Group();
+    const covers = [0x9a3b2e, 0x2f5d8a];
+    const dims = [[0.5, 0.13, 0.36], [0.44, 0.12, 0.32]];
+    let y = 0;
+    dims.forEach((d, i) => {
+      const cover = new THREE.Mesh(
+        new THREE.BoxGeometry(d[0], d[1], d[2]),
+        new THREE.MeshStandardMaterial({ color: covers[i], roughness: 0.9, flatShading: true })
+      );
+      const pages = new THREE.Mesh(
+        new THREE.BoxGeometry(d[0] * 0.92, d[1] * 0.62, d[2] * 0.9),
+        new THREE.MeshStandardMaterial({ color: 0xe8e0cc, roughness: 1 })
+      );
+      cover.castShadow = true;
+      const yaw = (i - 0.5) * 0.4;
+      cover.position.set(0, y + d[1] / 2, 0); cover.rotation.y = yaw;
+      pages.position.copy(cover.position); pages.rotation.y = yaw;
+      g.add(cover, pages);
+      y += d[1];
+    });
+    return g;
+  }
+
+  // recolor a mini-character's shared colormap atlas by hue rule (green
+  // apron → yellow, mage hair → white, etc.), keeping per-pixel shading.
+  // Rules run on a per-actor clone so nothing else wearing the atlas is
+  // touched. Matchers: 'green' (apron/skin-green), 'hair' & 'outfit' use
+  // the customize analyzer's real part cells for precise targeting.
+  recolorNpc(actor, modelKey, rules) {
+    // pixel-hue rules (e.g. the employee's green apron)
+    const hueRules = rules.filter((r) => r.match === 'green');
+    if (hueRules.length) {
+      const tex = npcHueTexture(modelKey, hueRules);
+      if (tex) applyTexture(actor.group, modelKey, tex);
+    }
+    // part-cell rules (hair / outfit) via the customization analyzer
+    const partRules = rules.filter((r) => r.match === 'hair' || r.match === 'outfit');
+    if (partRules.length) {
+      const slots = getSlots(modelKey);
+      const colors = {};
+      for (const s of slots) {
+        const lbl = s.label.toLowerCase();
+        if (lbl.includes('skin')) continue;
+        const hair = partRules.find((r) => r.match === 'hair');
+        const outfit = partRules.find((r) => r.match === 'outfit');
+        if (lbl.includes('hair') && hair) colors[s.id] = '#' + new THREE.Color(hair.to).getHexString();
+        else if (outfit) colors[s.id] = '#' + new THREE.Color(outfit.to).getHexString();
+      }
+      const tex = buildTexture(modelKey, colors);
+      if (tex) applyTexture(actor.group, modelKey, tex);
+    }
+  }
+
+  // the drill master's target dummies: a wooden post with a crossbar
+  // and a painted target board, standing in his little training yard
+  buildTrainingDummies() {
+    this.dummyProps = [];
+    for (const d of DUMMIES) {
+      const g = this.makeDummyMesh();
+      g.position.set(d.x, terrainY(d.z), d.z);
+      g.rotation.y = d.yaw;
+      g.scale.setScalar(d.scale);
+      this.scene.add(g);
+      this.sanctNodes.push(g);
+      this.dummyProps.push(g);
+    }
+  }
+
+  makeDummyMesh() {
+    const g = new THREE.Group();
+    const wood = new THREE.MeshStandardMaterial({ color: 0x8a5a33, roughness: 1, flatShading: true });
+    const woodDark = new THREE.MeshStandardMaterial({ color: 0x6b431f, roughness: 1, flatShading: true });
+    const post = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.12, 1.25, 7), wood);
+    post.position.y = 0.62;
+    post.castShadow = true;
+    g.add(post);
+    const arms = new THREE.Mesh(new THREE.BoxGeometry(0.85, 0.09, 0.09), woodDark);
+    arms.position.y = 1.0;
+    g.add(arms);
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.17, 8, 8), woodDark);
+    head.position.y = 1.38;
+    g.add(head);
+    // a real round archery target strapped square onto the dummy's chest.
+    // The kit board stands upright with its face along local +X, so a
+    // quarter-turn points that face forward (+Z), centered on the body.
+    const target = instantiate('kit-target', { shadows: false }).group;
+    // transform dialed in with the in-game dev editor (+180° on Y so the
+    // painted face points out toward the training hero)
+    target.rotation.set(0, -1.44 + Math.PI, 0);
+    target.scale.setScalar(1.25);
+    target.position.set(0, 0.62, 0.28);
+    g.add(target);
+    return g;
   }
 
   mkNpc(d) {
     const a = this.makeAnimated(d.model);
-    a.group.position.set(d.x, 0, d.z);
+    a.group.position.set(d.x, terrainY(d.z), d.z);
     a.group.rotation.y = d.yaw;
-    // dye the outfit so they don't read as one of the player classes
-    for (const m of a.mats) m.color.multiply(new THREE.Color(d.tint));
+    // either recolor specific parts (hue/part rules) or, failing that,
+    // dye the whole outfit so they don't read as a player class
+    if (d.recolor) this.recolorNpc(a, d.model, d.recolor);
+    else if (d.tint) for (const m of a.mats) m.color.multiply(new THREE.Color(d.tint));
     const label = this.makeTextSprite(d.name, 0xffe9b8, 2.2);
     label.position.y = 2.0;
+    // draw the name over everything so a stall/canopy never swallows it
+    label.material.depthTest = false;
+    label.renderOrder = 20;
     a.group.add(label);
     const bubble = this.makeTextSprite(d.bubble || t('npc.greeting'), 0xffffff, 1.5);
     bubble.position.y = 2.5;
     bubble.visible = false;
     a.group.add(bubble);
     a.bubble = bubble;
+    a.rotatePhrases = !!d.rotate;
     a.homeYaw = d.yaw;
     this.scene.add(a.group);
     this.setLoco(a, 'idle');
     this.npcs.push(a);
+    this.sanctNodes.push(a.group);
     return a;
+  }
+
+  // hide the sanctuary's dwellers & props while a wave rages (their
+  // per-frame updates are skipped too — see updateNpcs/updateShowPets)
+  setSanctuaryActive(on) {
+    if (this.sanctActive === on) return;
+    this.sanctActive = on;
+    for (const n of this.sanctNodes) n.visible = on;
+  }
+
+  // ---------------- the arrival portal ----------------
+
+  // arm a delayed arrival: heroes spawned at the portal wait hidden,
+  // then flare it open and step out once the timer fires — timed by the
+  // caller to land a beat after the intro clears the screen
+  beginArrival(delay) {
+    this.arrivalArmed = true;
+    this.arrivalT = delay;
+    // anything already spawned near the portal joins the wait
+    for (const a of this.players.values()) {
+      if (Math.hypot(a.group.position.x - PORTAL.x, a.group.position.z - PORTAL.z) < 3.5) {
+        a.arrivalPending = true;
+        a.group.visible = false;
+      }
+    }
+  }
+
+  fireArrival() {
+    this.arrivalArmed = false;
+    let any = false;
+    for (const a of this.players.values()) {
+      if (!a.arrivalPending) continue;
+      a.arrivalPending = false;
+      a.group.visible = true;
+      a.spawnT = -0.22; // portal opens a touch before the hero pops in
+      a.group.scale.setScalar(0.01);
+      any = true;
+    }
+    if (any) this.spawnPortalFx();
+  }
+
+  // swirling vortex shader for the round portal plane — arms spiraling
+  // into a bright core, ringed by a purple glow; uOpen drives both the
+  // flare-open and the fade-out so one uniform animates the whole life
+  makePortalMaterial() {
+    return new THREE.ShaderMaterial({
+      transparent: true, depthWrite: false, side: THREE.DoubleSide,
+      blending: THREE.AdditiveBlending,
+      uniforms: { uT: { value: 0 }, uOpen: { value: 0 } },
+      vertexShader: `
+        varying vec2 vUv;
+        void main() {
+          vUv = uv * 2.0 - 1.0;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }`,
+      fragmentShader: `
+        varying vec2 vUv;
+        uniform float uT, uOpen;
+        void main() {
+          float r = length(vUv);
+          if (r > 1.0) discard;
+          float ang = atan(vUv.y, vUv.x);
+          float swirl = 0.5 + 0.5 * sin(ang * 3.0 + uT * 3.2 - r * 10.0);
+          float rings = 0.5 + 0.5 * sin(r * 20.0 - uT * 6.0);
+          float core = smoothstep(0.4, 0.0, r);
+          float edge = smoothstep(1.0, 0.78, r) * smoothstep(0.5, 0.9, r);
+          vec3 purple = vec3(0.62, 0.35, 0.95);
+          vec3 blue = vec3(0.42, 0.55, 1.0);
+          vec3 col = mix(purple, blue, rings * 0.5) * (0.4 + 0.6 * swirl);
+          col += vec3(0.92, 0.82, 1.0) * core * 1.5;
+          col += purple * edge * 1.4;
+          float alpha = uOpen * clamp(edge + core + swirl * 0.35 * (1.0 - r), 0.0, 1.0);
+          gl_FragColor = vec4(col * uOpen, alpha);
+        }`,
+    });
+  }
+
+  // flare the arrival portal open: a round vortex standing UPRIGHT at
+  // the back of the sanctuary, facing the plaza, its swirl spinning.
+  // It expands, holds while the hero steps out of its FRONT, then
+  // shrinks away. Called once per arrival — an open portal just lingers.
+  spawnPortalFx() {
+    if (this.portalFx) { this.portalFx.hold = Math.max(this.portalFx.hold, 1.1); return; }
+    if (!this._portalMat) this._portalMat = this.makePortalMaterial();
+    const R = PORTAL.r;
+    const y = terrainY(PORTAL.z);
+    // parent group stands the disc up and turns it to face the plaza
+    // (−z), so the vortex looks straight at the arriving hero
+    const group = new THREE.Group();
+    group.position.set(PORTAL.x, y + R * 0.98, PORTAL.z + 0.65);
+    group.rotation.y = Math.PI;
+    const disc = new THREE.Mesh(new THREE.CircleGeometry(R, 48), this._portalMat);
+    disc.renderOrder = 3;
+    group.add(disc);
+    // a soft glow pooling in front of the portal mouth
+    const light = new THREE.PointLight(0x9a4ae0, 0, 9, 2);
+    light.position.set(PORTAL.x, y + 1.1, PORTAL.z - 0.2);
+    this.scene.add(group, light);
+    this.portalFx = { group, disc, light, t: 0, hold: 1.1, closing: 0 };
+    sfx.portal();
+  }
+
+  // per-frame portal life-cycle: flare open (with a little overshoot),
+  // spin the vortex, hold while the hero steps through, shrink & die
+  updatePortal(dt) {
+    const fx = this.portalFx;
+    if (!fx) return;
+    fx.t += dt;
+    this._portalMat.uniforms.uT.value = this.time;
+    fx.disc.rotation.z += dt * 1.6; // the vortex turns
+    const OPEN = 0.38, CLOSE = 0.5;
+    let open;
+    if (fx.t < OPEN) {
+      const k = fx.t / OPEN;
+      open = 1 - Math.pow(1 - k, 3);
+      open *= 1 + 0.18 * Math.sin(k * Math.PI); // overshoot pop
+    } else if (fx.hold > 0) {
+      fx.hold -= dt;
+      open = 1;
+    } else {
+      fx.closing += dt;
+      open = Math.max(1 - fx.closing / CLOSE, 0);
+      if (open <= 0) {
+        this.scene.remove(fx.group, fx.light);
+        this.portalFx = null;
+        return;
+      }
+    }
+    this._portalMat.uniforms.uOpen.value = Math.min(open, 1);
+    fx.group.scale.setScalar(Math.max(open, 0.001));
+    fx.light.intensity = 22 * open;
   }
 
   // ---------------- pet vendor's stall ----------------
@@ -1341,14 +1763,29 @@ export class GameView {
   // and two of his critters loafing about out front — impossible to
   // mistake for anything but the pet shop.
   spawnPetShop() {
-    const { x, z } = PET_SHOP_POS;
+    const yaw = NPCS.pets.yaw;
 
-    // the stall sits just north of (behind) Tonho, opening toward camera
+    // the stall is snapped onto its grass block in the back corner and
+    // rotated to open toward the plaza (local +z = the facing direction);
+    // Tonho steps out in front of it
     const stall = new THREE.Group();
-    stall.position.set(x, 0, z - 1.0);
+    stall.position.set(PET_STALL.x, -ELEV, PET_STALL.z);
+    stall.rotation.y = yaw;
     const frame = instantiate('dungeon-stall').group;
     stall.add(frame);
     const frameBox = new THREE.Box3().setFromObject(frame);
+
+    // a big elephant loafing in the middle of the stall
+    const elephant = this.makeAnimated('pet-elephant');
+    elephant.group.scale.setScalar(1.7);
+    elephant.group.position.set(0, 0, 0.1);
+    // local +z is the stall's facing (toward the plaza), so leave it at 0
+    stall.add(elephant.group);
+    this.setLoco(elephant, 'idle');
+    this.showPets.push({
+      actor: elephant, ax: null, az: null, mode: 'idle',
+      t: 3 + Math.random() * 3, ang: 0, stationary: true,
+    });
     // banners hang off the canopy's front corners (facing the camera)
     for (const sx of [-1, 1]) {
       const banner = instantiate('dungeon-banner', { shadows: false }).group;
@@ -1360,29 +1797,37 @@ export class GameView {
     chest.position.set(-(frameBox.max.x - 0.15), 0, 0.5);
     chest.rotation.y = 0.5;
     stall.add(chest);
-    // a big slowly-spinning coin as the shop sign
-    const sign = instantiate('dungeon-coin', { shadows: false }).group;
-    sign.scale.setScalar(2.2);
-    sign.position.set(0, frameBox.max.y + 0.42, 0);
-    stall.add(sign);
-    this.petShopSign = sign;
     this.scene.add(stall);
+    this.sanctNodes.push(stall);
 
-    // Tonho stands out front, turned to face the camera
+    // a basket of fruit set back beside the elephant, toward the back of
+    // the sanctuary (clear of Tonho out front)
+    const fruit = instantiate('kit-fruit').group;
+    fruit.position.set(PET_STALL.x - 0.4, -ELEV, PET_STALL.z + 1.4);
+    fruit.rotation.y = -0.5;
+    this.scene.add(fruit);
+    this.sanctNodes.push(fruit);
+
+    // Tonho stands a clear step out front, turned to face the plaza
     this.mkNpc({
-      model: 'char-berserker', name: 'Tonho', tint: 0x9ad86a,
-      x, z, yaw: 0, bubble: t('npc.pets'),
+      model: 'char-male-f', name: 'Tonho',
+      x: NPCS.pets.x, z: NPCS.pets.z, yaw, bubble: t('npc.pets'),
     });
 
-    // his display critters potter about out front (camera side), never
-    // hidden by the canopy — idling / eating / dancing / strolling
-    for (const [key, ox, oz] of [['pet-dog', -1.9, 1.1], ['pet-cat', 1.7, 1.3]]) {
+    // his display critters potter about out front of the stall (plaza
+    // side) — offsets rotated into world space by the stall's facing
+    const fwd = { x: Math.sin(yaw), z: Math.cos(yaw) };     // toward plaza
+    const rgt = { x: Math.cos(yaw), z: -Math.sin(yaw) };    // stall's right
+    for (const [key, of, os] of [['pet-dog', 2.0, -0.9], ['pet-cat', 2.2, 0.8]]) {
+      const wx = PET_STALL.x + fwd.x * of + rgt.x * os;
+      const wz = PET_STALL.z + fwd.z * of + rgt.z * os;
       const actor = this.makeAnimated(key);
-      actor.group.position.set(x + ox, 0, z + oz);
+      actor.group.position.set(wx, -ELEV, wz);
       this.scene.add(actor.group);
       this.setLoco(actor, 'idle');
+      this.sanctNodes.push(actor.group);
       this.showPets.push({
-        actor, ax: x + ox, az: z + oz,
+        actor, ax: wx, az: wz,
         mode: 'idle', t: 1 + Math.random() * 2, ang: Math.random() * Math.PI * 2,
       });
     }
@@ -1397,13 +1842,16 @@ export class GameView {
   // ground out front, and a spinning trophy for a shop sign. Everything
   // is laid out so no two models overlap. Same trade rules as the pets.
   spawnWeaponShop() {
-    const { x, z } = WEAPON_SHOP_POS;
+    const yaw = NPCS.weapons.yaw;
 
-    // hut origin sits on Baru; the wall is built a bit north (−z) so it
-    // ends up behind him and the whole display opens toward the camera
+    // hut anchored on its corner block and rotated to open toward the
+    // plaza (local +z = facing); the wall builds behind (local −z), so
+    // the whole forge opens inward. Baru steps out in front.
     const hut = new THREE.Group();
-    hut.position.set(x, 0, z);
+    hut.position.set(WEAPON_STALL.x, -ELEV, WEAPON_STALL.z);
+    hut.rotation.y = yaw;
     this.scene.add(hut);
+    this.sanctNodes.push(hut);
 
     // measure one wall segment
     let wallH = 1.7, wallW = 2;
@@ -1423,17 +1871,21 @@ export class GameView {
     // two weapon racks half-set into the wall (one per segment), a touch
     // in front of the wall line so they read as embedded in it
     const rackZ = WALLZ + 0.28;
-    // left rack — spears; right rack — swords
-    for (const [side, mk, n] of [[-1, makeSpear, 2], [1, () => instantiate('prop-sword', { shadows: false }).group, 2]]) {
+    // each rack has two slots — stand a weapon upright in each, seated on
+    // the FRONT of the wall (Baru's side, local +z) so they read as racked
+    // and stay in view. Left rack holds spears, right rack swords.
+    for (const [side, mk, h] of [[-1, makeSpear, 0.62], [1, () => makeGreatSword(), 0.5]]) {
       const rack = instantiate('arena-rack').group;
       rack.position.set(side * wallW * 0.5, 0, rackZ);
       hut.add(rack);
-      for (let i = 0; i < n; i++) {
+      for (let i = 0; i < 2; i++) {
         const w = mk();
-        const dx = (i - (n - 1) / 2) * 0.16;
-        w.position.set(side * wallW * 0.5 + dx, 0.5, rackZ + 0.06);
-        w.rotation.z = dx * 1.2; // fan them slightly in the rack
-        if (mk !== makeSpear) w.scale.setScalar(1.1);
+        w.scale.multiplyScalar(1.5);
+        const dx = (i - 0.5) * 0.3; // one weapon per slot
+        // stand them in front of the wall, ~10% of a tile TOWARD Baru
+        // (local +z is Baru's side) from where they used to sit
+        w.position.set(side * wallW * 0.5 + dx, h, WALLZ + 0.9);
+        w.rotation.set(-0.1, 0, dx * 1.6); // lean into the rack
         hut.add(w);
       }
     }
@@ -1466,43 +1918,50 @@ export class GameView {
     floorAxe.rotation.set(Math.PI / 2 - 0.08, 0, 0.9);
     hut.add(floorAxe);
 
-    // spinning trophy = the shop sign (mirrors the pet stall's coin)
-    const sign = instantiate('arena-trophy', { shadows: false }).group;
-    sign.scale.setScalar(1.6);
-    sign.position.set(0, wallH + 0.5, WALLZ);
-    hut.add(sign);
-    this.weaponShopSign = sign;
-
-    // Baru the smith stands out front, turned to face the camera
+    // Baru's wall line sits behind him; he stands a step out front,
+    // turned to face the plaza like Tonho across the way
     this.mkNpc({
       model: 'char-tanker', name: 'Baru', tint: 0xd87a5a,
-      x, z, yaw: 0, bubble: t('npc.weapons'),
+      x: NPCS.weapons.x, z: NPCS.weapons.z, yaw, bubble: t('npc.weapons'),
     });
+
+    // a basket of fruit on the ground to Iris's left (she tends the
+    // sanctuary just across from the forge)
+    const iris = NPCS.blessings;
+    const fruit = instantiate('kit-fruit').group;
+    fruit.position.set(iris.x - 1.2, terrainY(iris.z), iris.z + 0.3);
+    fruit.rotation.y = 0.6;
+    this.scene.add(fruit);
+    this.sanctNodes.push(fruit);
   }
 
   updateShowPets(dt) {
+    if (!this.sanctActive) return;
     const MODES = ['idle', 'eat', 'dance', 'walk', 'gesture-positive'];
     for (const p of this.showPets) {
       p.actor.mixer.update(dt);
       p.t -= dt;
       if (p.t <= 0) {
         p.t = 2.2 + Math.random() * 3.2;
-        p.mode = MODES[(Math.random() * MODES.length) | 0];
+        // the stall elephant just loafs — idle / eat, never walks off
+        p.mode = p.stationary
+          ? (Math.random() < 0.5 ? 'idle' : 'eat')
+          : MODES[(Math.random() * MODES.length) | 0];
         this.setLoco(p.actor, p.mode === 'walk' ? 'walk' : p.mode, 1);
       }
+      if (p.stationary) continue; // parented into the stall — no wandering
       if (p.mode === 'walk') {
-        // amble a lazy circle around the home spot
+        // amble a lazy circle around the home spot (sanctuary floor)
         p.ang += dt * 1.1;
         const r = 0.65;
-        p.actor.group.position.set(p.ax + Math.cos(p.ang) * r, 0, p.az + Math.sin(p.ang) * r);
+        p.actor.group.position.set(p.ax + Math.cos(p.ang) * r, -ELEV, p.az + Math.sin(p.ang) * r);
         p.actor.group.rotation.y = Math.atan2(-Math.sin(p.ang), Math.cos(p.ang));
       }
     }
-    if (this.petShopSign) this.petShopSign.rotation.y += dt * 1.2;
-    if (this.weaponShopSign) this.weaponShopSign.rotation.y += dt * 1.2;
   }
 
   updateNpcs(dt, selfPos) {
+    if (!this.sanctActive) return;
     for (const a of this.npcs) {
       a.mixer.update(dt);
       const near = !!selfPos && Math.hypot(
@@ -1515,6 +1974,15 @@ export class GameView {
         );
         a.group.rotation.y = angleLerp(a.group.rotation.y, ty, Math.min(dt * 6, 1));
         if (!a.bubble.visible && a.actions.wave) this.playOnce(a, 'wave', 1.1);
+        // the cheerleader swaps in a fresh encouragement on every visit
+        if (a.rotatePhrases && !a.bubble.visible) {
+          a.phraseIdx = ((a.phraseIdx ?? -1) + 1) % 6;
+          a.group.remove(a.bubble);
+          a.bubble.material.map.dispose();
+          a.bubble = this.makeBubbleSprite(t(`npc.inc${a.phraseIdx}`));
+          a.bubble.position.y = 2.5;
+          a.group.add(a.bubble);
+        }
       } else {
         a.group.rotation.y = angleLerp(a.group.rotation.y, a.homeYaw, Math.min(dt * 2, 1));
       }
@@ -1628,7 +2096,8 @@ export class GameView {
       seenP.add(id);
       const a = this.ensurePlayer(row, selfId);
       const dead = row[PL.DEAD] === 1;
-      a.group.visible = !dead;
+      // stay hidden while waiting on an armed portal arrival
+      a.group.visible = !dead && !a.arrivalPending;
       let x = row[PL.X], z = row[PL.Z], yaw = row[PL.YAW], moving = row[PL.MOV] === 1;
       const p = prevPl.get(id);
       if (id === selfId && selfPose) {
@@ -1640,6 +2109,10 @@ export class GameView {
       }
       a.group.position.x = x;
       a.group.position.z = z;
+      // heroes stand on the terrain: 0 on the battlefield plateau,
+      // ramping down the stairs to the sunken sanctuary floor
+      a.baseY = terrainY(z);
+      if (a.jumpT == null) a.group.position.y = a.baseY;
       a.group.rotation.y = yaw;
       if (!dead) {
         const spd = CLASSES[a.cls]?.speed || 4;
@@ -1691,8 +2164,12 @@ export class GameView {
       }
       a.group.position.x = x;
       a.group.position.z = z;
-      a.group.position.y = a.isGhost ? 0.25 + Math.sin(this.time * 3 + id) * 0.12 : 0;
-      a.group.rotation.y = yaw;
+      // ghosts hover; everything else stands on the terrain (training
+      // dummies live down on the sunken sanctuary floor)
+      a.group.position.y = a.isGhost
+        ? 0.25 + Math.sin(this.time * 3 + id) * 0.12
+        : terrainY(z);
+      if (a.kind !== 'dummy') a.group.rotation.y = yaw;
       // enemies spawn hidden deep in the northern woods and slowly
       // step out of the penumbra: invisible until the forest mouth,
       // fully lit a few cells into the board
@@ -1715,6 +2192,11 @@ export class GameView {
     for (const [id, a] of this.enemies) {
       if (!seenE.has(id)) { this.scene.remove(a.group); this.enemies.delete(id); }
     }
+    // the static yard dummies stand in whenever no live (attackable)
+    // sim dummies exist — the two never show at once
+    let liveDummy = false;
+    for (const a of this.enemies.values()) if (a.kind === 'dummy') { liveDummy = true; break; }
+    for (const g of this.dummyProps || []) g.visible = this.sanctActive && !liveDummy;
 
     // ---- towers / obstacles
     const seenT = new Set();
@@ -1867,12 +2349,23 @@ export class GameView {
       }
       case 'respawn': {
         this.burst(ev.x, ev.z, 1.4, 0x8fe98f);
+        // checkpoint respawns come back through the sanctuary portal
+        if (Math.hypot(ev.x - PORTAL.x, ev.z - PORTAL.z) < 3.5) {
+          this.spawnPortalFx();
+          const a = this.players.get(ev.id);
+          if (a) { a.spawnT = 0; a.group.scale.setScalar(0.01); }
+        }
         break;
       }
       case 'crit': {
         // tiger-pet critical hit: punchy ring + floating callout
         this.burst(ev.x, ev.z, 0.9, 0xffb020);
         this.spawnFloatText('CRIT!', ev.x, ev.z, 0xffb020);
+        break;
+      }
+      case 'dreset': {
+        // a depleted training dummy springs back to full
+        this.burst(ev.x, ev.z, 1.0, 0xffd24a);
         break;
       }
       case 'petswap': {
@@ -2003,7 +2496,8 @@ export class GameView {
   // one-shot rising text callout ("CRIT!") anchored in world space
   spawnFloatText(text, x, z, color) {
     const spr = this.makeTextSprite(text, color, 1.7);
-    spr.position.set(x, 1.35, z);
+    spr.position.set(x, terrainY(z) + 1.35, z);
+    spr.userData.baseY = terrainY(z);
     this.scene.add(spr);
     this.effects.push({ type: 'float-text', mesh: spr, t: 0, dur: 0.7 });
   }
@@ -2074,7 +2568,7 @@ export class GameView {
     lance.position.z = 0.65;
     const holder = new THREE.Group();
     holder.add(lance);
-    holder.position.set(x, 0.85, z);
+    holder.position.set(x, terrainY(z) + 0.85, z);
     holder.rotation.y = yaw;
     this.scene.add(holder);
     this.effects.push({ mesh: holder, inner: lance, t: 0, dur: 0.2, type: 'thrust' });
@@ -2084,6 +2578,7 @@ export class GameView {
   // impact spot out front plus a quick vertical slam streak, no slicing
   spawnBash(x, z, yaw, color) {
     const ix = x + Math.sin(yaw) * 0.95, iz = z + Math.cos(yaw) * 0.95;
+    const gy = terrainY(iz);
     // ground shockwave
     const ring = new THREE.Mesh(
       this._ringGeo,
@@ -2093,7 +2588,7 @@ export class GameView {
       })
     );
     ring.rotation.x = -Math.PI / 2;
-    ring.position.set(ix, 0.06, iz);
+    ring.position.set(ix, gy + 0.06, iz);
     ring.scale.setScalar(0.2);
     this.scene.add(ring);
     this.effects.push({ mesh: ring, t: 0, dur: 0.32, type: 'burst', r: 1.5 });
@@ -2105,7 +2600,7 @@ export class GameView {
         depthWrite: false, blending: THREE.AdditiveBlending,
       })
     );
-    slam.position.set(ix, 0.6, iz);
+    slam.position.set(ix, gy + 0.6, iz);
     this.scene.add(slam);
     this.effects.push({ mesh: slam, inner: slam, t: 0, dur: 0.16, type: 'slam' });
   }
@@ -2125,7 +2620,7 @@ export class GameView {
     arc.renderOrder = 8;
     const holder = new THREE.Group();
     holder.add(arc);
-    holder.position.set(x, 0, z);
+    holder.position.set(x, terrainY(z), z);
     arc.position.set(0, 0.75, 0);
     // ring theta 0 is +X; rotate so the arc opens toward the facing direction
     holder.rotation.y = yaw - Math.PI / 2;
@@ -2155,10 +2650,14 @@ export class GameView {
       );
       bolt.add(core, halo);
       this.scene.add(bolt);
+      const from = new THREE.Vector3(...ev.f);
+      const to = new THREE.Vector3(...ev.to);
+      from.y += terrainY(from.z);
+      to.y += terrainY(to.z);
       this.projectiles.push({
         mesh: bolt,
-        from: new THREE.Vector3(...ev.f),
-        to: new THREE.Vector3(...ev.to),
+        from,
+        to,
         ft: Math.max(ev.ft, 0.05),
         t: 0, lob: false, kind: 'magic',
       });
@@ -2184,10 +2683,16 @@ export class GameView {
       });
     }
     this.scene.add(mesh);
+    const from = new THREE.Vector3(...ev.f);
+    const to = new THREE.Vector3(...ev.to);
+    // the sim's heights are relative to the local ground — offset them
+    // by the terrain so training shots down in the sanctuary fly level
+    from.y += terrainY(from.z);
+    to.y += terrainY(to.z);
     this.projectiles.push({
       mesh,
-      from: new THREE.Vector3(...ev.f),
-      to: new THREE.Vector3(...ev.to),
+      from,
+      to,
       ft: Math.max(ev.ft, 0.05),
       t: 0,
       lob: !!ev.lob,
@@ -2208,7 +2713,7 @@ export class GameView {
         new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.22, depthWrite: false })
       );
       warn.rotation.x = -Math.PI / 2;
-      warn.position.set(ev.x, 0.05, ev.z);
+      warn.position.set(ev.x, terrainY(ev.z) + 0.05, ev.z);
       warn.scale.setScalar(ev.r);
       this.scene.add(warn);
       this.effects.push({ mesh: warn, t: 0, dur: ev.ft, type: 'warn' });
@@ -2224,7 +2729,8 @@ export class GameView {
       new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.85, depthWrite: false, side: THREE.DoubleSide })
     );
     ring.rotation.x = -Math.PI / 2;
-    ring.position.set(x, 0.08, z);
+    // bursts land on the ground wherever it is — board or sanctuary floor
+    ring.position.set(x, terrainY(z) + 0.08, z);
     ring.scale.setScalar(0.2);
     this.scene.add(ring);
     this.effects.push({ mesh: ring, t: 0, dur: 0.35, type: 'burst', r });
@@ -2352,9 +2858,36 @@ export class GameView {
     this.updateNpcs(dt, selfPos);
     this.updateShowPets(dt);
     this.updatePets(dt);
+    // countdown to the armed portal arrival (see beginArrival)
+    if (this.arrivalArmed) {
+      this.arrivalT -= dt;
+      if (this.arrivalT <= 0) this.fireArrival();
+    }
+    this.updatePortal(dt);
     this.animateStatusFx(dt);
 
     for (const a of this.players.values()) {
+      // materializing out of the arrival portal: pop in AT the portal
+      // mouth (spawnT starts negative so the portal opens first), then get
+      // clearly TOSSED forward toward the plaza — the hero steps out of
+      // the portal's front, it doesn't just drop into place.
+      if (a.spawnT != null) {
+        a.spawnT += dt;
+        const DUR = 0.85, TOSS = 1.6; // world units shoved forward (−z)
+        if (a.spawnT < 0) {
+          a.group.scale.setScalar(0.01);
+          a.group.position.z += TOSS; // waiting at the portal mouth
+        } else {
+          const k = Math.min(a.spawnT / DUR, 1);
+          // scale pops in over the first 55% (at the portal)
+          const sk = Math.min(k / 0.55, 1);
+          a.group.scale.setScalar(Math.max(sk * (1 + 0.16 * Math.sin(sk * Math.PI)), 0.01));
+          // forward shove eases out over the whole thing (portal → spawn)
+          const e = 1 - Math.pow(1 - k, 2);
+          a.group.position.z += (1 - e) * TOSS;
+          if (k >= 1) { a.spawnT = null; a.group.scale.setScalar(1); }
+        }
+      }
       // orbiting stone slabs of the tanker's wall mode
       if (a.wallFx) {
         a.wallFx.rotation.y += dt * 1.7;
@@ -2363,8 +2896,8 @@ export class GameView {
       if (a.jumpT == null) continue;
       a.jumpT += dt;
       const k = Math.min(a.jumpT / a.jumpDur, 1);
-      a.group.position.y = Math.sin(k * Math.PI) * (a.jumpH || JUMP.HEIGHT);
-      if (k >= 1) { a.jumpT = null; a.group.position.y = 0; }
+      a.group.position.y = (a.baseY || 0) + Math.sin(k * Math.PI) * (a.jumpH || JUMP.HEIGHT);
+      if (k >= 1) { a.jumpT = null; a.group.position.y = a.baseY || 0; }
     }
     // vaulting vampires get the same arc (runs after applySnapshot, so
     // it overrides the grounded y the snapshot wrote)
@@ -2474,7 +3007,7 @@ export class GameView {
       } else if (e.type === 'grave-sink') {
         e.mesh.position.y = -1.3 * easeOut(k);
       } else if (e.type === 'float-text') {
-        e.mesh.position.y = 1.35 + easeOut(k) * 0.85;
+        e.mesh.position.y = (e.mesh.userData.baseY || 0) + 1.35 + easeOut(k) * 0.85;
         e.mesh.material.opacity = 1 - k * k;
       } else if (e.type === 'slash') {
         // sweep the arc across the front and fade it out
@@ -2549,6 +3082,10 @@ export class GameView {
     this.projectiles = []; this.effects = []; this.corpses = [];
     this.xpOrbs.count = 0; this.ptsOrbs.count = 0; this.goldOrbs.count = 0;
     this.goldSparkle.count = 0;
+    if (this.portalFx) {
+      this.scene.remove(this.portalFx.disc, this.portalFx.beam, this.portalFx.light);
+      this.portalFx = null;
+    }
     this.clearGhost();
   }
 }
