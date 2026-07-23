@@ -3,7 +3,7 @@ import { joinRoom as joinTorrent } from '@trystero-p2p/torrent';
 import { joinRoom as joinMqtt } from '@trystero-p2p/mqtt';
 import { joinRoom as joinSupabase } from '@trystero-p2p/supabase';
 import { createClient } from '@supabase/supabase-js';
-import { NET, SUPABASE } from './config.js';
+import { NET, SUPABASE, TURN, DEFAULT_STUN } from './config.js';
 
 const useLocalNet = new URLSearchParams(location.search).has('localnet');
 // `trysteroId` comes from the 'trystero' (Nostr) package, but every
@@ -59,6 +59,99 @@ export const selfId = useLocalNet
 // full when Supabase genuinely can't be reached.
 const SUPABASE_HEALTH_TIMEOUT = 6000;
 
+// ============================================================
+// Connection diagnostics.
+//
+// When a match won't connect it is almost never "one relay is down" — every
+// transport shares the same WebRTC layer, so the useful question is WHERE it
+// breaks: did a transport's room even start? did any peer get discovered, and
+// over which transport? can this browser reach a STUN/TURN server at all?
+//
+// These helpers surface exactly that. Everything logs to the console; add
+// ?netdebug to the URL to also mirror it into a small on-screen overlay
+// (handy when testing across two phones/devices with no console at hand).
+// ============================================================
+const NETDEBUG = typeof location !== 'undefined'
+  && new URLSearchParams(location.search).has('netdebug');
+
+let _dbgEl = null;
+function dbgOverlay() {
+  if (!NETDEBUG || typeof document === 'undefined') return null;
+  if (_dbgEl) return _dbgEl;
+  _dbgEl = document.createElement('div');
+  _dbgEl.style.cssText = [
+    'position:fixed', 'left:6px', 'bottom:6px', 'z-index:99999',
+    'max-width:min(92vw,540px)', 'max-height:42vh', 'overflow:auto',
+    'font:11px/1.35 ui-monospace,Menlo,Consolas,monospace', 'color:#9fe7ff',
+    'background:rgba(0,0,0,.74)', 'padding:6px 8px', 'border:1px solid #0af',
+    'border-radius:6px', 'white-space:pre-wrap', 'pointer-events:none',
+  ].join(';');
+  (document.body || document.documentElement).appendChild(_dbgEl);
+  return _dbgEl;
+}
+
+function netLog(level, msg) {
+  (console[level] || console.log)(`[net] ${msg}`);
+  const el = dbgOverlay();
+  if (el) {
+    el.textContent += `${new Date().toLocaleTimeString()}  ${msg}\n`;
+    el.scrollTop = el.scrollHeight;
+  }
+}
+
+// The exact ICE server list Trystero hands the peer connection: its default
+// STUN servers with any configured TURN appended (see peer_default in
+// @trystero-p2p/core, which does defaultIceServers.concat(turnConfig)).
+const ICE_SERVERS = [...DEFAULT_STUN, ...TURN];
+
+// One-shot WebRTC reachability self-check. Gathers ICE candidates against the
+// same servers the real connections use and reports which kinds came back:
+//   host  = your LAN address (always there)
+//   srflx = your public address via STUN — needed to connect across networks
+//   relay = a TURN relay candidate — the fallback that beats symmetric NAT
+// If srflx never appears, STUN is blocked/unreachable and cross-network
+// matches CAN'T form on any transport — that's the usual cause of "nothing
+// connects". If you have no TURN configured, relay will always be 0.
+function probeIceReachability() {
+  if (typeof RTCPeerConnection === 'undefined') return;
+  let pc;
+  try {
+    pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+  } catch (err) {
+    netLog('warn', `ICE self-check couldn't start: ${err?.message || err}`);
+    return;
+  }
+  const seen = { host: 0, srflx: 0, prflx: 0, relay: 0 };
+  let done = false;
+  const finish = (reason) => {
+    if (done) return;
+    done = true;
+    try { pc.close(); } catch { /* ignore */ }
+    const hasTurn = TURN.length > 0;
+    let verdict;
+    if (seen.srflx === 0 && seen.relay === 0) {
+      verdict = hasTurn
+        ? '⚠ STUN *and* TURN unreachable — WebRTC will fail on every transport; check your network/TURN creds'
+        : '⚠ STUN unreachable and no TURN configured — cross-network matches will fail; configure a TURN server (see config.js TURN)';
+    } else if (seen.relay === 0 && !hasTurn) {
+      verdict = 'STUN OK. No TURN configured — fine on most home networks, but symmetric-NAT/mobile peers may still fail. Add TURN if two players never connect.';
+    } else {
+      verdict = 'STUN/TURN reachable — ICE looks healthy';
+    }
+    netLog('info', `ICE self-check [${reason}] host:${seen.host} srflx(STUN):${seen.srflx} relay(TURN):${seen.relay} — ${verdict}`);
+  };
+  pc.onicecandidate = (e) => {
+    if (!e.candidate) { finish('complete'); return; }
+    const type = e.candidate.type;
+    if (type && seen[type] != null) seen[type]++;
+  };
+  try {
+    pc.createDataChannel('probe');
+    pc.createOffer().then((o) => pc.setLocalDescription(o)).catch(() => finish('offer-failed'));
+  } catch { finish('offer-failed'); }
+  setTimeout(() => finish('timeout'), 7000);
+}
+
 // A wide mix of well-known, permissive public Nostr relays. Every
 // peer connects to all of them, so as long as any single relay is
 // reachable by both sides a match can be brokered. `hornetstorage`
@@ -105,7 +198,7 @@ const SUPABASE_TRANSPORT = supabaseReady ? {
   name: 'supabase',
   primary: true,
   join: (code) => joinSupabase(
-    { appId: SUPABASE.URL, relayConfig: { supabaseKey: SUPABASE.KEY } },
+    { appId: SUPABASE.URL, relayConfig: { supabaseKey: SUPABASE.KEY }, turnConfig: TURN },
     code,
   ),
 } : null;
@@ -117,17 +210,17 @@ const FALLBACK_TRANSPORTS = [
   {
     name: 'nostr',
     join: (code) => joinNostr(
-      { appId: NET.APP_ID, relayConfig: { urls: NOSTR_RELAYS } },
+      { appId: NET.APP_ID, relayConfig: { urls: NOSTR_RELAYS }, turnConfig: TURN },
       code,
     ),
   },
   {
     name: 'torrent',
-    join: (code) => joinTorrent({ appId: NET.APP_ID }, code),
+    join: (code) => joinTorrent({ appId: NET.APP_ID, turnConfig: TURN }, code),
   },
   {
     name: 'mqtt',
-    join: (code) => joinMqtt({ appId: NET.APP_ID }, code),
+    join: (code) => joinMqtt({ appId: NET.APP_ID, turnConfig: TURN }, code),
   },
 ];
 
@@ -216,6 +309,7 @@ export class Net {
     this._actionsByRoom = new Map(); // room -> { name -> action }
     this._membersByRoom = new Map(); // room -> Set(peerId)
     this._primary = new Map();       // peerId -> room used for sending
+    this._roomName = new Map();      // room -> transport name (for diagnostics)
 
     // staged-failover bookkeeping
     this._left = false;              // set by leave(); silences late probe events
@@ -225,16 +319,22 @@ export class Net {
     this._probeTimer = null;         // "Supabase didn't connect in time" timer
 
     if (useLocalNet) {
-      this._initRoom(new LocalRoom(code));
+      this._initRoom(new LocalRoom(code), false, 'local');
       return;
     }
+
+    // Fire the WebRTC reachability self-check once per room. It's independent
+    // of the transports and just reports whether STUN/TURN can be reached at
+    // all — the single most common reason a match won't connect.
+    probeIceReachability();
 
     // Debug override (?net=…): bring the named transports up in parallel and
     // skip the staged flow entirely.
     const forced = overrideTransports();
     if (forced) {
+      netLog('info', `debug override: forcing transports [${forced.map((t) => t.name).join(', ')}] up in parallel`);
       for (const t of forced) this._startTransport(t, code);
-      if (this.rooms.length === 0) console.warn('[net] no transports could start (offline?)');
+      if (this.rooms.length === 0) netLog('warn', 'no transports could start (offline?)');
       return;
     }
 
@@ -242,7 +342,7 @@ export class Net {
       this._startSupabasePrimary(code);
     } else {
       // No Supabase configured: the public relays ARE the transport.
-      console.warn('[net] Supabase signaling not configured — using public relays only');
+      netLog('warn', 'Supabase signaling not configured — using public relays only');
       this._activateFallback(code, 'no Supabase project configured');
     }
   }
@@ -251,17 +351,18 @@ export class Net {
   // failure is logged and swallowed so it can't take the others down.
   _startTransport(transport, code) {
     try {
-      this._initRoom(transport.join(code), transport.primary === true);
+      this._initRoom(transport.join(code), transport.primary === true, transport.name);
+      netLog('info', `transport "${transport.name}" room started`);
       return true;
     } catch (err) {
-      console.warn(`[net] transport "${transport.name}" unavailable:`, err);
+      netLog('warn', `transport "${transport.name}" unavailable: ${err?.message || err}`);
       return false;
     }
   }
 
   // Stage 1: bring Supabase up on its own, then watch its Realtime health.
   _startSupabasePrimary(code) {
-    console.info('[net] Supabase is the primary signaling transport — connecting on its own…');
+    netLog('info', 'Supabase is the primary signaling transport — connecting on its own…');
     if (!this._startTransport(SUPABASE_TRANSPORT, code)) {
       // Couldn't even construct the Supabase room: fail over immediately.
       this._activateFallback(code, 'Supabase transport failed to initialize');
@@ -297,7 +398,7 @@ export class Net {
       if (this._left) return; // our own teardown; ignore
       if (status === 'SUBSCRIBED') {
         if (this._probeTimer) { clearTimeout(this._probeTimer); this._probeTimer = null; }
-        console.info('[net] Supabase signaling is live — running on Supabase alone; relays stay off unless it drops');
+        netLog('info', 'Supabase signaling is live — running on Supabase alone; relays stay off unless it drops');
       } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
         if (this._probeTimer) { clearTimeout(this._probeTimer); this._probeTimer = null; }
         this._activateFallback(code, `Supabase signaling ${status}${err ? `: ${err.message || err}` : ''}`);
@@ -311,13 +412,14 @@ export class Net {
   _activateFallback(code, why) {
     if (this._fallbackStarted || this._left) return;
     this._fallbackStarted = true;
-    console.warn(`[net] falling back to public relays (Nostr/WebTorrent/MQTT): ${why}`);
+    netLog('warn', `falling back to public relays (Nostr/WebTorrent/MQTT): ${why}`);
     for (const t of FALLBACK_TRANSPORTS) this._startTransport(t, code);
-    if (this.rooms.length === 0) console.warn('[net] no transports could start (offline?)');
+    if (this.rooms.length === 0) netLog('warn', 'no transports could start (offline?)');
   }
 
-  _initRoom(room, preferred = false) {
+  _initRoom(room, preferred = false, name = 'local') {
     this.rooms.push(room);
+    this._roomName.set(room, name);
     const members = new Set();
     this._membersByRoom.set(room, members);
 
@@ -333,29 +435,57 @@ export class Net {
 
     room.onPeerJoin = (peerId) => {
       members.add(peerId);
+      const who = peerId.slice(0, 6);
       if (!this.peers.has(peerId)) {
         this.peers.add(peerId);
         this._primary.set(peerId, room);
+        netLog('info', `peer ${who} CONNECTED via ${name} (WebRTC linked) — ${this.peers.size} peer(s) total`);
+        this._pushDebugState();
         this.onPeerJoin?.(peerId);
-      } else if (preferred && this._primary.get(peerId) !== room) {
-        // Peer is already reachable via another transport, but our
-        // preferred (Supabase) path just linked it too — route future
-        // sends through this one. No join event: the peer is not new.
-        this._primary.set(peerId, room);
+      } else {
+        netLog('info', `peer ${who} also reachable via ${name}`);
+        if (preferred && this._primary.get(peerId) !== room) {
+          // Peer is already reachable via another transport, but our
+          // preferred (Supabase) path just linked it too — route future
+          // sends through this one. No join event: the peer is not new.
+          this._primary.set(peerId, room);
+          netLog('info', `routing peer ${who} through ${name} (preferred)`);
+        }
+        this._pushDebugState();
       }
     };
     room.onPeerLeave = (peerId) => {
       members.delete(peerId);
+      const who = peerId.slice(0, 6);
       const stillOn = this.rooms.find((r) => this._membersByRoom.get(r)?.has(peerId));
       if (stillOn) {
         // Still reachable elsewhere: just repoint sends if the primary left.
         if (this._primary.get(peerId) === room) this._primary.set(peerId, stillOn);
+        netLog('info', `peer ${who} dropped from ${name}, still on ${this._roomName.get(stillOn)}`);
+        this._pushDebugState();
         return;
       }
       if (this.peers.delete(peerId)) {
         this._primary.delete(peerId);
+        netLog('info', `peer ${who} DISCONNECTED (was last on ${name}) — ${this.peers.size} peer(s) total`);
+        this._pushDebugState();
         this.onPeerLeave?.(peerId);
       }
+    };
+  }
+
+  // Mirror the current connection state onto window.__dtcNet so it can be
+  // inspected live from the console during a match.
+  _pushDebugState() {
+    if (typeof window === 'undefined') return;
+    window.__dtcNet = {
+      code: this.code,
+      transports: this.rooms.map((r) => this._roomName.get(r)),
+      fallbackStarted: this._fallbackStarted,
+      turnConfigured: TURN.length > 0,
+      peers: [...this.peers].map((p) => ({
+        id: p, via: this._roomName.get(this._primary.get(p)),
+      })),
     };
   }
 
