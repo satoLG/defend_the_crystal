@@ -1149,26 +1149,6 @@ input:focus { border-color: var(--gold); }
   z-index: 40;
 }
 
-/* dev-only training-dummy tuning overlay (toggled by ` / ?dev) */
-#dummy-dev {
-  position: fixed; top: 8px; left: 8px; z-index: 300; width: 260px;
-  max-height: 90vh; overflow-y: auto; padding: 10px 12px;
-  background: rgba(10, 10, 14, 0.94); border: 1px solid rgba(255,255,255,0.2);
-  border-radius: 10px; color: #eee; font: 12px/1.3 monospace;
-}
-#dummy-dev .dd-title { font-weight: 800; margin-bottom: 8px; }
-#dummy-dev .dd-hint { opacity: 0.5; font-weight: 400; font-size: 10px; }
-#dummy-dev .dd-group { margin-bottom: 10px; }
-#dummy-dev .dd-gname { color: #8fd0ff; margin-bottom: 4px; }
-#dummy-dev .dd-row { display: flex; align-items: center; gap: 6px; margin: 2px 0; }
-#dummy-dev .dd-key { width: 34px; opacity: 0.8; }
-#dummy-dev .dd-row input { flex: 1; }
-#dummy-dev .dd-val { width: 42px; text-align: right; }
-#dummy-dev .dd-print {
-  width: 100%; margin-top: 6px; padding: 6px; cursor: pointer;
-  background: #2a3550; color: #cfe4ff; border: 1px solid #3f5f8f; border-radius: 6px;
-}
-
 /* black-screen intro: the crystal's plea typed out letter by letter
    just before the hero materializes at the sanctuary portal */
 #intro-overlay {

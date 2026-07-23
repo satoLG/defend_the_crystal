@@ -4,7 +4,6 @@ import {
   GameView, PET_SHOP_POS, PET_SHOP_RADIUS, WEAPON_SHOP_POS, WEAPON_SHOP_RADIUS,
 } from './render/view.js';
 import { CharacterPreview } from './render/preview.js';
-import { initDummyDevOverlay } from './render/devoverlay.js';
 import { Sim } from './sim/sim.js';
 import { Grid, worldToCell, cellToWorld, findJump, computeDashEnd } from './sim/grid.js';
 import { terrainY, ELEV, NPCS, findColliderJump } from './sanctuary.js';
@@ -156,8 +155,6 @@ async function boot() {
     if (k === 'shadows') gs.setShadows(v);
   });
   view = new GameView(gs);
-  // dev-only tuning overlay for the training dummies (press ` or ?dev)
-  initDummyDevOverlay(view);
 
   // live 3D turntable for the character-creation screen
   const preview = new CharacterPreview(document.getElementById('preview-canvas'));
