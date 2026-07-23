@@ -1488,7 +1488,41 @@ export class GameView {
     this.scene.add(shardGlow);
     this.sanctNodes.push(shardGlow);
 
+    // a little stack of two books on the floor beside Theo, the guide
+    const theo = NPCS.duvidas;
+    const books = this.makeBookStack();
+    books.position.set(theo.x + 0.85, terrainY(theo.z), theo.z + 0.35);
+    books.rotation.y = -0.4;
+    this.scene.add(books);
+    this.sanctNodes.push(books);
+
     this.buildTrainingDummies();
+  }
+
+  // two chunky books stacked on the ground (no kit has one, so it's a
+  // couple of coloured slabs with cream page edges)
+  makeBookStack() {
+    const g = new THREE.Group();
+    const covers = [0x9a3b2e, 0x2f5d8a];
+    const dims = [[0.5, 0.13, 0.36], [0.44, 0.12, 0.32]];
+    let y = 0;
+    dims.forEach((d, i) => {
+      const cover = new THREE.Mesh(
+        new THREE.BoxGeometry(d[0], d[1], d[2]),
+        new THREE.MeshStandardMaterial({ color: covers[i], roughness: 0.9, flatShading: true })
+      );
+      const pages = new THREE.Mesh(
+        new THREE.BoxGeometry(d[0] * 0.92, d[1] * 0.62, d[2] * 0.9),
+        new THREE.MeshStandardMaterial({ color: 0xe8e0cc, roughness: 1 })
+      );
+      cover.castShadow = true;
+      const yaw = (i - 0.5) * 0.4;
+      cover.position.set(0, y + d[1] / 2, 0); cover.rotation.y = yaw;
+      pages.position.copy(cover.position); pages.rotation.y = yaw;
+      g.add(cover, pages);
+      y += d[1];
+    });
+    return g;
   }
 
   // recolor a mini-character's shared colormap atlas by hue rule (green
@@ -1890,8 +1924,9 @@ export class GameView {
         const w = mk();
         w.scale.multiplyScalar(1.5);
         const dx = (i - 0.5) * 0.3; // one weapon per slot
-        w.position.set(side * wallW * 0.5 + dx, h, rackZ + 0.4);
-        w.rotation.set(-0.12, 0, dx * 1.6); // lean into the rack
+        // sit just off the wall — about 10% of a tile (0.2) proud of it
+        w.position.set(side * wallW * 0.5 + dx, h, WALLZ + 0.2);
+        w.rotation.set(-0.1, 0, dx * 1.6); // lean into the rack
         hut.add(w);
       }
     }
@@ -2873,21 +2908,24 @@ export class GameView {
     this.animateStatusFx(dt);
 
     for (const a of this.players.values()) {
-      // materializing out of the arrival portal: pop-in scale (spawnT
-      // starts slightly negative so the portal opens first) plus a short
-      // forward nudge — the hero steps OUT of the portal's front, so it
-      // starts back at the portal mouth and slides a teco toward the plaza
+      // materializing out of the arrival portal: pop in AT the portal
+      // mouth (spawnT starts negative so the portal opens first), then get
+      // clearly TOSSED forward toward the plaza — the hero steps out of
+      // the portal's front, it doesn't just drop into place.
       if (a.spawnT != null) {
         a.spawnT += dt;
+        const DUR = 0.85, TOSS = 1.6; // world units shoved forward (−z)
         if (a.spawnT < 0) {
           a.group.scale.setScalar(0.01);
-          a.group.position.z = PORTAL.z + 0.5; // waiting inside the portal
+          a.group.position.z += TOSS; // waiting at the portal mouth
         } else {
-          const k = Math.min(a.spawnT / 0.55, 1);
-          const e = 1 - Math.pow(1 - k, 3);
-          const s = k * (1 + 0.16 * Math.sin(k * Math.PI));
-          a.group.scale.setScalar(Math.max(s, 0.01));
-          a.group.position.z += (1 - e) * 0.7; // slide out from the portal
+          const k = Math.min(a.spawnT / DUR, 1);
+          // scale pops in over the first 55% (at the portal)
+          const sk = Math.min(k / 0.55, 1);
+          a.group.scale.setScalar(Math.max(sk * (1 + 0.16 * Math.sin(sk * Math.PI)), 0.01));
+          // forward shove eases out over the whole thing (portal → spawn)
+          const e = 1 - Math.pow(1 - k, 2);
+          a.group.position.z += (1 - e) * TOSS;
           if (k >= 1) { a.spawnT = null; a.group.scale.setScalar(1); }
         }
       }

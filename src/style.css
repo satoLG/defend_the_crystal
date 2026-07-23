@@ -777,6 +777,23 @@ input:focus { border-color: var(--gold); }
   animation: banner-in 0.4s cubic-bezier(0.18, 1.3, 0.4, 1),
     banner-out 0.5s ease-in 1.9s forwards;
 }
+/* calm location title card: white, no shake, smooth fade in & out, the
+   ornamental flourish sits UNDER the name, and it wraps + shrinks so the
+   name always fits on a phone */
+#boss-banner.location {
+  gap: 8px;
+  animation: loc-in 0.7s ease both, loc-out 0.7s ease 1.9s forwards;
+}
+#boss-banner.location #bb-name {
+  order: 1; color: #fff; text-transform: none; white-space: normal;
+  font-size: clamp(1.5rem, 6.4vw, 2.7rem); letter-spacing: 1px; font-weight: 800;
+  text-shadow: 0 0 18px rgba(255, 255, 255, 0.35), 0 3px 12px rgba(0, 0, 0, 0.9);
+}
+#boss-banner.location #bb-tag { order: 2; min-height: 18px; }
+#boss-banner.location #bb-flavor { display: none; }
+@keyframes loc-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes loc-out { from { opacity: 1; } to { opacity: 0; } }
+
 @keyframes banner-in { from { opacity: 0; transform: scale(1.9); } }
 @keyframes banner-shake {
   20% { transform: translate(-7px, 2px) rotate(-1deg); }

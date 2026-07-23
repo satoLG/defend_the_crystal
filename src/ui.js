@@ -448,12 +448,12 @@ export class UI {
   showLocationBanner() {
     const b = $('boss-banner');
     clearTimeout(this._bannerT);
-    $('bb-tag').textContent = '';
+    $('bb-tag').textContent = '';       // just the ornamental flourish
     $('bb-name').textContent = t('intro.templeName');
-    $('bb-flavor').textContent = t('intro.templeFlavor');
-    b.classList.remove('hidden', 'boss', 'mini');
+    $('bb-flavor').textContent = '';    // no subtitle
+    b.classList.remove('hidden', 'boss', 'mini', 'location');
     void b.offsetWidth;
-    b.classList.add('boss');
+    b.classList.add('location');
     const DUR = 2600;
     this._bannerT = setTimeout(() => b.classList.add('hidden'), DUR);
     return DUR;
