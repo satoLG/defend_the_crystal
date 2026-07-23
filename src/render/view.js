@@ -1924,8 +1924,9 @@ export class GameView {
         const w = mk();
         w.scale.multiplyScalar(1.5);
         const dx = (i - 0.5) * 0.3; // one weapon per slot
-        // sit just off the wall — about 10% of a tile (0.2) proud of it
-        w.position.set(side * wallW * 0.5 + dx, h, WALLZ + 0.2);
+        // stand them in front of the wall, ~10% of a tile TOWARD Baru
+        // (local +z is Baru's side) from where they used to sit
+        w.position.set(side * wallW * 0.5 + dx, h, WALLZ + 0.9);
         w.rotation.set(-0.1, 0, dx * 1.6); // lean into the rack
         hut.add(w);
       }

@@ -11,6 +11,7 @@ import { music } from './music.js';
 
 let ready = false;
 let sfxVolume = 0.45;
+let synthCtx = null; // our own WebAudio context for synthesized sounds
 const lastPlayed = {};
 
 export function initAudio() {
@@ -51,6 +52,25 @@ export function resumeSfx() {
   if (ctx && ctx.state !== 'running') {
     try { ctx.resume().catch(() => {}); } catch { /* ok */ }
   }
+  // keep our own synth context alive too (portal sound)
+  if (synthCtx && synthCtx.state === 'suspended') {
+    try { synthCtx.resume().catch(() => {}); } catch { /* ok */ }
+  }
+}
+
+// the tiks context is dug out heuristically and often isn't reachable,
+// which is why the portal was silent — so synthesized sounds get their
+// own context, created lazily and resumed on every gesture.
+function getSynthCtx() {
+  try {
+    if (!synthCtx) {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return null;
+      synthCtx = new AC();
+    }
+    if (synthCtx.state === 'suspended') synthCtx.resume().catch(() => {});
+  } catch { synthCtx = null; }
+  return synthCtx;
 }
 
 // A synthesized ETHEREAL portal sound (tiks' little blips can't do this):
@@ -58,11 +78,12 @@ export function resumeSfx() {
 // filter opens, swelling in and fading out over the whole ~2s portal
 // animation — one continuous magical rise, no beeps.
 function playPortalTone() {
-  const ctx = tiksContext();
-  if (!ctx || ctx.state !== 'running') return;
+  if (sfxVolume <= 0) return; // respect the sfx mute
+  const ctx = getSynthCtx();
+  if (!ctx) return;
   const t0 = ctx.currentTime;
   const dur = 2.0;
-  const vol = Math.max(sfxVolume, 0.05) * 0.55;
+  const vol = sfxVolume * 0.6;
 
   const master = ctx.createGain();
   master.gain.setValueAtTime(0.0001, t0);
@@ -142,6 +163,7 @@ export function armAudioOnFirstGesture(onGesture) {
   const arm = () => {
     initAudio();
     ensurePlaybackSession();
+    getSynthCtx(); // create/unlock the synth context inside the gesture
     onGesture?.();
     resumeSfx();
     music.unlock();
