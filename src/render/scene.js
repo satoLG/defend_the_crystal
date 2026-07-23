@@ -675,13 +675,14 @@ export class GameScene {
       placeTree(x, z, 0.8 + rng() * 1.1, 0.3 + rng() * 0.15, rng() < 0.35);
     }
 
-    // --- a low tree line closes off the back of the plaza. Kept SHORT
-    // (these sit right behind the portal, between the checkpoint camera
-    // and the arriving hero) so they never block the view of the spawn.
-    for (let i = 0; i < 9; i++) {
-      const x = -PLAZA.HALF_W - 1 + rng() * (PLAZA.HALF_W * 2 + 2);
-      const z = HALF_H + PLAZA.DEPTH + 1.4 + rng() * 2.4;
-      placeTree(x, z, 0.42 + rng() * 0.28, 0.62 + rng() * 0.2, rng() < 0.35);
+    // --- a tree line closes off the back of the plaza. A touch shorter
+    // than the rest (these sit behind the portal, between the checkpoint
+    // camera and the arriving hero) but still tall & dense enough that no
+    // bare ground shows under them.
+    for (let i = 0; i < 18; i++) {
+      const x = -PLAZA.HALF_W - 2 + rng() * (PLAZA.HALF_W * 2 + 4);
+      const z = HALF_H + PLAZA.DEPTH + 1.0 + rng() * 3.0;
+      placeTree(x, z, 0.62 + rng() * 0.4, 0.62 + rng() * 0.2, rng() < 0.35);
     }
 
     // --- low rocks and shrubs hug the board's side edges so it's
@@ -741,8 +742,9 @@ export class GameScene {
       const dark = Math.max(0.08, (base - north * 0.38 - out * 0.05) * (0.85 + rng() * 0.3));
       let s = 0.72 + rng() * 0.9;
       // trees right behind the plaza sit between the checkpoint camera and
-      // the spawning hero — keep them short so they never block the view
-      if (z > southZ - 1) s = Math.min(s, 0.42) * (0.7 + rng() * 0.3);
+      // the spawning hero — a bit shorter so they don't block the view,
+      // but still tall enough to hide the ground under them
+      if (z > southZ - 1) s = Math.min(s, 0.78);
       specs.push({
         x, z, y: terrainY(z), s, dark,
         crooked: rng() < 0.3, rot: rng() * Math.PI * 2,

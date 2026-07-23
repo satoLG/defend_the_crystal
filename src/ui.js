@@ -443,6 +443,22 @@ export class UI {
     }
   }
 
+  // location title card in the boss-banner style, shown once the intro
+  // clears — bridges into the portal arrival. Returns its lifetime (ms).
+  showLocationBanner() {
+    const b = $('boss-banner');
+    clearTimeout(this._bannerT);
+    $('bb-tag').textContent = '';
+    $('bb-name').textContent = t('intro.templeName');
+    $('bb-flavor').textContent = t('intro.templeFlavor');
+    b.classList.remove('hidden', 'boss', 'mini');
+    void b.offsetWidth;
+    b.classList.add('boss');
+    const DUR = 2600;
+    this._bannerT = setTimeout(() => b.classList.add('hidden'), DUR);
+    return DUR;
+  }
+
   // huge dramatic splash when a (mini-)boss stomps onto the field
   showBossBanner(name, flavor, mini = false) {
     const b = $('boss-banner');

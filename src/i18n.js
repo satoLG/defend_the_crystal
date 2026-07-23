@@ -196,7 +196,10 @@ const STRINGS = {
     start: {
       play: 'Play', summoning: 'Summoning models…', ready: 'Ready!',
     },
-    intro: { defend: 'PLEASE, DEFEND IT...' },
+    intro: {
+      defend: 'PLEASE, DEFEND IT...',
+      templeName: 'Crystal Temple', templeFlavor: 'Sanctuary of the last light',
+    },
     invite: {
       joiningMatch: "You're joining a specific match",
       openedLink: 'You opened a link to a specific match',
@@ -436,7 +439,10 @@ const STRINGS = {
     start: {
       play: 'Jogar', summoning: 'Invocando modelos…', ready: 'Pronto!',
     },
-    intro: { defend: 'POR FAVOR, DEFENDA-O...' },
+    intro: {
+      defend: 'POR FAVOR, DEFENDA-O...',
+      templeName: 'Templo do Cristal', templeFlavor: 'Santuário da última luz',
+    },
     invite: {
       joiningMatch: 'Você está entrando em uma partida específica',
       openedLink: 'Você abriu um link para uma partida específica',

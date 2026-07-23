@@ -1615,6 +1615,9 @@ export class GameView {
     else if (d.tint) for (const m of a.mats) m.color.multiply(new THREE.Color(d.tint));
     const label = this.makeTextSprite(d.name, 0xffe9b8, 2.2);
     label.position.y = 2.0;
+    // draw the name over everything so a stall/canopy never swallows it
+    label.material.depthTest = false;
+    label.renderOrder = 20;
     a.group.add(label);
     const bubble = this.makeTextSprite(d.bubble || t('npc.greeting'), 0xffffff, 1.5);
     bubble.position.y = 2.5;
@@ -1805,9 +1808,10 @@ export class GameView {
     this.scene.add(stall);
     this.sanctNodes.push(stall);
 
-    // a basket of fruit sitting on the grass out front of the pet stall
+    // a basket of fruit set back beside the elephant, toward the back of
+    // the sanctuary (clear of Tonho out front)
     const fruit = instantiate('kit-fruit').group;
-    fruit.position.set(PET_STALL.x - 1.3, -ELEV, PET_STALL.z + 0.4);
+    fruit.position.set(PET_STALL.x - 0.4, -ELEV, PET_STALL.z + 1.4);
     fruit.rotation.y = -0.5;
     this.scene.add(fruit);
     this.sanctNodes.push(fruit);
@@ -1875,17 +1879,19 @@ export class GameView {
     // two weapon racks half-set into the wall (one per segment), a touch
     // in front of the wall line so they read as embedded in it
     const rackZ = WALLZ + 0.28;
-    // each rack has two slots — stand a weapon upright in each. Left rack
-    // holds spears, right rack swords, seated straight in their slots.
-    for (const [side, mk] of [[-1, makeSpear], [1, () => instantiate('prop-sword', { shadows: false }).group]]) {
+    // each rack has two slots — stand a weapon upright in each, seated on
+    // the FRONT of the wall (Baru's side, local +z) so they read as racked
+    // and stay in view. Left rack holds spears, right rack swords.
+    for (const [side, mk, h] of [[-1, makeSpear, 0.62], [1, () => makeGreatSword(), 0.5]]) {
       const rack = instantiate('arena-rack').group;
       rack.position.set(side * wallW * 0.5, 0, rackZ);
       hut.add(rack);
       for (let i = 0; i < 2; i++) {
         const w = mk();
-        w.scale.multiplyScalar(1.25);
-        const dx = (i - 0.5) * 0.26; // one weapon per slot
-        w.position.set(side * wallW * 0.5 + dx, 0.62, rackZ + 0.14);
+        w.scale.multiplyScalar(1.5);
+        const dx = (i - 0.5) * 0.3; // one weapon per slot
+        w.position.set(side * wallW * 0.5 + dx, h, rackZ + 0.4);
+        w.rotation.set(-0.12, 0, dx * 1.6); // lean into the rack
         hut.add(w);
       }
     }

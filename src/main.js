@@ -304,10 +304,14 @@ function startMatch() {
 function enterGame() {
   state.started = true;
   state.over = false;
-  // black screen typing the crystal's plea, THEN — a beat after the
-  // scene is revealed — the portal flares open and the hero steps out
+  // black screen typing the crystal's plea, then a "Crystal Temple"
+  // title card as the scene fades in, and the hero steps out of the
+  // portal the moment that card clears — no dead wait
   const introDur = ui.playIntro();
-  view.beginArrival(introDur + 2.0);
+  // the title card appears right as the black screen clears, and the
+  // hero steps out of the portal the moment the card fades
+  setTimeout(() => { if (state.started && !state.over) ui.showLocationBanner(); }, introDur * 1000);
+  view.beginArrival(introDur + 2.6);
   ui.showHud();
   sfx.notify();
 }
@@ -731,9 +735,10 @@ function handleEvent(ev) {
       ui.hideGameOver();
       view.reset();
       syncSelfFromSim();
-      { // the party re-enters through the portal after the plea
+      { // the party re-enters through the portal after the plea + title
         const dur = ui.playIntro();
-        view.beginArrival(dur + 2.0);
+        setTimeout(() => { if (state.started && !state.over) ui.showLocationBanner(); }, dur * 1000);
+        view.beginArrival(dur + 2.6);
       }
       ui.toast(t('toast.newDefense'), 'gold');
       break;

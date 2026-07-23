@@ -136,10 +136,17 @@ export const sfx = {
   notify: () => ready && throttled('notify', 200, () => tiks.notify()),
   // soft per-character tick for the typewriter intro
   type: () => ready && throttled('type', 25, () => tiks.hover()),
-  // the arrival portal flaring open + the hero materializing
-  portal: () => ready && throttled('portal', 300, () => {
-    tiks.swoosh();
-    setTimeout(() => { try { tiks.success(); } catch { /* ok */ } }, 180);
+  // the arrival portal: a layered magical whoosh that swells as it
+  // opens, shimmers while it holds, and swooshes down as it closes —
+  // spanning the whole ~2s open→hold→close animation
+  portal: () => ready && throttled('portal', 400, () => {
+    const seq = [
+      [0, 'swoosh'], [90, 'warning'], [200, 'swoosh'], [360, 'notify'],
+      [720, 'hover'], [1040, 'hover'], [1360, 'swoosh'], [1520, 'warning'],
+    ];
+    for (const [delay, name] of seq) {
+      setTimeout(() => { try { tiks[name](); } catch { /* ok */ } }, delay);
+    }
   }),
   // gentle "start of a conversation" chime when stepping up to an NPC —
   // softer & less jarring than the old notify
