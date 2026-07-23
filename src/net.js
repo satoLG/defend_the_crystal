@@ -378,7 +378,18 @@ export class Net {
   _probeSupabase(code) {
     let client;
     try {
-      client = createClient(SUPABASE.URL, SUPABASE.KEY);
+      // A throwaway client just for the Realtime health check. Disable auth
+      // session persistence and give it its own storage key so it doesn't
+      // collide with the Trystero transport's internal client (which would
+      // trigger a "Multiple GoTrueClient instances" warning) — the probe
+      // never authenticates, it only opens a Broadcast channel.
+      client = createClient(SUPABASE.URL, SUPABASE.KEY, {
+        auth: {
+          persistSession: false,
+          autoRefreshToken: false,
+          storageKey: 'dtc-health-probe',
+        },
+      });
     } catch (err) {
       this._activateFallback(code, `Supabase client init error: ${err?.message || err}`);
       return;
