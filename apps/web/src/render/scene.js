@@ -1,10 +1,10 @@
 import * as THREE from 'three';
-import { GRID } from '../config.js';
-import { cellToWorld, CRYSTAL_POS, HALF_W, HALF_H, PLAZA } from '../sim/grid.js';
+import { GRID } from '@dtc/shared/config.js';
+import { cellToWorld, CRYSTAL_POS, HALF_W, HALF_H, PLAZA } from '@dtc/shared/sim/grid.js';
 import {
   ELEV, STAIRS, FOUNTAIN, terrainY, PILLAR_CELLS, STATUE_CELLS,
   PLAZA_COLUMNS, PLAZA_LANTERNS, PET_STALL_CELLS,
-} from '../sanctuary.js';
+} from '@dtc/shared/sanctuary.js';
 import { instantiate } from './assets.js';
 
 // ============================================================

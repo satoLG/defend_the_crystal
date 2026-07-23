@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as skeletonClone } from 'three/addons/utils/SkeletonUtils.js';
-import { GRID } from '../config.js';
+import { GRID } from '@dtc/shared/config.js';
 
 // ============================================================
 // Loads every GLB once, normalizes scale (Kenney kits use

@@ -1,7 +1,7 @@
 import {
   CLASSES, NAME_MAX, PETS, PET, petXpNext,
   WEAPONS, WEAPON_TIER_MAX, classStarterWeapons,
-} from './config.js';
+} from '@dtc/shared/config.js';
 
 // ============================================================
 // The player's saved characters (name + class + part colours +

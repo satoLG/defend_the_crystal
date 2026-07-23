@@ -1,0 +1,30 @@
+# Render Blueprint — authoritative multiplayer server.
+#
+# Deploys apps/server as a Node web service. The frontend lives on Vercel
+# (see vercel.json) and talks to this service over Socket.IO. PR previews are
+# enabled: opening a pull request spins up an ephemeral copy of the server,
+# torn down when the PR closes.
+#
+# First-time setup: Render Dashboard -> New -> Blueprint -> pick this repo.
+previews:
+  generation: automatic
+
+services:
+  - type: web
+    name: dtc-server
+    runtime: node
+    plan: free
+    rootDir: .
+    # install the whole workspace so @dtc/shared resolves for the server
+    buildCommand: npm install
+    startCommand: npm run start
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      # Optional: exact extra browser origins allowed to connect, comma-
+      # separated. localhost and every *.vercel.app deploy are already allowed
+      # by the server, so this is only needed for a custom domain.
+      - key: CLIENT_ORIGINS
+        sync: false

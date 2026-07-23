@@ -1,0 +1,13 @@
+{
+  "name": "@dtc/shared",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    "./*": "./src/*"
+  },
+  "dependencies": {
+    "miniplex": "^2.0.0",
+    "yuka": "^0.7.8"
+  }
+}
