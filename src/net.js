@@ -2,7 +2,8 @@ import { joinRoom as joinNostr, selfId as trysteroId } from 'trystero';
 import { joinRoom as joinTorrent } from '@trystero-p2p/torrent';
 import { joinRoom as joinMqtt } from '@trystero-p2p/mqtt';
 import { joinRoom as joinSupabase } from '@trystero-p2p/supabase';
-import { NET, SUPABASE } from './config.js';
+import { createClient } from '@supabase/supabase-js';
+import { NET, SUPABASE, TURN, DEFAULT_STUN } from './config.js';
 
 const useLocalNet = new URLSearchParams(location.search).has('localnet');
 // `trysteroId` comes from the 'trystero' (Nostr) package, but every
@@ -18,36 +19,138 @@ export const selfId = useLocalNet
   : trysteroId;
 
 // ============================================================
-// Robust peer discovery.
+// Supabase-first peer discovery, with public relays as a *fallback*.
 //
-// Trystero's default Nostr strategy only tries a handful of
-// relays, chosen deterministically from the app id. When those
-// specific relays are down or reject events (a common, transient
-// situation with public Nostr infra), two peers never find each
-// other even though plenty of *other* relays are healthy.
+// Supabase Realtime Broadcast is a signaling channel WE control (see
+// config.SUPABASE). Public Nostr/torrent/MQTT relays go up and down; a
+// Supabase project doesn't — so when it's configured it is the ONE, always-
+// preferred discovery path. Only the WebRTC handshake ever crosses Supabase;
+// once two peers link up, every bit of gameplay data flows directly
+// peer-to-peer and never touches it again.
 //
-// To make connecting far more reliable we:
-//   1. When configured, broker the handshake over a Supabase
-//      Realtime Broadcast channel WE control (see config.SUPABASE).
-//      Public relays go up and down; a Supabase project doesn't, so
-//      this becomes the steady, PREFERRED discovery path. Only the
-//      WebRTC handshake crosses Supabase — once peers link up, all
-//      gameplay data flows directly peer-to-peer and never touches it.
-//   2. Feed the Nostr strategy a large, curated relay pool (both
-//      peers use the exact same list, so overlap is guaranteed
-//      and a single healthy relay is enough to connect).
-//   3. Join the same room over several *independent* transports
-//      at once (Supabase, Nostr relays, WebTorrent trackers, MQTT
-//      brokers). A peer is discovered as soon as ANY transport links
-//      them, so all of them have to be down for a match to fail.
+// The connection order is a real, staged failover — not a race:
 //
-// All transports run in parallel and are merged behind one Net
-// interface; the game layer is unaware of the plumbing. Supabase, when
-// present, is marked `primary`: whenever it links a peer that another
-// transport also found, sends are routed through Supabase, so the
-// public relays only ever carry traffic Supabase couldn't — i.e. they
-// act as automatic backups without any explicit failover step.
+//   1. Supabase starts FIRST and ALONE. In the normal case a match forms
+//      entirely over Supabase and the public relays are never even opened.
+//   2. In parallel we run a lightweight Realtime *health probe* (a throwaway
+//      Broadcast channel whose subscribe status we can actually read). While
+//      Supabase's own signaling channel is healthy — SUBSCRIBED — we stay on
+//      Supabase alone.
+//   3. ONLY if the probe reports Supabase can't connect (CHANNEL_ERROR /
+//      TIMED_OUT, or no SUBSCRIBED within the timeout) — or if a live
+//      Supabase link later drops — do we bring up the fallback pool:
+//      a large curated Nostr relay list plus WebTorrent trackers and MQTT
+//      brokers, all joined at once so a single reachable one is enough.
+//
+// This is the behaviour we want: Supabase is the principal transport,
+// tried on its own every time, and the relays are touched strictly as a
+// backup, never speculatively. Every stage logs to the console so a failing
+// Supabase connection is loud and obvious instead of being silently papered
+// over by a relay that happened to answer first.
+//
+// All active transports are merged behind one Net interface; the game layer
+// is unaware of the plumbing. Supabase is marked `primary`, so even when the
+// fallback pool is up, any peer Supabase can reach is sent to over Supabase.
 // ============================================================
+
+// How long (ms) to wait for the Supabase Realtime health probe to report
+// SUBSCRIBED before declaring Supabase unreachable and opening the fallback
+// relays. A healthy project subscribes in ~1-3s; this only ever elapses in
+// full when Supabase genuinely can't be reached.
+const SUPABASE_HEALTH_TIMEOUT = 6000;
+
+// ============================================================
+// Connection diagnostics.
+//
+// When a match won't connect it is almost never "one relay is down" — every
+// transport shares the same WebRTC layer, so the useful question is WHERE it
+// breaks: did a transport's room even start? did any peer get discovered, and
+// over which transport? can this browser reach a STUN/TURN server at all?
+//
+// These helpers surface exactly that. Everything logs to the console; add
+// ?netdebug to the URL to also mirror it into a small on-screen overlay
+// (handy when testing across two phones/devices with no console at hand).
+// ============================================================
+const NETDEBUG = typeof location !== 'undefined'
+  && new URLSearchParams(location.search).has('netdebug');
+
+let _dbgEl = null;
+function dbgOverlay() {
+  if (!NETDEBUG || typeof document === 'undefined') return null;
+  if (_dbgEl) return _dbgEl;
+  _dbgEl = document.createElement('div');
+  _dbgEl.style.cssText = [
+    'position:fixed', 'left:6px', 'bottom:6px', 'z-index:99999',
+    'max-width:min(92vw,540px)', 'max-height:42vh', 'overflow:auto',
+    'font:11px/1.35 ui-monospace,Menlo,Consolas,monospace', 'color:#9fe7ff',
+    'background:rgba(0,0,0,.74)', 'padding:6px 8px', 'border:1px solid #0af',
+    'border-radius:6px', 'white-space:pre-wrap', 'pointer-events:none',
+  ].join(';');
+  (document.body || document.documentElement).appendChild(_dbgEl);
+  return _dbgEl;
+}
+
+function netLog(level, msg) {
+  (console[level] || console.log)(`[net] ${msg}`);
+  const el = dbgOverlay();
+  if (el) {
+    el.textContent += `${new Date().toLocaleTimeString()}  ${msg}\n`;
+    el.scrollTop = el.scrollHeight;
+  }
+}
+
+// The exact ICE server list Trystero hands the peer connection: its default
+// STUN servers with any configured TURN appended (see peer_default in
+// @trystero-p2p/core, which does defaultIceServers.concat(turnConfig)).
+const ICE_SERVERS = [...DEFAULT_STUN, ...TURN];
+
+// One-shot WebRTC reachability self-check. Gathers ICE candidates against the
+// same servers the real connections use and reports which kinds came back:
+//   host  = your LAN address (always there)
+//   srflx = your public address via STUN — needed to connect across networks
+//   relay = a TURN relay candidate — the fallback that beats symmetric NAT
+// If srflx never appears, STUN is blocked/unreachable and cross-network
+// matches CAN'T form on any transport — that's the usual cause of "nothing
+// connects". If you have no TURN configured, relay will always be 0.
+function probeIceReachability() {
+  if (typeof RTCPeerConnection === 'undefined') return;
+  let pc;
+  try {
+    pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+  } catch (err) {
+    netLog('warn', `ICE self-check couldn't start: ${err?.message || err}`);
+    return;
+  }
+  const seen = { host: 0, srflx: 0, prflx: 0, relay: 0 };
+  let done = false;
+  const finish = (reason) => {
+    if (done) return;
+    done = true;
+    try { pc.close(); } catch { /* ignore */ }
+    const hasTurn = TURN.length > 0;
+    let verdict;
+    if (seen.srflx === 0 && seen.relay === 0) {
+      verdict = hasTurn
+        ? '⚠ STUN *and* TURN unreachable — WebRTC will fail on every transport; check your network/TURN creds'
+        : '⚠ STUN unreachable and no TURN configured — cross-network matches will fail; configure a TURN server (see config.js TURN)';
+    } else if (seen.relay === 0 && !hasTurn) {
+      verdict = 'STUN OK. No TURN configured — fine on most home networks, but symmetric-NAT/mobile peers may still fail. Add TURN if two players never connect.';
+    } else {
+      verdict = 'STUN/TURN reachable — ICE looks healthy';
+    }
+    netLog('info', `ICE self-check [${reason}] host:${seen.host} srflx(STUN):${seen.srflx} relay(TURN):${seen.relay} — ${verdict}`);
+  };
+  pc.onicecandidate = (e) => {
+    if (!e.candidate) { finish('complete'); return; }
+    const type = e.candidate.type;
+    if (type && seen[type] != null) seen[type]++;
+  };
+  try {
+    pc.createDataChannel('probe');
+    pc.createOffer().then((o) => pc.setLocalDescription(o)).catch(() => finish('offer-failed'));
+  } catch { finish('offer-failed'); }
+  setTimeout(() => finish('timeout'), 7000);
+}
 
 // A wide mix of well-known, permissive public Nostr relays. Every
 // peer connects to all of them, so as long as any single relay is
@@ -82,51 +185,60 @@ const NOSTR_RELAYS = [
 // respective strategies' own defaults, which are already broad and
 // independent of Nostr; we just enable those transports below.
 
-// The Supabase transport is only wired up when a project URL + anon key
-// are configured; otherwise the game runs on the public relays alone,
-// exactly as before. The Supabase project URL is Trystero's `appId` for
-// this strategy and the anon key goes in relayConfig.supabaseKey.
+// Supabase is only wired up when a project URL + key are configured;
+// otherwise the game runs on the public relays alone. The Supabase project
+// URL is Trystero's `appId` for this strategy and the key goes in
+// relayConfig.supabaseKey.
 const supabaseReady = !!(SUPABASE.URL && SUPABASE.KEY);
 
-// Each transport is a named joiner. They are attempted in order and
-// any that fails to initialize is skipped, so a single broken
-// strategy can never take the others down with it. A transport marked
-// `primary` becomes the preferred send path once it links a peer (see
-// _initRoom); Supabase, when configured, is listed first and primary.
-const TRANSPORTS = [
-  ...(supabaseReady ? [{
-    name: 'supabase',
-    primary: true,
-    join: (code) => joinSupabase(
-      { appId: SUPABASE.URL, relayConfig: { supabaseKey: SUPABASE.KEY } },
-      code,
-    ),
-  }] : []),
+// The primary transport: Supabase, when configured. Started first and on its
+// own; `primary` makes it the preferred send path whenever it can reach a
+// peer (see _initRoom).
+const SUPABASE_TRANSPORT = supabaseReady ? {
+  name: 'supabase',
+  primary: true,
+  join: (code) => joinSupabase(
+    { appId: SUPABASE.URL, relayConfig: { supabaseKey: SUPABASE.KEY }, turnConfig: TURN },
+    code,
+  ),
+} : null;
+
+// The fallback pool: public relays, opened ONLY if Supabase can't connect
+// (or isn't configured at all). Each is a named joiner; any that fails to
+// initialize is skipped, so one broken strategy can't take the others down.
+const FALLBACK_TRANSPORTS = [
   {
     name: 'nostr',
     join: (code) => joinNostr(
-      { appId: NET.APP_ID, relayConfig: { urls: NOSTR_RELAYS } },
+      { appId: NET.APP_ID, relayConfig: { urls: NOSTR_RELAYS }, turnConfig: TURN },
       code,
     ),
   },
   {
     name: 'torrent',
-    join: (code) => joinTorrent({ appId: NET.APP_ID }, code),
+    join: (code) => joinTorrent({ appId: NET.APP_ID, turnConfig: TURN }, code),
   },
   {
     name: 'mqtt',
-    join: (code) => joinMqtt({ appId: NET.APP_ID }, code),
+    join: (code) => joinMqtt({ appId: NET.APP_ID, turnConfig: TURN }, code),
   },
 ];
 
-// Optional override for debugging: ?net=nostr,torrent limits which
-// transports are used. Unknown names are ignored.
-function activeTransports() {
+const ALL_TRANSPORTS = [
+  ...(SUPABASE_TRANSPORT ? [SUPABASE_TRANSPORT] : []),
+  ...FALLBACK_TRANSPORTS,
+];
+
+// Optional debug override: ?net=nostr,torrent forces an exact set of
+// transports up in parallel (the old all-at-once behaviour), skipping the
+// staged Supabase-first failover. Unknown names are ignored; an empty match
+// falls back to the full staged flow (returns null).
+function overrideTransports() {
   const wanted = new URLSearchParams(location.search).get('net');
-  if (!wanted) return TRANSPORTS;
+  if (!wanted) return null;
   const allow = new Set(wanted.split(',').map((s) => s.trim().toLowerCase()));
-  const picked = TRANSPORTS.filter((t) => allow.has(t.name));
-  return picked.length ? picked : TRANSPORTS;
+  const picked = ALL_TRANSPORTS.filter((t) => allow.has(t.name));
+  return picked.length ? picked : null;
 }
 
 const ACTION_NAMES = ['hello', 'input', 'act', 'snap', 'ev', 'lobby'];
@@ -197,26 +309,128 @@ export class Net {
     this._actionsByRoom = new Map(); // room -> { name -> action }
     this._membersByRoom = new Map(); // room -> Set(peerId)
     this._primary = new Map();       // peerId -> room used for sending
+    this._roomName = new Map();      // room -> transport name (for diagnostics)
+
+    // staged-failover bookkeeping
+    this._left = false;              // set by leave(); silences late probe events
+    this._fallbackStarted = false;   // fallback relays opened at most once
+    this._probeClient = null;        // Supabase health-probe client…
+    this._probeChan = null;          // …and its throwaway channel
+    this._probeTimer = null;         // "Supabase didn't connect in time" timer
 
     if (useLocalNet) {
-      this._initRoom(new LocalRoom(code));
+      this._initRoom(new LocalRoom(code), false, 'local');
       return;
     }
 
-    for (const transport of activeTransports()) {
-      try {
-        this._initRoom(transport.join(code), transport.primary === true);
-      } catch (err) {
-        console.warn(`[net] transport "${transport.name}" unavailable:`, err);
-      }
+    // Fire the WebRTC reachability self-check once per room. It's independent
+    // of the transports and just reports whether STUN/TURN can be reached at
+    // all — the single most common reason a match won't connect.
+    probeIceReachability();
+
+    // Debug override (?net=…): bring the named transports up in parallel and
+    // skip the staged flow entirely.
+    const forced = overrideTransports();
+    if (forced) {
+      netLog('info', `debug override: forcing transports [${forced.map((t) => t.name).join(', ')}] up in parallel`);
+      for (const t of forced) this._startTransport(t, code);
+      if (this.rooms.length === 0) netLog('warn', 'no transports could start (offline?)');
+      return;
     }
-    if (this.rooms.length === 0) {
-      console.warn('[net] no transports could start (offline?)');
+
+    if (SUPABASE_TRANSPORT) {
+      this._startSupabasePrimary(code);
+    } else {
+      // No Supabase configured: the public relays ARE the transport.
+      netLog('warn', 'Supabase signaling not configured — using public relays only');
+      this._activateFallback(code, 'no Supabase project configured');
     }
   }
 
-  _initRoom(room, preferred = false) {
+  // Attempt one transport; returns true if its room started. A construction
+  // failure is logged and swallowed so it can't take the others down.
+  _startTransport(transport, code) {
+    try {
+      this._initRoom(transport.join(code), transport.primary === true, transport.name);
+      netLog('info', `transport "${transport.name}" room started`);
+      return true;
+    } catch (err) {
+      netLog('warn', `transport "${transport.name}" unavailable: ${err?.message || err}`);
+      return false;
+    }
+  }
+
+  // Stage 1: bring Supabase up on its own, then watch its Realtime health.
+  _startSupabasePrimary(code) {
+    netLog('info', 'Supabase is the primary signaling transport — connecting on its own…');
+    if (!this._startTransport(SUPABASE_TRANSPORT, code)) {
+      // Couldn't even construct the Supabase room: fail over immediately.
+      this._activateFallback(code, 'Supabase transport failed to initialize');
+      return;
+    }
+    this._probeSupabase(code);
+  }
+
+  // Stage 2: a throwaway Broadcast channel whose subscribe status we CAN read
+  // (Trystero's supabase room hides its own). SUBSCRIBED => Supabase signaling
+  // is live, so we stay on it alone. An error/timeout — or a later drop —
+  // opens the fallback relays exactly once.
+  _probeSupabase(code) {
+    let client;
+    try {
+      // A throwaway client just for the Realtime health check. Disable auth
+      // session persistence and give it its own storage key so it doesn't
+      // collide with the Trystero transport's internal client (which would
+      // trigger a "Multiple GoTrueClient instances" warning) — the probe
+      // never authenticates, it only opens a Broadcast channel.
+      client = createClient(SUPABASE.URL, SUPABASE.KEY, {
+        auth: {
+          persistSession: false,
+          autoRefreshToken: false,
+          storageKey: 'dtc-health-probe',
+        },
+      });
+    } catch (err) {
+      this._activateFallback(code, `Supabase client init error: ${err?.message || err}`);
+      return;
+    }
+    this._probeClient = client;
+    const chan = client.channel(`dtc-health:${code}`, {
+      config: { broadcast: { self: false } },
+    });
+    this._probeChan = chan;
+
+    this._probeTimer = setTimeout(() => {
+      this._probeTimer = null;
+      this._activateFallback(code, `Supabase did not connect within ${SUPABASE_HEALTH_TIMEOUT / 1000}s`);
+    }, SUPABASE_HEALTH_TIMEOUT);
+
+    chan.subscribe((status, err) => {
+      if (this._left) return; // our own teardown; ignore
+      if (status === 'SUBSCRIBED') {
+        if (this._probeTimer) { clearTimeout(this._probeTimer); this._probeTimer = null; }
+        netLog('info', 'Supabase signaling is live — running on Supabase alone; relays stay off unless it drops');
+      } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+        if (this._probeTimer) { clearTimeout(this._probeTimer); this._probeTimer = null; }
+        this._activateFallback(code, `Supabase signaling ${status}${err ? `: ${err.message || err}` : ''}`);
+      }
+    });
+  }
+
+  // Stage 3: open the public-relay fallback pool. Runs at most once, whether
+  // triggered by a failed probe, a dropped Supabase link, or no Supabase at
+  // all. Supabase (if it recovers) stays primary for routing.
+  _activateFallback(code, why) {
+    if (this._fallbackStarted || this._left) return;
+    this._fallbackStarted = true;
+    netLog('warn', `falling back to public relays (Nostr/WebTorrent/MQTT): ${why}`);
+    for (const t of FALLBACK_TRANSPORTS) this._startTransport(t, code);
+    if (this.rooms.length === 0) netLog('warn', 'no transports could start (offline?)');
+  }
+
+  _initRoom(room, preferred = false, name = 'local') {
     this.rooms.push(room);
+    this._roomName.set(room, name);
     const members = new Set();
     this._membersByRoom.set(room, members);
 
@@ -232,29 +446,57 @@ export class Net {
 
     room.onPeerJoin = (peerId) => {
       members.add(peerId);
+      const who = peerId.slice(0, 6);
       if (!this.peers.has(peerId)) {
         this.peers.add(peerId);
         this._primary.set(peerId, room);
+        netLog('info', `peer ${who} CONNECTED via ${name} (WebRTC linked) — ${this.peers.size} peer(s) total`);
+        this._pushDebugState();
         this.onPeerJoin?.(peerId);
-      } else if (preferred && this._primary.get(peerId) !== room) {
-        // Peer is already reachable via another transport, but our
-        // preferred (Supabase) path just linked it too — route future
-        // sends through this one. No join event: the peer is not new.
-        this._primary.set(peerId, room);
+      } else {
+        netLog('info', `peer ${who} also reachable via ${name}`);
+        if (preferred && this._primary.get(peerId) !== room) {
+          // Peer is already reachable via another transport, but our
+          // preferred (Supabase) path just linked it too — route future
+          // sends through this one. No join event: the peer is not new.
+          this._primary.set(peerId, room);
+          netLog('info', `routing peer ${who} through ${name} (preferred)`);
+        }
+        this._pushDebugState();
       }
     };
     room.onPeerLeave = (peerId) => {
       members.delete(peerId);
+      const who = peerId.slice(0, 6);
       const stillOn = this.rooms.find((r) => this._membersByRoom.get(r)?.has(peerId));
       if (stillOn) {
         // Still reachable elsewhere: just repoint sends if the primary left.
         if (this._primary.get(peerId) === room) this._primary.set(peerId, stillOn);
+        netLog('info', `peer ${who} dropped from ${name}, still on ${this._roomName.get(stillOn)}`);
+        this._pushDebugState();
         return;
       }
       if (this.peers.delete(peerId)) {
         this._primary.delete(peerId);
+        netLog('info', `peer ${who} DISCONNECTED (was last on ${name}) — ${this.peers.size} peer(s) total`);
+        this._pushDebugState();
         this.onPeerLeave?.(peerId);
       }
+    };
+  }
+
+  // Mirror the current connection state onto window.__dtcNet so it can be
+  // inspected live from the console during a match.
+  _pushDebugState() {
+    if (typeof window === 'undefined') return;
+    window.__dtcNet = {
+      code: this.code,
+      transports: this.rooms.map((r) => this._roomName.get(r)),
+      fallbackStarted: this._fallbackStarted,
+      turnConfigured: TURN.length > 0,
+      peers: [...this.peers].map((p) => ({
+        id: p, via: this._roomName.get(this._primary.get(p)),
+      })),
     };
   }
 
@@ -299,6 +541,13 @@ export class Net {
   }
 
   leave() {
+    this._left = true;
+    if (this._probeTimer) { clearTimeout(this._probeTimer); this._probeTimer = null; }
+    if (this._probeClient && this._probeChan) {
+      try { this._probeClient.removeChannel(this._probeChan); } catch { /* ignore */ }
+    }
+    this._probeChan = null;
+    this._probeClient = null;
     for (const room of this.rooms) {
       try { room.leave(); } catch { /* ignore */ }
     }

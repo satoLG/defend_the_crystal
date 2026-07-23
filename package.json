@@ -14,6 +14,7 @@
   },
   "dependencies": {
     "@rexa-developer/tiks": "^0.3.0",
+    "@supabase/supabase-js": "^2.108.1",
     "@trystero-p2p/mqtt": "0.25.2",
     "@trystero-p2p/supabase": "0.25.2",
     "@trystero-p2p/torrent": "0.25.2",
