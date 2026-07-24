@@ -61,6 +61,7 @@ export class Sim {
     this.events = [];
     this.contReady = new Set();
     this.trainers = new Set(); // players currently in training mode
+    this.taunt = null;      // active tanker taunt { id, until, r }
     this.waveStartCount = 1; // player count captured at wave start
   }
 
@@ -281,6 +282,7 @@ export class Sim {
     this.drops = [];
     this.contReady.clear();
     this.trainers.clear();
+    this.taunt = null;
     // back to a free-roam phase BEFORE re-adding the roster, so every
     // hero of the fresh defense arrives through the portal again
     this.phase = 'lobby';
@@ -612,10 +614,25 @@ export class Sim {
     });
   }
 
-  // wall mode: no knockback + doubled defense, applied in damagePlayer
+  // taunt: every enemy that can reach the tanker is forced to charge him
+  // at maximum priority for the duration — overriding the crystal-priority
+  // and anti-kite rules (see stepEnemies). Doubled defense (wallT) rides
+  // along so he can actually tank the horde he just yanked onto himself.
   skillTanker(p) {
-    p.wallT = SKILLS.tanker.dur;
-    this.emit({ t: 'skill', cls: 'tanker', id: p.id, dur: SKILLS.tanker.dur });
+    const S = SKILLS.tanker;
+    p.wallT = S.dur;
+    this.taunt = { id: p.id, until: this.time + S.dur, r: S.radius };
+    // snap nearby enemies onto him immediately so the pull is instant
+    for (const e of this.enemies) {
+      if (e.dummy) continue;
+      const pos = e.vehicle.position;
+      const d = dist2d(pos.x, pos.z, p.x, p.z);
+      if (d <= S.radius && (e.flying || this.hasLos(pos.x, pos.z, p.x, p.z))) {
+        this.startChase(e, p);
+        e.aggroCd = 0;
+      }
+    }
+    this.emit({ t: 'skill', cls: 'tanker', id: p.id, dur: S.dur, r: S.radius });
   }
 
   skillArcher(p) {
@@ -844,23 +861,10 @@ export class Sim {
       }
       return;
     }
-    // knockback shoves the enemy BACKWARD along the direction the hit
-    // travelled — away from whoever landed it, whatever side that is (a
-    // stab in the back sends it forward, not blindly away from the crystal).
-    // Only player-dealt blows knock back: tower attacks and DoT ticks pass
-    // no killer and deal damage only, their stun/slow/etc. coming from
-    // their own specials — never a default shove.
-    if (killer && (kbx || kbz)) {
-      e.kbx += kbx;
-      e.kbz += kbz;
-      // clamp the accumulated impulse so a pile-up of simultaneous hits
-      // can't fling the enemy across the board (or through a wall)
-      const acc = Math.hypot(e.kbx, e.kbz);
-      if (acc > ENEMY.KB_MAX) {
-        const s = ENEMY.KB_MAX / acc;
-        e.kbx *= s; e.kbz *= s;
-      }
-    }
+    // knockback removed: hits deal damage only, never shove the enemy —
+    // characters and enemies stay locked together while trading blows
+    // instead of flinging each other apart (kbx/kbz kept in the signature
+    // for call-site compatibility but no longer applied).
     this.emit({ t: 'hit', id: e.id });
     // getting shot/blasted pulls aggro — but only under the same rules
     // as proximity: clear line to the attacker and crystal not closer
@@ -1117,18 +1121,16 @@ export class Sim {
       this.emit({ t: 'block', id: p.id, x: rnd2(p.x), z: rnd2(p.z) });
       return;
     }
-    // wall mode (tanker skill): doubled defense, immune to knockback
+    // taunt mode (tanker skill) also doubles defense so the tank can soak
+    // the horde it just pulled onto itself. Knockback removed entirely:
+    // enemies hit the character in place and never shove it around.
     const wall = p.wallT > 0;
     const def = wall ? Math.min(p.def * SKILLS.tanker.defMult, SKILLS.tanker.defCap) : p.def;
-    if (wall) { kbx = 0; kbz = 0; }
-    // the elephant pet plants its owner's feet: knockback taken shrinks
-    if (p.kbResist > 0) { kbx *= 1 - p.kbResist; kbz *= 1 - p.kbResist; }
     const dmg = rawDmg * (1 - def);
     p.hp -= dmg;
     p.lastDmg = this.time;
     p.invT = PLAYER.HIT_IFRAME; // open the i-frame window
     this.emit({ t: 'hit', id: p.id });
-    if (kbx || kbz) this.emit({ t: 'kb', id: p.id, dx: rnd2(kbx), dz: rnd2(kbz) });
     if (p.hp <= 0) {
       p.hp = 0;
       p.dead = true;
@@ -1507,9 +1509,32 @@ export class Sim {
       // aggro refractory period ticks down while marching
       if (e.aggroCd > 0) e.aggroCd = Math.max(e.aggroCd - dt, 0);
 
+      // taunt (tanker skill): a forced, maximum-priority target that
+      // overrides both the crystal-priority rule and the anti-kite drag —
+      // every enemy that can reach the taunter charges him for as long as
+      // the taunt holds. Only the clear-path / leash reachability still
+      // applies (a straight-line chase into a wall would just get stuck).
+      let taunted = false;
+      if (this.taunt) {
+        if (this.time >= this.taunt.until) {
+          this.taunt = null;
+        } else {
+          const tp = this.getPlayer(this.taunt.id);
+          if (!tp || tp.dead) {
+            this.taunt = null;
+          } else if (dist2d(pos.x, pos.z, tp.x, tp.z) <= this.taunt.r &&
+                     (e.flying || this.hasLos(pos.x, pos.z, tp.x, tp.z))) {
+            taunted = true;
+            e.state = 'chase';
+            e.targetId = tp.id;
+            e.dragT = 0;
+          }
+        }
+      }
+
       // acquire aggro: nearest character in radius that passes the
       // rules — clear straight path, and the crystal not closer
-      if (e.state === 'path' && alive.length) {
+      if (!taunted && e.state === 'path' && alive.length) {
         let best = null, bestD = Infinity;
         for (const p of alive) {
           const d = dist2d(pos.x, pos.z, p.x, p.z);
@@ -1521,7 +1546,9 @@ export class Sim {
       }
 
       let target = null;
-      if (e.state === 'chase') {
+      if (taunted) {
+        target = this.getPlayer(e.targetId);
+      } else if (e.state === 'chase') {
         target = this.getPlayer(e.targetId);
         const td = target && !target.dead
           ? dist2d(pos.x, pos.z, target.x, target.z) : Infinity;

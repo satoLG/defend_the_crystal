@@ -403,8 +403,10 @@ export const SKILLS = {
   berserker: { // dash forward, flinging everything on the path backward
     name: 'Rampage Dash', cells: 5, dur: 0.42, dmgMult: 3.2, kb: 4.5, width: 1.25,
   },
-  tanker: { // "wall mode": zero knockback + doubled defense for a while
-    name: 'Wall Mode', dur: 10, defMult: 2, defCap: 0.92,
+  tanker: { // "taunt": force every nearby enemy to charge the tanker at
+            // max priority for a while — plus doubled defense so he can
+            // actually soak the horde he just pulled onto himself
+    name: 'Taunt', dur: 10, defMult: 2, defCap: 0.92, radius: 8.5,
   },
   archer: { // 3 quick volleys of 5 arrows at the nearest enemies
     name: 'Arrow Storm', arrows: 5, bursts: 3, gap: 0.32, rangeMult: 1.25, dmgMult: 1.0,
@@ -515,8 +517,8 @@ export const TOWER_SPECIALS = {
               desc: 'Shells leave the ground burning where they land.' },
   },
   crystal: {
-    ice: { name: 'Ice Crystal', cost: 230, slowF: 0.5, slowDur: 2.2,
-           desc: 'Pulses chill enemies, slowing them for a few seconds.' },
+    ice: { name: 'Ice Crystal', cost: 230, slowF: 0.65, slowDur: 1.2,
+           desc: 'Pulses chill enemies, slowing them down briefly.' },
     storm: { name: 'Storm Crystal', cost: 230, chainR: 1.7, chainMult: 0.55,
              desc: 'Damage arcs between enemies bunched close together.' },
   },

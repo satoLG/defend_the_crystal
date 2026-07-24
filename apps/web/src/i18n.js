@@ -415,8 +415,8 @@ const STRINGS = {
       enemy: { keeper: 'Gravedigger' },
     },
     power: {
-      berserker: { name: 'Rampage Dash', desc: 'Rampage Dash — charge through the horde, hurling enemies aside.' },
-      tanker: { name: 'Wall Mode', desc: 'Wall Mode — become immovable with doubled defense for a while.' },
+      berserker: { name: 'Rampage Dash', desc: 'Rampage Dash — charge through the horde, striking everything in your path.' },
+      tanker: { name: 'Taunt', desc: 'Taunt — force every nearby enemy to charge you, with doubled defense to hold the line.' },
       archer: { name: 'Arrow Storm', desc: 'Arrow Storm — unleash rapid volleys at the nearest foes.' },
       mage: { name: 'Arcane Orb', desc: 'Arcane Orb — a giant blast dealing massive area damage.' },
     },
@@ -735,8 +735,8 @@ const STRINGS = {
       },
     },
     power: {
-      berserker: { name: 'Investida Furiosa', desc: 'Investida Furiosa — atravesse a horda empurrando inimigos.' },
-      tanker: { name: 'Modo Muralha', desc: 'Modo Muralha — fique imóvel com defesa dobrada por um tempo.' },
+      berserker: { name: 'Investida Furiosa', desc: 'Investida Furiosa — atravesse a horda golpeando tudo no caminho.' },
+      tanker: { name: 'Provocar', desc: 'Provocar — force todos os inimigos próximos a irem para cima de você, com defesa dobrada para segurar a linha.' },
       archer: { name: 'Tempestade de Flechas', desc: 'Tempestade de Flechas — rajadas rápidas nos alvos próximos.' },
       mage: { name: 'Orbe Arcano', desc: 'Orbe Arcano — explosão gigante com dano em área massivo.' },
     },

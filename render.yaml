@@ -1,4 +1,4 @@
-# Render Blueprint — authoritative multiplayer server.
+# Render Blueprint — authoritative multiplayer server(s).
 #
 # Deploys apps/server as a Node web service. The frontend lives on Vercel
 # (see vercel.json) and talks to this over Socket.IO.
@@ -9,9 +9,14 @@
 #   previews:
 #     generation: automatic
 # require a PAID workspace — they are NOT available on the free/Hobby plan.
-# So this file ships PRODUCTION only. For a non-prod server on the free plan,
-# enable the `dtc-server-staging` service below (tracks a `staging` branch)
-# and point Vercel's Preview VITE_SERVER_URL at it.
+# Instead, this file ships TWO long-lived services: production (tracks
+# `main`) and staging (tracks a `staging` branch), which is the free-tier
+# substitute for per-PR previews — see README "Previews" for the workflow
+# (merge into `staging` to deploy front+server together, then promote
+# `staging` -> `main` once validated).
+#
+# `dtc-server-staging` requires the branch to exist first:
+#   git push origin main:staging
 
 services:
   # ---- Production: tracks the default branch (main) ----
@@ -34,24 +39,23 @@ services:
       - key: CLIENT_ORIGINS
         sync: false
 
-  # ---- Staging / preview backend (free tier's answer to previews) ----
-  # Uncomment AFTER creating a `staging` branch:  git push origin main:staging
-  # Gives a stable server URL for Vercel Preview builds without paying for
-  # per-PR previews. It's shared across PRs (not ephemeral) and spins down when
-  # idle — that's the free-tier trade-off. To test a PR's server changes here,
-  # push that branch to `staging`, or use ?server=<url> against any service.
-  # - type: web
-  #   name: dtc-server-staging
-  #   runtime: node
-  #   plan: free
-  #   branch: staging
-  #   rootDir: .
-  #   buildCommand: npm install
-  #   startCommand: npm run start
-  #   healthCheckPath: /health
-  #   autoDeploy: true
-  #   envVars:
-  #     - key: NODE_VERSION
-  #       value: "22"
-  #     - key: CLIENT_ORIGINS
-  #       sync: false
+  # ---- Staging: tracks the `staging` branch ----
+  # A stable, shared non-prod server — the free-tier answer to per-PR preview
+  # servers. Merge a feature branch into `staging` (instead of `main`) and
+  # this redeploys automatically, alongside Vercel's automatic deployment of
+  # the same `staging` branch, so one merge updates front+server together.
+  - type: web
+    name: dtc-server-staging
+    runtime: node
+    plan: free
+    branch: staging
+    rootDir: .
+    buildCommand: npm install
+    startCommand: npm run start
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: CLIENT_ORIGINS
+        sync: false

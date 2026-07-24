@@ -51,11 +51,20 @@ or `?server=<url>` (per tab).
 - **Server → Render.** One-click via [`render.yaml`](render.yaml) (Blueprint).
   Free tier hibernates after ~15 min idle; the first connection then wakes it
   (~30–50 s) and the client shows a "connecting to the server…" state.
-- **Previews.** Vercel builds a preview per PR automatically. Render's
-  automatic per-PR previews need a **paid** workspace; on the free plan use one
-  stable server for Preview builds (production, or the optional
-  `dtc-server-staging` service in `render.yaml`) and `?server=<url>` to point a
-  preview at any specific server.
+- **Previews / staging.** Render's automatic per-PR previews need a **paid**
+  workspace, so this repo uses a `staging` branch instead — the free-tier
+  substitute for previews, running BOTH sides:
+  - `dtc-server-staging` in `render.yaml` tracks `staging` and redeploys on
+    every push (`autoDeploy: true`).
+  - Vercel deploys every non-production branch automatically; pushing
+    `staging` gets its own Preview deployment with no extra setup.
+  - Point Vercel's **Preview** `VITE_SERVER_URL` at the staging Render URL
+    (Production stays pointed at prod) — then merging a feature branch into
+    `staging` redeploys front + server together with a single merge. Promote
+    to production with `staging` -> `main`.
+  - One-time setup: `git push origin main:staging` to create the branch.
+  - `?server=<url>` still works to point any deployment at a specific server
+    ad hoc.
 
 ## How it works
 
