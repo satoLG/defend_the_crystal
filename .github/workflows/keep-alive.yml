@@ -1,0 +1,57 @@
+name: Keep Render awake
+
+# Free Render web services hibernate after ~15 min idle, and the next
+# connection then pays a ~30-50s cold start. This workflow pings the
+# production server's /health endpoint on a schedule so it never sits idle
+# long enough to spin down.
+#
+# IMPORTANT — target production only. The Render free tier grants ~750
+# instance-hours/month shared across the workspace (~744h in a month), so
+# keeping ONE service warm 24/7 just fits; keeping prod + staging both warm
+# would blow past the cap. Point this at dtc-server only.
+#
+# Setup: add a repo variable named RENDER_HEALTH_URL (Settings -> Secrets and
+# variables -> Actions -> Variables) with the full URL, e.g.
+#   https://dtc-server.onrender.com/health
+#
+# Caveats vs. an external monitor (UptimeRobot / cron-job.org):
+#  - GitHub's scheduled cron is best-effort and can be delayed 10-20 min under
+#    load, which may occasionally let the service slip past the 15 min window.
+#  - GitHub disables scheduled workflows after 60 days with no repo activity.
+# For rock-solid warmth, pair this with (or replace it by) an external pinger.
+
+on:
+  schedule:
+    # every 10 minutes — tight enough to absorb GitHub's cron jitter and still
+    # land inside the 15 min idle window
+    - cron: '*/10 * * * *'
+  workflow_dispatch: {}
+
+# never pile up overlapping runs
+concurrency:
+  group: keep-alive
+  cancel-in-progress: true
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping /health
+        env:
+          HEALTH_URL: ${{ vars.RENDER_HEALTH_URL }}
+        run: |
+          if [ -z "$HEALTH_URL" ]; then
+            echo "::warning::RENDER_HEALTH_URL repo variable is not set — nothing to ping."
+            exit 0
+          fi
+          echo "Pinging $HEALTH_URL"
+          # A cold service can take ~50s to wake, so give curl room and retry.
+          code=$(curl -sS -o /dev/null -w '%{http_code}' \
+                   --max-time 90 --retry 3 --retry-delay 5 --retry-all-errors \
+                   "$HEALTH_URL")
+          echo "HTTP $code"
+          # Wake succeeded as long as the server answered; treat any 2xx as ok.
+          case "$code" in
+            2??) echo "Server is awake." ;;
+            *)   echo "::error::Unexpected status $code from $HEALTH_URL"; exit 1 ;;
+          esac
