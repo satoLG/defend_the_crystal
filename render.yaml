@@ -1,15 +1,20 @@
 # Render Blueprint — authoritative multiplayer server.
 #
 # Deploys apps/server as a Node web service. The frontend lives on Vercel
-# (see vercel.json) and talks to this service over Socket.IO. PR previews are
-# enabled: opening a pull request spins up an ephemeral copy of the server,
-# torn down when the PR closes.
+# (see vercel.json) and talks to this over Socket.IO.
 #
-# First-time setup: Render Dashboard -> New -> Blueprint -> pick this repo.
-previews:
-  generation: automatic
+# Setup: Render Dashboard -> New -> Blueprint -> pick this repo (branch main).
+#
+# NOTE on PR previews: Render's automatic per-PR "Preview Environments"
+#   previews:
+#     generation: automatic
+# require a PAID workspace — they are NOT available on the free/Hobby plan.
+# So this file ships PRODUCTION only. For a non-prod server on the free plan,
+# enable the `dtc-server-staging` service below (tracks a `staging` branch)
+# and point Vercel's Preview VITE_SERVER_URL at it.
 
 services:
+  # ---- Production: tracks the default branch (main) ----
   - type: web
     name: dtc-server
     runtime: node
@@ -28,3 +33,25 @@ services:
       # by the server, so this is only needed for a custom domain.
       - key: CLIENT_ORIGINS
         sync: false
+
+  # ---- Staging / preview backend (free tier's answer to previews) ----
+  # Uncomment AFTER creating a `staging` branch:  git push origin main:staging
+  # Gives a stable server URL for Vercel Preview builds without paying for
+  # per-PR previews. It's shared across PRs (not ephemeral) and spins down when
+  # idle — that's the free-tier trade-off. To test a PR's server changes here,
+  # push that branch to `staging`, or use ?server=<url> against any service.
+  # - type: web
+  #   name: dtc-server-staging
+  #   runtime: node
+  #   plan: free
+  #   branch: staging
+  #   rootDir: .
+  #   buildCommand: npm install
+  #   startCommand: npm run start
+  #   healthCheckPath: /health
+  #   autoDeploy: true
+  #   envVars:
+  #     - key: NODE_VERSION
+  #       value: "22"
+  #     - key: CLIENT_ORIGINS
+  #       sync: false
