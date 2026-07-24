@@ -50,8 +50,12 @@ or `?server=<url>` (per tab).
   per environment to your Render server URL.
 - **Server → Render.** One-click via [`render.yaml`](render.yaml) (Blueprint).
   Free tier hibernates after ~15 min idle; the first connection then wakes it
-  (~30–50 s) and the client shows a "connecting to the server…" state. PR
-  previews are enabled on both platforms.
+  (~30–50 s) and the client shows a "connecting to the server…" state.
+- **Previews.** Vercel builds a preview per PR automatically. Render's
+  automatic per-PR previews need a **paid** workspace; on the free plan use one
+  stable server for Preview builds (production, or the optional
+  `dtc-server-staging` service in `render.yaml`) and `?server=<url>` to point a
+  preview at any specific server.
 
 ## How it works
 
