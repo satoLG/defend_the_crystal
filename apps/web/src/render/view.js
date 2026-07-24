@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { instantiate, getTemplate } from './assets.js';
 import { buildTexture, applyTexture, getSlots } from './customize.js';
 import { iconPaths } from '../icons.js';
-import { CLASSES, TOWERS, JUMP, ENEMIES, BOSSES, PETS, WEAPONS, classStarterWeapons } from '@dtc/shared/config.js';
+import { CLASSES, TOWERS, JUMP, ENEMIES, BOSSES, PETS, WEAPONS, SKILLS, classStarterWeapons } from '@dtc/shared/config.js';
 import { t, bossNameByKind } from '../i18n.js';
 import { cellToWorld, CRYSTAL_POS, HALF_H, PLAZA } from '@dtc/shared/sim/grid.js';
 import {
@@ -731,6 +731,14 @@ export class GameView {
     });
     this._wallRingMat = new THREE.MeshBasicMaterial({
       color: 0xbfc8d4, transparent: true, opacity: 0.55,
+      depthWrite: false, side: THREE.DoubleSide,
+    });
+    // taunt aura: a wide, angry ground ring at the skill's pull radius so
+    // it's obvious every enemy inside it is being yanked onto the tanker
+    const tauntR = SKILLS.tanker.radius;
+    this._tauntRingGeo = new THREE.RingGeometry(tauntR - 0.25, tauntR, 72);
+    this._tauntRingMat = new THREE.MeshBasicMaterial({
+      color: 0xff5a3c, transparent: true, opacity: 0.5,
       depthWrite: false, side: THREE.DoubleSide,
     });
 
@@ -2447,6 +2455,8 @@ export class GameView {
           if (a) this.playOnce(a, 'attack-melee-right', ev.dur || 0.4);
         } else if (ev.cls === 'tanker' && a) {
           this.burst(a.group.position.x, a.group.position.z, 1.7, 0xbfc8d4);
+          // a wide shockwave racing out to the taunt radius sells the pull
+          this.burst(a.group.position.x, a.group.position.z, ev.r || SKILLS.tanker.radius, 0xff5a3c);
           this.playOnce(a, 'interact-right', 0.5);
         } else if (ev.cls === 'mage' && a) {
           this.burst(a.group.position.x, a.group.position.z, 1.2, 0xc07dff);
@@ -2456,8 +2466,9 @@ export class GameView {
     }
   }
 
-  // "wall mode": a slowly orbiting ring of stone slabs around the
-  // tanker so the no-knockback / double-defense window is unmissable
+  // tanker taunt: orbiting stone slabs (the doubled-defense tell) plus a
+  // wide, pulsing red ground ring at the pull radius so it's unmissable
+  // that every enemy inside it is being dragged onto the tanker
   addWallAura(a) {
     const g = new THREE.Group();
     for (let i = 0; i < 6; i++) {
@@ -2471,14 +2482,22 @@ export class GameView {
     ring.rotation.x = -Math.PI / 2;
     ring.position.y = 0.04;
     g.add(ring);
+    // the big taunt-radius ring lives on the group directly so its rotation
+    // stays fixed to the ground while the slabs (in `g`) keep spinning
+    const taunt = new THREE.Mesh(this._tauntRingGeo, this._tauntRingMat);
+    taunt.rotation.x = -Math.PI / 2;
+    taunt.position.y = 0.05;
     g.userData.stone = this._wallStoneMat;
     a.group.add(g);
+    a.group.add(taunt);
     a.wallFx = g;
+    a.tauntFx = taunt;
   }
 
   removeWallAura(a) {
     a.group.remove(a.wallFx);
     a.wallFx = null;
+    if (a.tauntFx) { a.group.remove(a.tauntFx); a.tauntFx = null; }
   }
 
   // vertical arc while the character vaults grid cells; x/z motion
@@ -2888,10 +2907,16 @@ export class GameView {
           if (k >= 1) { a.spawnT = null; a.group.scale.setScalar(1); }
         }
       }
-      // orbiting stone slabs of the tanker's wall mode
+      // orbiting stone slabs of the tanker's taunt (doubled-defense tell)
       if (a.wallFx) {
         a.wallFx.rotation.y += dt * 1.7;
         a.wallFx.userData.stone.opacity = 0.75 + Math.sin(this.time * 5) * 0.2;
+      }
+      // pulsing red pull-radius ring so the taunt's reach is unmissable
+      if (a.tauntFx) {
+        const pulse = 0.96 + Math.sin(this.time * 4) * 0.04;
+        a.tauntFx.scale.set(pulse, pulse, 1);
+        a.tauntFx.material.opacity = 0.4 + Math.sin(this.time * 4) * 0.15;
       }
       if (a.jumpT == null) continue;
       a.jumpT += dt;
