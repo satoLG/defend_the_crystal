@@ -8,6 +8,9 @@ import { Grid, worldToCell, cellToWorld, findJump, computeDashEnd } from '@dtc/s
 import { terrainY, ELEV, NPCS, findColliderJump } from '@dtc/shared/sanctuary.js';
 import { Net, selfId } from './net.js';
 import { SnapBuffer } from './net_interp.js';
+import { P2PMesh } from './p2p.js';
+import { PeerLinks } from './peer_links.js';
+import { NetStat } from './netstat.js';
 import { Input } from './input.js';
 import { UI } from './ui.js';
 import { armAudioOnFirstGesture, bindAudioLifecycle, sfx, setSfxVolume } from './audio.js';
@@ -51,6 +54,15 @@ const state = {
   blockedKey: '',
   lobbyPlayers: [],
   lastInputSend: 0,
+  // ---- direct peer links ----
+  // Optional accelerator: the other players' poses, straight from them
+  // instead of via the server. `p2p` is the connection mesh (p2p.js),
+  // `links` decides which source each avatar is drawn from (peer_links.js).
+  // When a link is missing or stale the renderer just uses the snapshot.
+  p2p: null,
+  links: new PeerLinks(),
+  lastPoseSend: 0,
+  netstat: new NetStat(),
   // mirrors the sim's free-roam rule: the sanctuary only opens during
   // checkpoints / before wave 1 — local prediction clamps the same way
   allowPlaza: true,
@@ -207,7 +219,15 @@ function connectRoom({ create, code, character }) {
     state.isOwner = !!info.isOwner;
     ui.showLobby(info.code, state.isOwner);
     $status('');
+    // identity is assigned, so the direct-link mesh can start negotiating
+    startP2P(net);
   };
+
+  net.onRtt = (ms) => { if (state.net === net) state.netstat.noteRtt(ms); };
+  net.onSignal = (from, data) => { if (state.net === net) state.p2p?.onSignal(from, data); };
+  // the room roster drives which peers we try to reach directly
+  net.onPeerJoin = () => syncP2PPeers(net);
+  net.onPeerLeave = (id) => { state.links.forget(id); syncP2PPeers(net); };
 
   net.on('lobby', (data) => {
     if (state.net !== net) return;
@@ -222,7 +242,9 @@ function connectRoom({ create, code, character }) {
   net.on('snap', (snap) => {
     if (state.net !== net) return;
     withStatic(snap); // re-fill cached towers/obstacles/graves if this was a lean tick
-    state.snaps.push(snap, performance.now() / 1000);
+    const t = performance.now() / 1000;
+    state.snaps.push(snap, t);
+    state.netstat.noteSnap(t);
     if (!state.started) enterGame();
     syncClientGrid(snap);
     reconcileSelf(snap);
@@ -256,6 +278,7 @@ function $status(msg) {
 function leaveLobby() {
   state.net?.leave();
   state.net = null;
+  stopP2P();
   state.isOwner = false;
   state.started = false;
   state.lobbyPlayers = [];
@@ -523,6 +546,7 @@ function doJump() {
   const dur = jumpDurFor(info.span);
   s.jump = { fx: s.x, fz: s.z, tx: info.to.x, tz: info.to.z, t: 0, dur };
   view.startJump(selfId, dur);
+  state.p2p?.sendJump(dur);   // peers start the arc without waiting on the server
   sfx.jump();
   // jyaw is the cardinal we vault along; the character's facing (s.yaw)
   // is left alone so it can keep looking at whatever it's fighting
@@ -664,8 +688,10 @@ function handleEvent(ev) {
       break;
     case 'stun': sfx.hit(); break;
     case 'jump':
-      // own jump is predicted locally in doJump()
-      if (ev.id !== selfId) view.startJump(ev.id, ev.dur);
+      // own jump is predicted locally in doJump(); a peer's may already
+      // have arrived over its direct link, in which case this is the same
+      // hop reaching us a second time
+      if (ev.id !== selfId && !state.links.jumpedRecently(ev.id)) view.startJump(ev.id, ev.dur);
       break;
     case 'breach':
       sfx.breach();
@@ -881,13 +907,29 @@ function frame(t) {
         m: state.self.moving,
       });
     }
+    // the same pose, also straight to the other players. It runs faster
+    // than the server input rate because it costs one short hop, not two
+    // long ones — and the receiving side interpolates on that shorter gap.
+    if (now - state.lastPoseSend > 1 / NET.P2P_HZ && state.selfInit) {
+      state.lastPoseSend = now;
+      state.p2p?.sendPose(
+        Math.round(state.self.x * 100) / 100,
+        Math.round(state.self.z * 100) / 100,
+        Math.round(state.self.yaw * 100) / 100,
+        state.self.moving,
+      );
+    }
+    state.links.step(dt);
     // render slightly in the past, blending the snapshots that bracket that
-    // time so remote heroes/enemies move smoothly between server ticks
-    const s = state.snaps.sample(now - NET.INTERP_DELAY, NET.INTERP_MAX);
+    // time so remote heroes/enemies move smoothly between server ticks. The
+    // delay tracks the connection's measured jitter instead of assuming an
+    // average one — see netstat.js.
+    const s = state.snaps.sample(now - state.netstat.interpDelay(), NET.INTERP_MAX);
     if (s) {
-      view.applySnapshot(s.prev, s.next, s.alpha, selfId, selfPose());
+      view.applySnapshot(s.prev, s.next, s.alpha, selfId, selfPose(), peerPose);
       ui.updateHud(state.snaps.latest(), selfId);
     }
+    state.netstat.paint(now, state.p2p?.stats() || []);
   }
 
   // checkpoints are free time: the camera leaves the board framing and
@@ -953,6 +995,61 @@ function selfPose() {
     ? { x: state.self.x, z: state.self.z, yaw: state.self.yaw, moving: state.self.moving }
     : null;
 }
+
+// ---------------------------------------------------------
+// direct peer links — an accelerator on top of the snapshots
+//
+// Every player already predicts their own movement and declares the result
+// (main.js -> EV.INPUT -> sim.setInput). The server relays that pose to
+// everyone else, which on a distant server means it arrives two long hops
+// later. A direct datachannel carries the same pose on one short hop, so
+// these buffers can be sampled on a far shorter delay.
+//
+// The server remains the authority throughout: it decides whether a player
+// is alive, what they hit and what hits them. Only where the avatar is
+// *drawn* comes from here, and only while a link is actually delivering.
+// ---------------------------------------------------------
+
+function startP2P(net) {
+  stopP2P();
+  const mesh = new P2PMesh({ selfId, signal: (to, data) => net.signal(to, data) });
+
+  mesh.onPose = (id, pose) => state.links.note(id, pose);
+
+  // the jumper predicts its own hop, so the direct copy lands well before
+  // the server event for the same hop — whichever gets here first wins and
+  // suppresses the other (see the 'jump' case in handleEvent)
+  mesh.onJump = (id, dur) => {
+    state.links.noteJump(id);
+    view.startJump(id, dur);
+  };
+
+  state.p2p = mesh;
+  syncP2PPeers(net);
+
+  if (NetStat.requested()) state.netstat.mount();
+  // always reachable from the console, overlay or not
+  window.__dtcNet = () => ({
+    rtt: state.netstat.rtt,
+    snapHz: 1 / state.netstat.snapInterval,
+    snapJitter: state.netstat.snapJitter,
+    interpDelay: state.netstat.delay,
+    peers: mesh.stats(),
+  });
+}
+
+function stopP2P() {
+  state.p2p?.destroy();
+  state.p2p = null;
+  state.links.clear();
+}
+
+function syncP2PPeers(net) {
+  state.p2p?.setPeers([...net.peers]);
+}
+
+// pose to draw peer `id` at, or null to use the authoritative snapshot
+const peerPose = (id) => state.links.pose(id);
 
 // which background bed the current game situation calls for. Both host
 // and client read it off the buffered snapshot's enemy list (index 8 is
