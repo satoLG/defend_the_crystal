@@ -4,20 +4,19 @@ import {
   GameView, PET_SHOP_POS, PET_SHOP_RADIUS, WEAPON_SHOP_POS, WEAPON_SHOP_RADIUS,
 } from './render/view.js';
 import { CharacterPreview } from './render/preview.js';
-import { Sim } from './sim/sim.js';
-import { Grid, worldToCell, cellToWorld, findJump, computeDashEnd } from './sim/grid.js';
-import { terrainY, ELEV, NPCS, findColliderJump } from './sanctuary.js';
+import { Grid, worldToCell, cellToWorld, findJump, computeDashEnd } from '@dtc/shared/sim/grid.js';
+import { terrainY, ELEV, NPCS, findColliderJump } from '@dtc/shared/sanctuary.js';
 import { Net, selfId } from './net.js';
 import { SnapBuffer } from './net_interp.js';
 import { Input } from './input.js';
 import { UI } from './ui.js';
 import { armAudioOnFirstGesture, bindAudioLifecycle, sfx, setSfxVolume } from './audio.js';
 import {
-  CLASSES, PLAYER, ENEMY, NET, SIM_DT, TOWERS, TOWER_UPGRADE, GRID, JUMP, SKILLS,
+  CLASSES, PLAYER, ENEMY, NET, TOWERS, TOWER_UPGRADE, GRID, JUMP, SKILLS,
   petEffects, jumpDurFor,
-} from './config.js';
+} from '@dtc/shared/config.js';
 import { petRefOf, loadoutOf } from './character.js';
-import { makeRoomCode, lerp, dist2d, angleLerp } from './utils.js';
+import { lerp, dist2d, angleLerp } from '@dtc/shared/utils.js';
 import { settings } from './settings.js';
 import { music } from './music.js';
 import { t, getLang, onLangChange, bossName, bossFlavor, enemyName } from './i18n.js';
@@ -25,24 +24,24 @@ import { initPwa } from './pwa.js';
 import { initSync } from './sync.js';
 
 // ============================================================
-// Bootstraps everything and runs the two game loops:
-//   host   — authoritative Sim + broadcast snapshots/events
-//   client — send inputs, interpolate snapshots
-// Both predict their own character's movement locally so
-// controls always feel instant.
+// Bootstraps everything and runs the client game loop.
+//
+// The authoritative simulation lives on the server now (see
+// apps/server): every browser is a client that sends its inputs
+// and actions and renders interpolated snapshots. We still predict
+// our OWN character's movement locally so controls feel instant,
+// reconciling against the authoritative snapshots as they arrive.
+// The room "owner" is just the player allowed to start waves.
 // ============================================================
 
 const state = {
-  role: null,          // 'host' | 'client'
   net: null,
-  sim: null,
-  hostId: null,
+  isOwner: false,      // may start waves / restart (server-enforced)
   started: false,
   over: false,
-  // snapshot interpolation buffer. Clients push on receive; the host
-  // pushes the snapshots it broadcasts (stamped with the render clock),
-  // so both blend remotes identically. Self bypasses this via selfPose(),
-  // staying responsive at render rate.
+  // snapshot interpolation buffer: we push authoritative snapshots on
+  // receive and render slightly in the past so remote motion stays smooth.
+  // Self bypasses this via selfPose(), staying responsive at render rate.
   snaps: new SnapBuffer(),
   // local self-prediction (jump = in-flight hop over a grid cell,
   // dash = the berserker's special sprint)
@@ -52,26 +51,19 @@ const state = {
   blockedKey: '',
   lobbyPlayers: [],
   lastInputSend: 0,
-  lastSnapSend: 0,
-  lastStaticSend: 0,
   // mirrors the sim's free-roam rule: the sanctuary only opens during
   // checkpoints / before wave 1 — local prediction clamps the same way
   allowPlaza: true,
-  // clients cache the static geometry (towers/obstacles/graves) from the
-  // last snapshot that carried it, and re-merge it into the lean per-tick
+  // we cache the static geometry (towers/obstacles/graves) from the last
+  // snapshot that carried it, and re-merge it into the lean per-tick
   // snapshots so the rest of the pipeline still sees a full snapshot.
   staticCache: { tw: [], ob: [], gr: [] },
 };
 
-// static geometry keys sent only every NET.STATIC_INTERVAL (they change
-// rarely); stripped from the lean per-tick snapshots to save bandwidth.
+// static geometry keys the server sends only every NET.STATIC_INTERVAL
+// (they change rarely) and strips from lean per-tick snapshots; we cache
+// the last full copy and re-merge it here.
 const STATIC_KEYS = ['tw', 'ob', 'gr'];
-
-function leanSnap(snap) {
-  const out = {};
-  for (const k in snap) if (!STATIC_KEYS.includes(k)) out[k] = snap[k];
-  return out;
-}
 
 function withStatic(snap) {
   for (const k of STATIC_KEYS) {
@@ -172,80 +164,61 @@ async function boot() {
 // ---------------------------------------------------------
 
 function hostGame(character) {
-  state.role = 'host';
-  state.hostId = selfId;
-  const code = makeRoomCode();
-  // captured locally so a message that arrives after leaveLobby() (or
-  // after hosting a fresh room) can tell it's stale and ignore itself,
-  // instead of reviving a room state we already tore down
-  const net = state.net = new Net(code);
-  state.sim = new Sim();
-  state.sim.addPlayer(
-    selfId, character.name, character.cls, character.colors,
-    petRefOf(character), loadoutOf(character)
-  );
-  syncSelfFromSim();
-
-  net.on('hello', (data, peerId) => {
-    if (state.net !== net) return;
-    if (!state.sim.getPlayer(peerId)) {
-      state.sim.addPlayer(peerId, data?.name, data?.cls, data?.colors, data?.pet, data?.loadout);
-    }
-    broadcastLobby();
-  });
-  net.on('input', (data, peerId) => state.sim.setInput(peerId, data));
-  net.on('act', (data, peerId) => state.sim.handleAction(peerId, data));
-  net.onPeerJoin = () => {
-    if (state.net !== net) return;
-    state.lastStaticSend = 0;
-    broadcastLobby();
-  };
-  net.onPeerLeave = (peerId) => {
-    if (state.net !== net) return;
-    state.sim.removePlayer(peerId);
-    broadcastLobby();
-  };
-
-  ui.showLobby(code, true);
-  broadcastLobby();
-}
-
-function broadcastLobby() {
-  if (state.role !== 'host') return;
-  const players = state.sim.players.entities.map((p) => ({
-    id: p.id, name: p.name, cls: p.cls, colors: p.colors, host: p.id === selfId,
-  }));
-  state.lobbyPlayers = players;
-  const payload = { host: selfId, code: state.net.code, players, started: state.started };
-  state.net.send('lobby', payload);
-  ui.updateLobby(players, selfId);
-  view.setCosmetics(players);
+  connectRoom({ create: true, code: null, character });
 }
 
 function joinGame(code, character) {
-  state.role = 'client';
-  // captured locally so a message that arrives after leaveLobby() (or
-  // after joining a different room) can tell it's stale and ignore
-  // itself, instead of reviving a room state we already tore down
-  const net = state.net = new Net(code);
-  ui.showLobby(code, false);
-  $status(t('lobby.lookingForHost'));
+  connectRoom({ create: false, code, character });
+}
 
-  const hello = () => net.send('hello', {
-    name: character.name, cls: character.cls, colors: character.colors,
-    pet: petRefOf(character), loadout: loadoutOf(character),
+// Open a room on the authoritative server. Both entry points share the same
+// wiring — the only difference is whether we CREATE the room (becoming its
+// owner) or JOIN an existing one by code. The server owns the simulation;
+// this side only sends inputs/actions and renders the snapshots it streams.
+function connectRoom({ create, code, character }) {
+  state.started = false;
+  state.over = false;
+  state.isOwner = create;
+  state.lobbyPlayers = [];
+  state.selfInit = false;
+  state.snaps.clear();
+
+  const net = state.net = new Net(code, {
+    create,
+    character: {
+      name: character.name, cls: character.cls, colors: character.colors,
+      pet: petRefOf(character), loadout: loadoutOf(character),
+    },
   });
-  net.onPeerJoin = () => { if (state.net === net) hello(); };
+
+  // Cold-start / connectivity feedback. On Render's free tier the very first
+  // connection can take ~30-50s while the instance wakes; keep the player
+  // informed instead of leaving them on a silent screen.
+  net.onStatus = (status) => {
+    if (state.net !== net || state.started) return;
+    if (status === 'reconnecting') $status(t('lobby.reconnecting'));
+    else if (status === 'error') $status(t('lobby.serverWaking'));
+  };
+
+  // Identity assigned by the server — reveal the lobby with the real
+  // (server-issued) code and whether we may start the defense.
+  net.onReady = (info) => {
+    if (state.net !== net) return;
+    state.isOwner = !!info.isOwner;
+    ui.showLobby(info.code, state.isOwner);
+    $status('');
+  };
 
   net.on('lobby', (data) => {
     if (state.net !== net) return;
-    state.hostId = data.host;
+    state.isOwner = data.ownerId === selfId;
     state.lobbyPlayers = data.players || [];
+    ui.setOwner(state.isOwner);
     ui.updateLobby(state.lobbyPlayers, selfId);
     view.setCosmetics(state.lobbyPlayers);
-    $status('');
     if (data.started && !state.started) enterGame();
   });
+
   net.on('snap', (snap) => {
     if (state.net !== net) return;
     withStatic(snap); // re-fill cached towers/obstacles/graves if this was a lean tick
@@ -254,48 +227,46 @@ function joinGame(code, character) {
     syncClientGrid(snap);
     reconcileSelf(snap);
   });
+
   net.on('ev', (events) => {
     if (state.net !== net) return;
     for (const ev of events) handleEvent(ev);
   });
-  net.onPeerLeave = (peerId) => {
-    if (state.net !== net) return;
-    if (peerId === state.hostId) ui.showHostLost();
-  };
 
-  // if we never hear from a host, tell the player
-  setTimeout(() => {
-    if (state.net === net && !state.hostId && !state.started) {
-      $status(t('lobby.nobodyHere'));
-    }
-  }, 12000);
+  net.on('err', (e) => {
+    if (state.net !== net) return;
+    if (e?.code === 'no_room') $status(t('lobby.nobodyHere'));
+  });
+
+  // Show a lobby shell right away so the player isn't staring at nothing
+  // while the socket connects. A join already knows its code; a create gets
+  // the real one with onReady (placeholder until then).
+  ui.showLobby(create ? '· · ·' : code, create);
+  $status(t('lobby.connecting'));
 }
 
 function $status(msg) {
   const el = document.getElementById('lobby-status');
-  if (msg) el.textContent = msg;
+  if (el) el.textContent = msg;
 }
 
-// "Sair" while waiting in the lobby (hosting or looking for a host): drop
-// every transport right away and bounce straight back to the menu — no
-// page reload, so it doesn't wait on asset/scene reloading to take effect.
+// "Sair" while waiting in the lobby: drop the connection right away and
+// bounce straight back to the menu — no page reload, so it doesn't wait on
+// asset/scene reloading to take effect.
 function leaveLobby() {
   state.net?.leave();
   state.net = null;
-  state.role = null;
-  state.hostId = null;
-  state.sim = null;
+  state.isOwner = false;
   state.started = false;
   state.lobbyPlayers = [];
   ui.showMenu();
 }
 
 function startMatch() {
-  if (state.role !== 'host' || state.started) return;
-  state.sim.start();
-  state.started = true;
-  broadcastLobby();
-  enterGame();
+  if (!state.isOwner || state.started) return;
+  // ask the server to leave the lobby and begin the defense; the match
+  // actually starts for us when the authoritative lobby/snapshot arrives.
+  state.net?.send('act', { t: 'begin' });
 }
 
 function enterGame() {
@@ -315,8 +286,7 @@ function enterGame() {
 
 function sendAction(act) {
   if (!state.started) return;
-  if (state.role === 'host') state.sim.handleAction(selfId, act);
-  else state.net.send('act', act, state.hostId);
+  state.net.send('act', act);
 }
 
 // ---------------------------------------------------------
@@ -324,9 +294,7 @@ function sendAction(act) {
 // ---------------------------------------------------------
 
 function snapForUi() {
-  return state.role === 'host'
-    ? (state.sim && state.started ? state.sim.buildSnapshot() : null)
-    : state.snaps.latest();
+  return state.snaps.latest();
 }
 
 function cellFromPointer(x, y) {
@@ -338,22 +306,18 @@ function cellFromPointer(x, y) {
 function canPlaceLocal(item, c, r) {
   const g = clientGridRef();
   if (!g.isBuildable(c, r)) return false;
-  if (!g.canPlaceAt(c, r, state.role === 'host' ? state.sim.enemyCells() : [])) return false;
+  if (!g.canPlaceAt(c, r, [])) return false;
   if (!canAffordLocal(item)) return false;
   if (someoneStandingAt(c, r)) return false;
   return true;
 }
 
 // mirror the sim's cost/stock check so the preview turns red up front
-// instead of the placement bouncing back off the host with a toast
+// instead of the placement bouncing back off the server with a toast
 function canAffordLocal(item) {
   const cost = TOWERS[item]?.cost || 0;
-  if (state.role === 'host') {
-    if (item === 'obstacle') return (state.sim.getPlayer(selfId)?.obst || 0) >= 1;
-    return state.sim.points >= cost;
-  }
   const snap = state.snaps.latest();
-  if (!snap) return true; // no data yet — let the host arbitrate
+  if (!snap) return true; // no data yet — let the server arbitrate
   if (item === 'obstacle') {
     const me = snap.pl.find((p) => p[0] === selfId);
     return (me?.[13] || 0) >= 1;
@@ -362,28 +326,21 @@ function canAffordLocal(item) {
 }
 
 // mirror the sim's "don't build on top of a character" check (self uses
-// the locally-predicted position, allies come from the sim/snapshot)
+// the locally-predicted position, allies come from the latest snapshot)
 function someoneStandingAt(c, r) {
   const w = cellToWorld(c, r);
   const near = (x, z) =>
     Math.abs(x - w.x) < 1 + PLAYER.RADIUS && Math.abs(z - w.z) < 1 + PLAYER.RADIUS;
-  if (!state.self.dead && (state.role === 'host' || state.selfInit) &&
-      near(state.self.x, state.self.z)) return true;
-  if (state.role === 'host') {
-    for (const q of state.sim.players.entities) {
-      if (q.id !== selfId && !q.dead && near(q.x, q.z)) return true;
-    }
-  } else {
-    for (const p of state.snaps.latest()?.pl || []) {
-      if (p[0] === selfId || p[11] === 1) continue;
-      if (near(p[2], p[3])) return true;
-    }
+  if (!state.self.dead && state.selfInit && near(state.self.x, state.self.z)) return true;
+  for (const p of state.snaps.latest()?.pl || []) {
+    if (p[0] === selfId || p[11] === 1) continue;
+    if (near(p[2], p[3])) return true;
   }
   return false;
 }
 
 function clientGridRef() {
-  return state.role === 'host' ? state.sim.grid : state.clientGrid;
+  return state.clientGrid;
 }
 
 function onCanvasHover(x, y) {
@@ -523,8 +480,8 @@ function onKeyAction(action) {
     case 'skill': doSkill(); break;
     case 'startwave':
       // Space jumps when a jump is possible; otherwise it keeps its
-      // old job of starting the next wave (host only)
-      if (!doJump() && state.role === 'host') sendAction({ t: 'start' });
+      // old job of starting the next wave (owner only; the server enforces it)
+      if (!doJump() && state.isOwner) sendAction({ t: 'start' });
       break;
   }
 }
@@ -560,7 +517,7 @@ function findAnyJump() {
 function doJump() {
   const s = state.self;
   if (!state.started || state.over || s.dead || s.jump || s.dash) return false;
-  if (state.role === 'client' && !state.selfInit) return false;
+  if (!state.selfInit) return false;
   const info = findAnyJump();
   if (!info) return false;
   const dur = jumpDurFor(info.span);
@@ -577,7 +534,7 @@ let jumpWasEnabled = null;
 function updateJumpButton() {
   const s = state.self;
   const ok = state.started && !state.over && !s.dead && !s.jump && !s.dash &&
-    (state.role === 'host' || state.selfInit) &&
+    state.selfInit &&
     (!!findJump(clientGridRef(), s.x, s.z, localJumpCells()) ||
       (state.allowPlaza && !!findColliderJump(s.x, s.z, PLAYER.RADIUS)));
   if (ok !== jumpWasEnabled) {
@@ -593,7 +550,7 @@ function updateJumpButton() {
 function doSkill() {
   const s = state.self;
   if (!state.started || state.over || s.dead || s.jump || s.dash) return;
-  if (state.role === 'client' && !state.selfInit) return;
+  if (!state.selfInit) return;
   if (!ui.skillReady) return;
   // the berserker's dash moves the character, and movement is
   // client-authoritative — predict it locally, like jumps
@@ -724,14 +681,17 @@ function handleEvent(ev) {
       state.over = true;
       ui.cancelDrag?.();
       ui.selectItem(null);
-      ui.showGameOver(ev, state.role === 'host');
+      ui.showGameOver(ev, state.isOwner);
       sfx.error();
       break;
     case 'restart':
       state.over = false;
       ui.hideGameOver();
       view.reset();
-      syncSelfFromSim();
+      // the fresh defense re-adds every hero at the portal; our own position
+      // snaps back when the next authoritative snapshot reconciles it
+      state.self.jump = null;
+      state.self.dash = null;
       { // the party re-enters through the portal after the plea + title
         const dur = ui.playIntro();
         setTimeout(() => { if (state.started && !state.over) ui.showLocationBanner(); }, dur * 1000);
@@ -743,21 +703,8 @@ function handleEvent(ev) {
 }
 
 // ---------------------------------------------------------
-// self movement prediction (both roles)
+// self movement prediction + reconciliation against the server
 // ---------------------------------------------------------
-
-function syncSelfFromSim() {
-  const p = state.sim?.getPlayer(selfId);
-  if (p) {
-    state.self.x = p.x; state.self.z = p.z; state.self.yaw = p.yaw;
-    state.self.speed = p.speed;
-    state.self.range = p.range;
-    state.self.dead = p.dead;
-    state.self.jump = null;
-    state.self.dash = null;
-    state.selfInit = true;
-  }
-}
 
 function reconcileSelf(snap) {
   const me = snap.pl.find((r) => r[0] === selfId);
@@ -903,7 +850,6 @@ function stepSelf(dt) {
 // ---------------------------------------------------------
 
 let lastT = 0;
-let simAccum = 0;
 
 function frame(t) {
   requestAnimationFrame(frame);
@@ -914,54 +860,18 @@ function frame(t) {
   // free-roam = the sanctuary is open (checkpoints / before wave 1).
   // Resolved up front because self-prediction needs it: once a match is
   // running there's no walking back down until the next checkpoint.
-  const uiSnap = state.role === 'host' ? null : state.snaps.latest();
-  const phase = state.role === 'host' ? state.sim?.phase : uiSnap?.ph;
-  const waveN = state.role === 'host' ? state.sim?.wave : uiSnap?.w;
+  const uiSnap = state.snaps.latest();
+  const phase = uiSnap?.ph;
+  const waveN = uiSnap?.w;
   const freeRoam = phase === 'checkpoint' || (phase === 'build' && waveN === 0);
   state.allowPlaza = !state.started || state.over || freeRoam;
 
   if (state.started && !state.over) stepSelf(dt);
   updateJumpButton();
 
-  if (state.role === 'host' && state.started) {
-    // fixed-step authoritative sim
-    simAccum = Math.min(simAccum + dt, 0.25);
-    while (simAccum >= SIM_DT) {
-      state.sim.setInput(selfId, {
-        x: state.self.x, z: state.self.z, yaw: state.self.yaw, m: state.self.moving,
-      });
-      state.sim.step(SIM_DT);
-      simAccum -= SIM_DT;
-    }
-    // keep local prediction speed + range in sync with pet/weapon buffs
-    const meSim = state.sim.getPlayer(selfId);
-    if (meSim) { state.self.speed = meSim.speed; state.self.range = meSim.range; }
-    const events = state.sim.drainEvents();
-    if (events.length) {
-      for (const ev of events) handleEvent(ev);
-      state.net.send('ev', events);
-    }
-    if (now - state.lastSnapSend > 1 / NET.SNAP_HZ) {
-      state.lastSnapSend = now;
-      const snap = state.sim.buildSnapshot();
-      // include static geometry only periodically; lean ticks omit it and
-      // clients re-merge from their cache
-      if (now - state.lastStaticSend > NET.STATIC_INTERVAL) {
-        state.lastStaticSend = now;
-        state.net.send('snap', snap);
-      } else {
-        state.net.send('snap', leanSnap(snap));
-      }
-      // the host buffers the full snapshot (local, no wire cost) so its own
-      // interpolation of remotes is unaffected
-      state.snaps.push(snap, now);
-    }
-    const s = state.snaps.sample(now - NET.INTERP_DELAY, NET.INTERP_MAX);
-    if (s) {
-      view.applySnapshot(s.prev, s.next, s.alpha, selfId, selfPose());
-      ui.updateHud(state.snaps.latest(), selfId);
-    }
-  } else if (state.role === 'client' && state.started) {
+  if (state.started) {
+    // stream our own input to the authoritative server at a fixed rate;
+    // it folds our movement into the sim and streams snapshots back
     if (now - state.lastInputSend > 1 / NET.INPUT_HZ && state.selfInit) {
       state.lastInputSend = now;
       state.net.send('input', {
@@ -969,8 +879,10 @@ function frame(t) {
         z: Math.round(state.self.z * 100) / 100,
         yaw: Math.round(state.self.yaw * 100) / 100,
         m: state.self.moving,
-      }, state.hostId);
+      });
     }
+    // render slightly in the past, blending the snapshots that bracket that
+    // time so remote heroes/enemies move smoothly between server ticks
     const s = state.snaps.sample(now - NET.INTERP_DELAY, NET.INTERP_MAX);
     if (s) {
       view.applySnapshot(s.prev, s.next, s.alpha, selfId, selfPose());
@@ -984,7 +896,7 @@ function frame(t) {
   // build phase gets the same free-roam camera. The follow target rides
   // the terrain height so the camera dips down the sanctuary stairs.
   if (state.started && !state.over && freeRoam &&
-      (state.role === 'host' || state.selfInit) && !state.self.dead) {
+      state.selfInit && !state.self.dead) {
     gs.setFollow(state.self.x, state.self.z, terrainY(state.self.z));
   } else {
     gs.clearFollow();
@@ -1004,7 +916,7 @@ function frame(t) {
   // standing at Tonho's stall in the plaza unlocks buying at the shop
   // (vendors are only reachable while the sanctuary is open anyway)
   const canRoam = state.started && !state.over && !state.self.dead && freeRoam &&
-    (state.role === 'host' || state.selfInit);
+    state.selfInit;
   const atShop = canRoam &&
     dist2d(state.self.x, state.self.z, PET_SHOP_POS.x, PET_SHOP_POS.z) < PET_SHOP_RADIUS;
   ui.setShopNear(atShop);

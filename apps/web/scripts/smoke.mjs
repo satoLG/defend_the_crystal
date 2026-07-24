@@ -1,8 +1,11 @@
 // Minimal end-to-end smoke test (kept deliberately small):
-//   boot → menu → host → start match → HUD up → walk to Baru's smithy
+//   boot → menu → create room → start match → HUD up → walk to Baru's smithy
 //   → weapon panel opens with cards → no uncaught page errors.
 //
 //   node scripts/smoke.mjs
+//
+// Spawns the authoritative server (apps/server) AND the Vite dev server, and
+// points the client at the local server via VITE_SERVER_URL.
 //
 // Needs a chromium for playwright-core; set CHROMIUM_PATH to override
 // the default /opt/pw-browsers/chromium. Writes debug screenshots to
@@ -12,11 +15,27 @@ import { mkdirSync } from 'node:fs';
 import { chromium } from 'playwright-core';
 
 const PORT = 5198;
+const SERVER_PORT = 3198;
 const CHROMIUM = process.env.CHROMIUM_PATH || '/opt/pw-browsers/chromium';
 const SHOTS = process.env.SMOKE_SHOTS_DIR || '';
+const repoRoot = new URL('../../../', import.meta.url).pathname;
 
+// 1) authoritative game server
+const server = spawn('node', ['apps/server/src/index.js'], {
+  cwd: repoRoot,
+  env: { ...process.env, PORT: String(SERVER_PORT) },
+  stdio: ['ignore', 'pipe', 'inherit'],
+});
+await new Promise((resolve, reject) => {
+  server.stdout.on('data', (d) => { if (String(d).includes('listening')) resolve(); });
+  server.on('exit', (code) => reject(new Error(`server exited (${code})`)));
+  setTimeout(() => reject(new Error('server start timeout')), 15000);
+});
+
+// 2) Vite dev server, told which server the client should connect to
 const vite = spawn('npx', ['vite', '--port', String(PORT), '--strictPort'], {
   cwd: new URL('..', import.meta.url).pathname,
+  env: { ...process.env, VITE_SERVER_URL: `http://localhost:${SERVER_PORT}` },
   stdio: ['ignore', 'pipe', 'inherit'],
 });
 await new Promise((resolve, reject) => {
@@ -60,12 +79,16 @@ try {
     await page.screenshot({ path: `${SHOTS}/board.png` });
   }
 
-  // stroll to the weapon smith (pre-wave-1 build phase = free roam)
-  await page.evaluate(() => {
-    window.__dtc.self.x = -4.3;
-    window.__dtc.self.z = 24.9;
-  });
-  await page.locator('#weaponshop-prompt').waitFor({ state: 'visible', timeout: 10000 });
+  // stroll to the weapon smith (pre-wave-1 build phase = free roam). The
+  // server is authoritative and reconciles our position, so we PIN the target
+  // each frame until the prompt shows instead of teleporting once.
+  await page.evaluate((t) => {
+    window.__smokePin = setInterval(() => {
+      window.__dtc.self.x = t.x; window.__dtc.self.z = t.z;
+    }, 40);
+  }, { x: -4.3, z: 24.9 });
+  await page.locator('#weaponshop-prompt').waitFor({ state: 'visible', timeout: 15000 });
+  await page.evaluate(() => clearInterval(window.__smokePin));
   await page.waitForTimeout(2500); // let the follow-cam glide over
   if (SHOTS) await page.screenshot({ path: `${SHOTS}/smithy.png` });
   await page.click('#weaponshop-prompt');
@@ -79,8 +102,8 @@ try {
   console.log(`✓ shop lists ${shop} weapons for the tanker`);
   if (SHOTS) await page.screenshot({ path: `${SHOTS}/weapon-shop.png` });
 
-  // ignore benign multiplayer-transport noise (no network in CI)
-  const real = errors.filter((e) => !/WebSocket|network|mqtt|torrent|ICE/i.test(e));
+  // ignore benign socket transport noise
+  const real = errors.filter((e) => !/WebSocket|socket\.io|network/i.test(e));
   if (real.length) throw new Error('page errors:\n' + real.join('\n'));
   console.log('✓ no uncaught page errors');
   await browser.close();
@@ -88,6 +111,7 @@ try {
   failed = err;
 } finally {
   vite.kill('SIGKILL'); // piped stdio can otherwise keep the loop alive
+  server.kill('SIGKILL');
 }
 if (failed) { console.error('SMOKE FAILED:', failed.message); process.exit(1); }
 console.log('SMOKE PASSED');

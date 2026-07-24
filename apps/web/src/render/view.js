@@ -2,13 +2,13 @@ import * as THREE from 'three';
 import { instantiate, getTemplate } from './assets.js';
 import { buildTexture, applyTexture, getSlots } from './customize.js';
 import { iconPaths } from '../icons.js';
-import { CLASSES, TOWERS, JUMP, ENEMIES, BOSSES, PETS, WEAPONS, classStarterWeapons } from '../config.js';
+import { CLASSES, TOWERS, JUMP, ENEMIES, BOSSES, PETS, WEAPONS, classStarterWeapons } from '@dtc/shared/config.js';
 import { t, bossNameByKind } from '../i18n.js';
-import { cellToWorld, CRYSTAL_POS, HALF_H, PLAZA } from '../sim/grid.js';
+import { cellToWorld, CRYSTAL_POS, HALF_H, PLAZA } from '@dtc/shared/sim/grid.js';
 import {
   ELEV, terrainY, NPCS, AMBIENT_NPCS, DUMMIES, PORTAL, PET_STALL, WEAPON_STALL,
-} from '../sanctuary.js';
-import { lerp, angleLerp } from '../utils.js';
+} from '@dtc/shared/sanctuary.js';
+import { lerp, angleLerp } from '@dtc/shared/utils.js';
 import { sfx } from '../audio.js';
 
 // ============================================================

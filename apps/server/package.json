@@ -1,0 +1,16 @@
+{
+  "name": "@dtc/server",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "dev": "node --watch src/index.js",
+    "start": "node src/index.js",
+    "smoke": "node scripts/sim-smoke.mjs"
+  },
+  "dependencies": {
+    "@dtc/shared": "*",
+    "socket.io": "^4.8.3"
+  }
+}

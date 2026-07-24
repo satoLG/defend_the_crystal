@@ -15,28 +15,47 @@ enemies around your maze while towers grind them down.
 
 ## Play
 
+This is an npm-workspaces **monorepo**:
+
+- [`apps/web`](apps/web) — the browser game (Vite + three.js), deployed to Vercel.
+- [`apps/server`](apps/server) — the authoritative multiplayer server (Node + Socket.IO), deployed to Render.
+- [`packages/shared`](packages/shared) — game config + the simulation (`sim/`), shared by both.
+
 ```bash
-npm install
-npm run dev        # local dev server
-npm run build      # static build in dist/
+npm install            # installs all workspaces
+npm run dev            # runs the server (:3001) and the web dev server together
+# or, in two terminals:
+npm run dev:server
+npm run dev:web
+npm run build          # static build of the web app in apps/web/dist/
 ```
 
-The game is a fully static site — host `dist/` anywhere (GitHub Pages
-workflow included in `.github/workflows/deploy.yml`; enable Pages →
-"GitHub Actions" in the repo settings and push to `main`).
+For local multiplayer, open two browser tabs on the dev server: create a room
+in one, join with the 5-letter code in the other. The web app connects to
+`http://<host>:3001` by default; override with `VITE_SERVER_URL` (build time)
+or `?server=<url>` (per tab).
 
-> Multiplayer uses [Trystero](https://github.com/dmotz/trystero)
-> (serverless WebRTC). Peers discover each other over a Supabase Realtime
-> Broadcast channel by default, with public Nostr relays, WebTorrent
-> trackers and MQTT brokers as automatic backups — only the handshake
-> crosses those channels; gameplay itself runs directly peer-to-peer, so
-> there is still no game backend to deploy. Peers do need internet access
-> to find each other. For a quick same-device test, open two tabs with
-> `?localnet` in the URL.
+> **Multiplayer is client–server.** The server owns the authoritative
+> simulation and streams ~18 Hz snapshots over a single reliable WebSocket;
+> every browser is a plain client that sends its inputs/actions and renders
+> interpolated snapshots with client-side movement prediction. There is no
+> "host player" — if any player (even the room's owner) drops, the match
+> keeps running, and a brief reconnect restores the same hero. This replaces
+> the old peer-to-peer WebRTC transport, which failed on strict NATs.
+
+### Deploy
+
+- **Frontend → Vercel.** Build command `npm run build`, output
+  `apps/web/dist` (see [`vercel.json`](vercel.json)). Set `VITE_SERVER_URL`
+  per environment to your Render server URL.
+- **Server → Render.** One-click via [`render.yaml`](render.yaml) (Blueprint).
+  Free tier hibernates after ~15 min idle; the first connection then wakes it
+  (~30–50 s) and the client shows a "connecting to the server…" state. PR
+  previews are enabled on both platforms.
 
 ## How it works
 
-1. **Host a match** — you get a 5-letter room code. Share it (📋 copy /
+1. **Create a match** — you get a 5-letter room code. Share it (📋 copy /
    🔗 share link). Friends can join in the lobby *or drop in mid-battle*.
 2. **Pick a class** — stats differ across HP, defense, attack, range,
    attack speed and movement speed:
@@ -95,18 +114,17 @@ Every 10th wave a **named boss** stomps in, on rotation:
 | Build | `1-4` select card, hover + click to place | tap card, tap cell to preview, tap again to confirm |
 | Manage tower/block | click it | tap it |
 | Cancel | `Esc` / right-click | tap the selected card |
-| Start wave (host) | `Space` or button | button |
+| Start wave (owner) | `Space` or button | button |
 
 ## Tech
 
 - [three.js](https://github.com/mrdoob/three.js) — rendering (animated GLTF minis, night ambience)
 - [miniplex](https://github.com/hmans/miniplex) — ECS for the authoritative simulation
 - [yuka](https://github.com/Mugen87/yuka) — enemy steering (seek + separation) on top of a BFS flow field
-- [trystero](https://github.com/dmotz/trystero) — serverless WebRTC rooms (Supabase Realtime
-  signaling, with Nostr/torrent/MQTT relays as backups); host-authoritative sim,
-  12 Hz snapshots with client interpolation, client-side movement prediction
+- [Socket.IO](https://socket.io) — reliable client↔server realtime transport; server-authoritative
+  sim, ~18 Hz snapshots with client interpolation, client-side movement prediction, auto-reconnect
 - [tiks](https://github.com/rexa-developer/tiks) — procedural arcade UI sounds, zero audio files
 - [Kenney](https://www.kenney.nl) CC0 assets — see [CREDITS.md](CREDITS.md)
 
 The whole balance sheet (classes, towers, enemies, waves, 1–4 player
-scaling) lives in [`src/config.js`](src/config.js) — tweak away.
+scaling) lives in [`packages/shared/src/config.js`](packages/shared/src/config.js) — tweak away.

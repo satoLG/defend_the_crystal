@@ -4,7 +4,7 @@ import {
   PETS, PET, petXpNext, petEffects,
   WEAPONS, WEAPON_TIER_MAX, CLASS_WEAPONS,
   weaponEffects, weaponUpgradeCost,
-} from './config.js';
+} from '@dtc/shared/config.js';
 import {
   t, applyStaticI18n, getLang, setLang, onLangChange,
   className, classBlurb, classWeaponName, powerName, powerDesc,
@@ -12,14 +12,14 @@ import {
   tierName, towerName, towerSpecName, towerSpecDesc,
 } from './i18n.js';
 import { sfx, setSfxVolume } from './audio.js';
-import { normalizeRoomCode } from './utils.js';
+import { normalizeRoomCode } from '@dtc/shared/utils.js';
 import { icon, mountIcons, mountFlags } from './icons.js';
 import { settings } from './settings.js';
 import { music } from './music.js';
 import { isInstalled, hasNativePrompt, promptInstall, onInstallChange } from './pwa.js';
 import { loadRoster, saveRoster, defaultCharacter, petRefOf, grantPetXp, loadoutOf } from './character.js';
 import { getSlots } from './render/customize.js';
-import { NPCS } from './sanctuary.js';
+import { NPCS } from '@dtc/shared/sanctuary.js';
 
 // class accent colours (mirror the 3D CLASS_TINT) used to tint the
 // class glyph in the roster, lobby and HUD chrome
@@ -850,6 +850,18 @@ export class UI {
     $('room-code').textContent = code;
     $('start-btn').classList.toggle('hidden', !isHost);
     $('lobby-hint').textContent = isHost
+      ? t('lobby.alliesMidBattle')
+      : t('lobby.waitingHostStart');
+  }
+
+  // Re-apply owner-only lobby affordances when ownership changes (e.g. the
+  // owner disconnects and the server hands control to another player).
+  setOwner(isOwner) {
+    this.isHost = isOwner;
+    const btn = document.getElementById('start-btn');
+    if (btn) btn.classList.toggle('hidden', !isOwner);
+    const hint = document.getElementById('lobby-hint');
+    if (hint) hint.textContent = isOwner
       ? t('lobby.alliesMidBattle')
       : t('lobby.waitingHostStart');
   }

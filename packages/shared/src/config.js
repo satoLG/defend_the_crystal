@@ -692,8 +692,9 @@ export function scaleFor(table, playerCount) {
 }
 
 // ---------- networking ----------
+// Gameplay net tuning shared by the authoritative server (snapshot/event
+// broadcast cadence) and the client (input rate + interpolation).
 export const NET = {
-  APP_ID: 'dtc-defend-the-crystal-v1',
   // host -> clients position rate. Raised now that per-tick snapshots omit
   // the static geometry (towers/obstacles/graves), which the client caches
   // and re-merges — so more frequent snapshots cost little extra bandwidth.
@@ -712,75 +713,5 @@ export const NET = {
   INTERP_MAX: 1.25,
 };
 
-// ---------- Supabase Realtime signaling (preferred transport) ----------
-// Trystero brokers the WebRTC handshake over a Supabase Realtime Broadcast
-// channel we control — a signaling path far steadier than the public
-// Nostr/torrent/MQTT relays (which stay on as automatic backups, see
-// net.js). Only the *handshake* crosses Supabase; once two peers link up,
-// every bit of gameplay traffic flows directly peer-to-peer over WebRTC and
-// never touches Supabase again. This is about making peers FIND each other
-// reliably, not about routing game data through a server.
-//
-//   URL - the project's base URL (Supabase dashboard -> Project Settings ->
-//         API -> "Project URL"); Trystero uses it as the appId. It is the
-//         bare project origin, with NO "/rest/v1/" path.
-//   KEY - the project's publishable key ("sb_publishable_...", the current
-//         replacement for the legacy anon key). It is public by design — it
-//         ships in the client bundle and access is governed by Supabase
-//         Realtime authorization — so committing it here is fine; rotate it
-//         in the dashboard any time.
-//
-// Env vars override the defaults at build time (VITE_SUPABASE_URL /
-// VITE_SUPABASE_KEY in a .env file); blank both out and the game falls back
-// to the public relays exactly as before.
-export const SUPABASE = {
-  URL: import.meta.env?.VITE_SUPABASE_URL || 'https://jfswwxbsxbmkpbhbvmkz.supabase.co',
-  KEY: import.meta.env?.VITE_SUPABASE_KEY || 'sb_publishable_oz5an94SaG1zEaEfpwtHuw_MZIdDuxU',
-};
-
-// ---------- WebRTC ICE (STUN / TURN) ----------
-// Every transport (Supabase, Nostr, torrent, MQTT) is only a SIGNALING path:
-// it helps two peers exchange the WebRTC handshake, after which the actual
-// connection is a direct browser-to-browser RTCPeerConnection. Trystero ships
-// public STUN servers (Google + Cloudflare) and nothing else.
-//
-// STUN is enough on most home networks, but when BOTH players sit behind
-// strict NAT/firewalls — symmetric NAT, blocked UDP, many mobile carriers and
-// corporate/campus networks — STUN can't punch through and the WebRTC link
-// never forms. The tell-tale symptom is that NOTHING connects on ANY
-// transport at once (they all share this same WebRTC layer), which looks
-// "illogical" because the signaling side is actually fine.
-//
-// A TURN server fixes that: it relays the connection (typically over TCP/443)
-// as a last resort, getting through almost any network. Trystero has no free
-// TURN by default, so configure your own here to make connecting reliable
-// across arbitrary networks. Free/cheap TURN: Metered (metered.ca), Cloudflare
-// Realtime/Calls TURN, Twilio, or self-hosted coturn.
-//
-// Set via env (preferred, keeps creds out of source):
-//   VITE_TURN_URL  = comma-separated urls, e.g.
-//                    "turn:xxx.relay.metered.ca:443,turns:xxx.relay.metered.ca:443?transport=tcp"
-//   VITE_TURN_USER = TURN username
-//   VITE_TURN_CRED = TURN credential/password
-// These are ADDED to Trystero's STUN defaults — they never replace them.
-export const TURN = (() => {
-  const url = import.meta.env?.VITE_TURN_URL;
-  if (!url) return []; // STUN-only (fine on most home networks)
-  return [{
-    urls: url.split(',').map((u) => u.trim()).filter(Boolean),
-    username: import.meta.env?.VITE_TURN_USER || undefined,
-    credential: import.meta.env?.VITE_TURN_CRED || undefined,
-  }];
-})();
-
-// The STUN servers Trystero uses by default (Google + Cloudflare). Mirrored
-// here only so the connectivity self-check in net.js can build the exact same
-// ICE server list Trystero hands to the peer connection.
-export const DEFAULT_STUN = [
-  { urls: 'stun:stun.l.google.com:19302' },
-  { urls: 'stun:stun1.l.google.com:19302' },
-  { urls: 'stun:stun2.l.google.com:19302' },
-  { urls: 'stun:stun.cloudflare.com:3478' },
-];
-
+// authoritative simulation fixed timestep (server tick + client prediction)
 export const SIM_DT = 1 / 30;

@@ -16,7 +16,7 @@
 import {
   PETS, PET, WEAPONS, CLASSES, TOWERS, TOWER_SPECIALS, BOSSES, SKILLS,
   ENEMIES, petEffects, weaponEffects,
-} from './config.js';
+} from '@dtc/shared/config.js';
 
 const LANG_KEY = 'dtc-lang';       // last language in effect
 const CHOSEN_KEY = 'dtc-lang-set'; // '1' once the player picked one by hand
@@ -230,6 +230,9 @@ const STRINGS = {
       waitingHostStart: 'Waiting for the host to start…',
       lookingForHost: 'Looking for the host…',
       nobodyHere: 'Nobody here yet — check the code, or keep waiting.',
+      connecting: 'Connecting to the server…',
+      serverWaking: 'Waking the server — this can take up to a minute…',
+      reconnecting: 'Connection lost — reconnecting…',
       defenders: '{n}/4 defenders — difficulty scales with party size',
       codeCopied: 'Code copied!', inviteCopied: 'Invite link copied!',
       shareText: 'Join my defense! Code: {code}',
@@ -473,6 +476,9 @@ const STRINGS = {
       waitingHostStart: 'Aguardando o anfitrião iniciar…',
       lookingForHost: 'Procurando o anfitrião…',
       nobodyHere: 'Ninguém aqui ainda — confira o código ou continue aguardando.',
+      connecting: 'Conectando ao servidor…',
+      serverWaking: 'Acordando o servidor — pode levar até um minuto…',
+      reconnecting: 'Conexão perdida — reconectando…',
       defenders: '{n}/4 defensores — a dificuldade escala com o tamanho do grupo',
       codeCopied: 'Código copiado!', inviteCopied: 'Link de convite copiado!',
       shareText: 'Entre na minha defesa! Código: {code}',

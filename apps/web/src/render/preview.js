@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { instantiate } from './assets.js';
 import { attachProps, CLASS_PROPS } from './view.js';
 import { buildTexture, applyTexture } from './customize.js';
-import { CLASSES } from '../config.js';
+import { CLASSES } from '@dtc/shared/config.js';
 
 // ============================================================
 // A little turntable used by the character-creation screen: the
