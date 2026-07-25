@@ -60,6 +60,23 @@ export function attachHub(io) {
       if (act && (act.t === 'restart')) room.broadcastLobby();
     });
 
+    // Round-trip probe: echo the client's timestamp untouched. The client
+    // subtracts it from its own clock, so no clock sync is involved and the
+    // number it gets is the real latency to this server.
+    socket.on(EV.PING, (msg) => { socket.emit(EV.PONG, msg); });
+
+    // WebRTC signalling relay. Two players in the same room negotiate a
+    // direct datachannel through here; the payload is opaque (SDP / ICE)
+    // and never inspected. Routing is room-scoped and the sender's id is
+    // stamped server-side, so a client cannot signal outside its own match
+    // or impersonate another player.
+    socket.on(EV.SIGNAL, (msg) => {
+      if (!room || !playerId || !msg || typeof msg.to !== 'string') return;
+      const targetSocket = room.socketIdOf(msg.to);
+      if (!targetSocket || targetSocket === socket.id) return;
+      io.to(targetSocket).emit(EV.SIGNAL, { from: playerId, data: msg.data });
+    });
+
     socket.on(EV.LEAVE, () => {
       if (room && playerId) room.disconnect(playerId);
       room = null; playerId = null;

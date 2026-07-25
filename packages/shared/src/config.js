@@ -707,12 +707,44 @@ export const NET = {
   STATIC_INTERVAL: 0.5,
   // seconds rendered behind the newest snapshot. ~2 snapshot intervals
   // (1/SNAP_HZ) so a late/jittered packet still has a buffered point to
-  // interpolate toward instead of freezing.
+  // interpolate toward instead of freezing. Used as the starting point for
+  // the adaptive delay below.
   INTERP_DELAY: 0.12,
+  // The delay above is sized for an "average" connection, which means it is
+  // too short on a jittery link (visible freeze-then-jump) and needlessly
+  // long on a clean one. The client measures the real spread of snapshot
+  // arrivals and slides the delay inside these bounds — see netstat.js.
+  INTERP_MIN: 0.09,
+  INTERP_MAX_DELAY: 0.26,
   // alpha clamp ceiling: >1 lets a remote briefly extrapolate along its
   // last known heading when the next snapshot is late, softening the
   // hitch into a short over-shoot that snaps back on arrival.
   INTERP_MAX: 1.25,
+
+  // ---- peer-to-peer acceleration (WebRTC datachannel) ----
+  // The server stays the single authority for everything it simulates
+  // (enemies, damage, waves, towers, gold). These settings only affect how
+  // the *other players' avatars* are drawn: their position already comes
+  // from their own client (see sim.setInput — movement is client-declared),
+  // so taking it straight from them over a direct connection shows the same
+  // number sooner. Nothing here changes what the simulation believes.
+  P2P: true,               // master switch; false = server path only
+  P2P_HZ: 30,              // own-pose broadcast rate over the datachannel
+  // A direct link between two nearby players has a fraction of the jitter
+  // of a round-trip through a distant server, so its buffer can be much
+  // shallower — this is where most of the felt latency win comes from.
+  P2P_INTERP_DELAY: 0.06,
+  // no pose from a peer for this long -> treat the link as down and fall
+  // back to that player's position from the authoritative snapshot
+  P2P_STALE: 0.3,
+  // seconds to cross-fade between the two sources, so a link coming up (or
+  // dropping) eases across the gap instead of teleporting the avatar
+  P2P_BLEND: 0.3,
+  // how long a locally-applied peer jump suppresses the same jump arriving
+  // later as a server event (the P2P copy wins; this stops a double-hop)
+  P2P_EV_DEDUP: 0.5,
+  // datachannel round-trip probe interval
+  P2P_PING_INTERVAL: 2,
 };
 
 // authoritative simulation fixed timestep (server tick + client prediction)

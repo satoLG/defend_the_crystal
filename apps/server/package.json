@@ -7,7 +7,8 @@
   "scripts": {
     "dev": "node --watch src/index.js",
     "start": "node src/index.js",
-    "smoke": "node scripts/sim-smoke.mjs"
+    "smoke": "node scripts/sim-smoke.mjs",
+    "smoke:signal": "node scripts/signal-smoke.mjs"
   },
   "dependencies": {
     "@dtc/shared": "*",

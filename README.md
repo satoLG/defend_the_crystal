@@ -40,8 +40,52 @@ or `?server=<url>` (per tab).
 > every browser is a plain client that sends its inputs/actions and renders
 > interpolated snapshots with client-side movement prediction. There is no
 > "host player" — if any player (even the room's owner) drops, the match
-> keeps running, and a brief reconnect restores the same hero. This replaces
-> the old peer-to-peer WebRTC transport, which failed on strict NATs.
+> keeps running, and a brief reconnect restores the same hero.
+
+#### Direct peer links
+
+Player movement is client-declared: your browser predicts your own hero and
+tells the server where it ended up, and the server clamps it. That means the
+*same* pose can travel two ways — through the server, or straight to the
+other players. When the server sits on another continent (Render has no
+South American region), the round trip through it dominates everything else
+a player feels about another player's movement.
+
+So each pair of players in a room also negotiates a WebRTC datachannel and
+pushes its own pose over it at 30 Hz. Where an ally's avatar is *drawn*
+comes from that link when it is live; everything else — who is alive, what
+hit what, waves, towers, gold — stays with the server, unchanged.
+
+- **Signalling rides the existing socket.** The room already knows its
+  members, so there is no public relay network involved. That discovery
+  step, not WebRTC itself, is what made the earlier serverless P2P
+  transport flaky.
+- **Failure is free.** No TURN server is configured, so some links (strict
+  NAT, blocked UDP) never connect. Nothing special happens when they don't:
+  the renderer keeps using the authoritative snapshot, which is the path
+  every player is on today. The fallback is the normal path, always running.
+- **Turn it off** with `NET.P2P = false` in `config.js`.
+- **See what is happening** with `?netstat=1` — an overlay with round-trip
+  time, real snapshot rate and jitter, the adaptive interpolation delay, and
+  whether each peer is coming from its direct link or from the server. Also
+  on `window.__dtcNet()`.
+
+Interpolation depth adapts to the measured connection rather than assuming
+an average one, so a jittery link buffers deeper (fewer freeze-then-jump
+hitches) and a clean one buffers shallower (less lag).
+
+Checks for all of this:
+
+```bash
+npm run smoke:signal --workspace @dtc/server  # signalling relay + latency probe (node)
+npm run smoke:links  --workspace @dtc/web     # source selection & adaptive delay (node)
+npm run smoke:p2p    --workspace @dtc/web     # two real browsers, real datachannel
+```
+
+The first two are plain Node and run anywhere. `smoke:p2p` (like the
+existing `npm run smoke`) drives Chromium through playwright-core and needs
+a machine that can render the scene — it will time out where WebGL falls
+back to software rasterization.
 
 ### Deploy
 
@@ -51,6 +95,18 @@ or `?server=<url>` (per tab).
 - **Server → Render.** One-click via [`render.yaml`](render.yaml) (Blueprint).
   Free tier hibernates after ~15 min idle; the first connection then wakes it
   (~30–50 s) and the client shows a "connecting to the server…" state.
+  [`keep-alive.yml`](.github/workflows/keep-alive.yml) pings `/health` to stop
+  that happening — as a **loop inside one run**, because GitHub delivers only
+  ~30% of a `*/10` cron (measured: gaps of 26–52 min, all of them longer than
+  Render's idle window). Set a `RENDER_HEALTH_URL` repo variable to enable it.
+  It runs on a **20h/day window** (warm 08:00–04:00 BRT), because the free
+  tier's ~750 instance-hours against a 744-hour month means 24/7 spends the
+  whole allowance and risks a suspension that would take production down —
+  20h leaves ~130h spare. Override with `KEEP_ALIVE_HOURS_UTC`; the smoke
+  test fails if the default ever stops fitting the budget.
+
+  > Scheduled workflows only run from the **default branch**, so a change
+  > here does nothing until `staging` is promoted to `main`.
 - **Previews / staging.** Render's automatic per-PR previews need a **paid**
   workspace, so this repo uses a `staging` branch instead — the free-tier
   substitute for previews, running BOTH sides:
@@ -136,6 +192,8 @@ Every 10th wave a **named boss** stomps in, on rotation:
 - [yuka](https://github.com/Mugen87/yuka) — enemy steering (seek + separation) on top of a BFS flow field
 - [Socket.IO](https://socket.io) — reliable client↔server realtime transport; server-authoritative
   sim, ~18 Hz snapshots with client interpolation, client-side movement prediction, auto-reconnect
+- WebRTC datachannels — optional direct peer links carrying each player's own pose at 30 Hz,
+  signalled over the same socket, with the authoritative snapshot as an always-running fallback
 - [tiks](https://github.com/rexa-developer/tiks) — procedural arcade UI sounds, zero audio files
 - [Kenney](https://www.kenney.nl) CC0 assets — see [CREDITS.md](CREDITS.md)
 

@@ -15,12 +15,19 @@ export const EV = {
   INPUT: 'input',     // per-tick movement input for this player
   ACT: 'act',         // a discrete action (build, upgrade, pet/weapon swap, start, …)
   LEAVE: 'leave',     // explicit "sair"
+  PING: 'ping',       // { t } -> echoed back as PONG, measures round-trip time
   // server -> client
   WELCOME: 'welcome', // { selfId, code, token, isOwner } — assigns identity
   LOBBY: 'lobby',     // { code, ownerId, players, started }
   SNAP: 'snap',       // authoritative snapshot (full or lean)
   EV: 'ev',           // batched gameplay events
   ERROR: 'err',       // { code, message } — e.g. room not found
+  PONG: 'pong',       // { t } — the PING payload, straight back
+  // both ways — WebRTC signalling relayed between two players in a room.
+  // client -> server: { to, data }; server -> client: { from, data }.
+  // The server never inspects `data`; it only routes it to the target's
+  // socket, so the peers can negotiate a direct datachannel (see p2p.js).
+  SIGNAL: 'sig',
 };
 
 // static geometry keys sent only every NET.STATIC_INTERVAL (they change

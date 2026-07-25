@@ -6,11 +6,16 @@ import { normalizeRoomCode } from '@dtc/shared/utils.js';
 // Client transport — a thin wrapper over a single Socket.IO
 // connection to the authoritative game server.
 //
-// This replaces the old peer-to-peer WebRTC/Trystero mesh. There
-// is no "host player" anymore: the server owns the simulation, and
+// There is no "host player": the server owns the simulation, and
 // every browser (including whoever created the room) is a plain
-// client. All traffic rides one reliable WebSocket, so matches form
-// on any network — no STUN/TURN/NAT to fail.
+// client. All gameplay traffic rides this one reliable WebSocket, so
+// matches form on any network — no STUN/TURN/NAT to fail.
+//
+// This socket also carries two things that are not gameplay: a
+// latency probe (PING/PONG), and the signalling that lets two players
+// in a room negotiate a direct WebRTC datachannel. That datachannel
+// is a pure optimization for how other players' avatars are drawn and
+// is allowed to fail — see p2p.js.
 //
 // `selfId` is assigned by the server on WELCOME and exposed as a live
 // binding, so importers that read it at call time see the real id.
@@ -44,6 +49,8 @@ export class Net {
     this.onPeerLeave = null;
     this.onReady = null;      // (welcomeInfo) => {} — fired once identity is assigned
     this.onStatus = null;     // (status) => {} — 'connected'|'reconnecting'|'error'
+    this.onRtt = null;        // (ms) => {} — round trip to the server
+    this.onSignal = null;     // (fromId, data) => {} — relayed WebRTC signalling
     this.isOwner = false;
 
     this._left = false;
@@ -81,7 +88,25 @@ export class Net {
     this.socket.on(EV.SNAP, (d) => this.handlers[EV.SNAP]?.(d));
     this.socket.on(EV.EV, (d) => this.handlers[EV.EV]?.(d));
     this.socket.on(EV.ERROR, (d) => this.handlers[EV.ERROR]?.(d));
+
+    // Latency probe. Socket.IO's own heartbeat is too coarse (20s) to show
+    // what a player is feeling, so we time our own echo.
+    this.socket.on(EV.PONG, (msg) => {
+      if (msg?.t) this.onRtt?.(Date.now() - msg.t);
+    });
+    this._pingTimer = setInterval(() => {
+      if (!this._left && this.socket.connected) this.socket.emit(EV.PING, { t: Date.now() });
+    }, 2000);
+
+    // WebRTC signalling relayed by the server between two players in the
+    // room (see p2p.js). `from` is stamped server-side.
+    this.socket.on(EV.SIGNAL, (msg) => {
+      if (msg?.from) this.onSignal?.(msg.from, msg.data);
+    });
   }
+
+  // hand an opaque signalling payload to another player in this room
+  signal(to, data) { if (!this._left) this.socket.emit(EV.SIGNAL, { to, data }); }
 
   // On the first connect we CREATE (owner) or JOIN; every later reconnect
   // re-JOINs the same room with our token so the server restores our hero.
@@ -112,6 +137,7 @@ export class Net {
 
   leave() {
     this._left = true;
+    if (this._pingTimer) { clearInterval(this._pingTimer); this._pingTimer = null; }
     try { this.socket.emit(EV.LEAVE); } catch { /* ignore */ }
     try { this.socket.disconnect(); } catch { /* ignore */ }
     this.peers.clear();
