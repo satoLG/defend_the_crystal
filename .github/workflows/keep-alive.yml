@@ -19,16 +19,26 @@ name: Keep Render awake
 # one we have. Instead each run now pings for the better part of an hour,
 # which covers the worst observed gap on its own.
 #
-# INSTANCE HOURS — read before widening the window
+# INSTANCE HOURS — why this is a window and not just "always on"
 #
 # Render's free tier grants ~750 instance-hours/month across the workspace,
-# and a 31-day month is 744 hours. A service kept genuinely warm 24/7
-# consumes essentially the entire allowance, leaving nothing for
-# dtc-server-staging and risking a suspension near the end of the month.
-# So ACTIVE_HOURS_UTC defaults to an 18h/day window (~558h/month), leaving
-# real headroom. Override it with a KEEP_ALIVE_HOURS_UTC repo variable:
-#   "11-05"  the default — 08:00-02:00 in BRT (UTC-3), the hours people play
-#   "0-24"   always on — only do this if nothing else uses the free tier
+# and a 31-day month is 744 hours. Warm 24/7 therefore spends essentially
+# the entire allowance on this one service, leaving nothing for
+# dtc-server-staging and risking a suspension near the end of the month —
+# which would take production down, a worse outcome than a cold start.
+#
+# The window is sized to spend as much of the budget as can be spent safely:
+#
+#   24h/day   744h/month   6h spare    — one bad month away from suspension
+#   20h/day   620h/month   130h spare  <- the default
+#   18h/day   558h/month   192h spare  — more cautious than it needs to be
+#
+# At 20h the server is warm 08:00-04:00 BRT and only sleeps 04:00-08:00,
+# which is the one stretch nobody is playing. Override with a
+# KEEP_ALIVE_HOURS_UTC repo variable:
+#   "11-07"  the default — 08:00-04:00 in BRT (UTC-3)
+#   "0-24"   always on — only if nothing else uses the free tier
+# keep-warm-smoke.sh asserts the default here stays inside the budget.
 #
 # Setup: add a repo variable RENDER_HEALTH_URL (Settings -> Secrets and
 # variables -> Actions -> Variables), e.g. https://dtc-server.onrender.com/health
@@ -77,5 +87,5 @@ jobs:
           # '0-24' rather than '' for "always on": an empty string is falsy
           # in a GitHub expression, so `x && '' || y` would fall straight
           # through to y and silently keep the window it was asked to ignore.
-          ACTIVE_HOURS_UTC: ${{ inputs.ignore_active_hours && '0-24' || vars.KEEP_ALIVE_HOURS_UTC || '11-05' }}
+          ACTIVE_HOURS_UTC: ${{ inputs.ignore_active_hours && '0-24' || vars.KEEP_ALIVE_HOURS_UTC || '11-07' }}
         run: bash .github/scripts/keep-warm.sh

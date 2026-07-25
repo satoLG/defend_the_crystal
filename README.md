@@ -99,9 +99,14 @@ back to software rasterization.
   that happening — as a **loop inside one run**, because GitHub delivers only
   ~30% of a `*/10` cron (measured: gaps of 26–52 min, all of them longer than
   Render's idle window). Set a `RENDER_HEALTH_URL` repo variable to enable it.
-  It defaults to an 18h/day window, since the free tier's ~750 instance-hours
-  and a 744-hour month leave no room for a service kept warm 24/7 — widen it
-  with `KEEP_ALIVE_HOURS_UTC` only if nothing else uses the free tier.
+  It runs on a **20h/day window** (warm 08:00–04:00 BRT), because the free
+  tier's ~750 instance-hours against a 744-hour month means 24/7 spends the
+  whole allowance and risks a suspension that would take production down —
+  20h leaves ~130h spare. Override with `KEEP_ALIVE_HOURS_UTC`; the smoke
+  test fails if the default ever stops fitting the budget.
+
+  > Scheduled workflows only run from the **default branch**, so a change
+  > here does nothing until `staging` is promoted to `main`.
 - **Previews / staging.** Render's automatic per-PR previews need a **paid**
   workspace, so this repo uses a `staging` branch instead — the free-tier
   substitute for previews, running BOTH sides:
