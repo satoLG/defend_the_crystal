@@ -123,6 +123,12 @@ export class Room {
     this._scheduleEmptyCheck();
   }
 
+  // socket behind a playerId, or null when that player is mid-disconnect.
+  // Used to route WebRTC signalling between two players in this room.
+  socketIdOf(playerId) {
+    return this.players.get(playerId)?.socketId || null;
+  }
+
   connectedCount() {
     let n = 0;
     for (const e of this.players.values()) if (e.socketId) n++;

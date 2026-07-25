@@ -2089,7 +2089,12 @@ export class GameView {
 
   // ---------------- snapshot application ----------------
 
-  applySnapshot(prev, next, alpha, selfId, selfPose) {
+  // `peerPose(id)` is optional and returns { x, z, yaw, moving, blend } when
+  // that player is also arriving over a direct peer connection — the same
+  // pose the server is relaying, only sooner. `blend` cross-fades between
+  // the two sources so a link coming up or dropping eases across the gap
+  // instead of snapping the avatar.
+  applySnapshot(prev, next, alpha, selfId, selfPose, peerPose = null) {
     if (!next) return;
     const prevPl = new Map(), prevEn = new Map();
     if (prev) {
@@ -2110,10 +2115,28 @@ export class GameView {
       const p = prevPl.get(id);
       if (id === selfId && selfPose) {
         x = selfPose.x; z = selfPose.z; yaw = selfPose.yaw; moving = selfPose.moving;
-      } else if (p) {
-        x = lerp(p[PL.X], x, alpha);
-        z = lerp(p[PL.Z], z, alpha);
-        yaw = angleLerp(p[PL.YAW], yaw, alpha);
+      } else {
+        if (p) {
+          x = lerp(p[PL.X], x, alpha);
+          z = lerp(p[PL.Z], z, alpha);
+          yaw = angleLerp(p[PL.YAW], yaw, alpha);
+        }
+        // A live direct link overrides the (older) authoritative pose;
+        // everything else about this row — alive/dead, HP, level, gear —
+        // still comes from the server, which remains the authority.
+        //
+        // Death and portal arrivals are the exception: those are the server
+        // teleporting a hero, and until the peer's own client reconciles to
+        // the new spot its direct pose still describes the old one. The
+        // avatar is hidden through both, so deferring to the snapshot here
+        // costs nothing and avoids reappearing at a stale position.
+        const pp = (dead || a.arrivalPending) ? null : peerPose?.(id);
+        if (pp) {
+          x = lerp(x, pp.x, pp.blend);
+          z = lerp(z, pp.z, pp.blend);
+          yaw = angleLerp(yaw, pp.yaw, pp.blend);
+          if (pp.blend > 0.5) moving = pp.moving;
+        }
       }
       a.group.position.x = x;
       a.group.position.z = z;
