@@ -19,3 +19,5 @@ jobs:
       - run: npm run build
       # … and the authoritative simulation must run headless on Node
       - run: node apps/server/scripts/sim-smoke.mjs
+      # the keep-alive loop is a shell script now, so it gets checked too
+      - run: bash .github/scripts/keep-warm-smoke.sh

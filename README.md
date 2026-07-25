@@ -51,6 +51,13 @@ or `?server=<url>` (per tab).
 - **Server → Render.** One-click via [`render.yaml`](render.yaml) (Blueprint).
   Free tier hibernates after ~15 min idle; the first connection then wakes it
   (~30–50 s) and the client shows a "connecting to the server…" state.
+  [`keep-alive.yml`](.github/workflows/keep-alive.yml) pings `/health` to stop
+  that happening — as a **loop inside one run**, because GitHub delivers only
+  ~30% of a `*/10` cron (measured: gaps of 26–52 min, all of them longer than
+  Render's idle window). Set a `RENDER_HEALTH_URL` repo variable to enable it.
+  It defaults to an 18h/day window, since the free tier's ~750 instance-hours
+  and a 744-hour month leave no room for a service kept warm 24/7 — widen it
+  with `KEEP_ALIVE_HOURS_UTC` only if nothing else uses the free tier.
 - **Previews / staging.** Render's automatic per-PR previews need a **paid**
   workspace, so this repo uses a `staging` branch instead — the free-tier
   substitute for previews, running BOTH sides:
