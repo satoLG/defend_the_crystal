@@ -95,18 +95,18 @@ back to software rasterization.
 - **Server → Render.** One-click via [`render.yaml`](render.yaml) (Blueprint).
   Free tier hibernates after ~15 min idle; the first connection then wakes it
   (~30–50 s) and the client shows a "connecting to the server…" state.
-  [`keep-alive.yml`](.github/workflows/keep-alive.yml) pings `/health` to stop
-  that happening — as a **loop inside one run**, because GitHub delivers only
-  ~30% of a `*/10` cron (measured: gaps of 26–52 min, all of them longer than
-  Render's idle window). Set a `RENDER_HEALTH_URL` repo variable to enable it.
-  It runs on a **20h/day window** (warm 08:00–04:00 BRT), because the free
-  tier's ~750 instance-hours against a 744-hour month means 24/7 spends the
-  whole allowance and risks a suspension that would take production down —
-  20h leaves ~130h spare. Override with `KEEP_ALIVE_HOURS_UTC`; the smoke
-  test fails if the default ever stops fitting the budget.
-
-  > Scheduled workflows only run from the **default branch**, so a change
-  > here does nothing until `staging` is promoted to `main`.
+  [`keep-alive.yml`](.github/workflows/keep-alive.yml) pinged `/health` to stop
+  that happening, but its **schedule is now commented out**: even looping for
+  ~55 min per run, GitHub's cron throttling still left the server cold in
+  practice, so it was spending Actions minutes and instance-hours for nothing.
+  The job still exists and can be run by hand from the Actions tab (and needs a
+  `RENDER_HEALTH_URL` repo variable); uncomment the `schedule:` block to bring
+  it back. For warmth that actually holds, use an external pinger
+  (UptimeRobot / cron-job.org) against `/health` instead — no GitHub
+  throttling and no 60-day disable rule. Whatever pings it, keep it inside a
+  ~20h/day window: the free tier's ~750 instance-hours against a 744-hour
+  month means 24/7 spends the whole allowance and risks a suspension that
+  would take production down.
 - **Previews / staging.** Render's automatic per-PR previews need a **paid**
   workspace, so this repo uses a `staging` branch instead — the free-tier
   substitute for previews, running BOTH sides:
