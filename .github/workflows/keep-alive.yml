@@ -48,12 +48,23 @@ name: Keep Render awake
 # (UptimeRobot / cron-job.org), which has neither the throttling nor the
 # 60-day rule.
 
+# DISABLED — the schedule below is commented out on purpose.
+#
+# In practice this never kept the server warm: even with each run looping for
+# ~55 minutes, GitHub's throttling of the cron left holes longer than Render's
+# idle window, and production was still found cold. Rather than keep burning
+# Actions minutes (and instance-hours) on something that does not deliver, the
+# trigger is off. The job is kept intact and can still be started by hand from
+# the Actions tab, and re-enabling is just uncommenting the schedule block.
+#
+# The reliable fix is an external pinger (UptimeRobot / cron-job.org) hitting
+# /health directly — no GitHub throttling, no 60-day rule.
 on:
-  schedule:
-    # Ask often. GitHub will drop most of these, and that is fine — each run
-    # that does land covers ~55 minutes on its own, so a delivery rate as
-    # low as one per hour still leaves no meaningful hole.
-    - cron: '*/10 * * * *'
+  # schedule:
+  #   # Ask often. GitHub will drop most of these, and that is fine — each run
+  #   # that does land covers ~55 minutes on its own, so a delivery rate as
+  #   # low as one per hour still leaves no meaningful hole.
+  #   - cron: '*/10 * * * *'
   workflow_dispatch:
     inputs:
       duration_min:
