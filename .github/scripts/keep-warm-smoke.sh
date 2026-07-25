@@ -86,6 +86,15 @@ out=$(HEALTH_URL="$URL" DURATION_MIN=0.02 INTERVAL_MIN=0.05 \
 check "a window wrapping past midnight still opens" \
   "$(grep -q "awake" <<<"$out" && echo 0 || echo 1)"
 
+# "0-24" is the always-on sentinel the workflow passes when asked to ignore
+# the window. It has to be a real window the script accepts, not a special
+# case, because an empty string is falsy in a GitHub expression and would
+# fall through to the default window instead.
+out=$(HEALTH_URL="$URL" DURATION_MIN=0.02 INTERVAL_MIN=0.05 \
+        ACTIVE_HOURS_UTC="0-24" bash "$SCRIPT" 2>&1)
+check "the always-on window (0-24) pings at any hour" \
+  "$(grep -q "awake" <<<"$out" && echo 0 || echo 1)"
+
 # Hours written with a leading zero must not be read as octal ("08", "09").
 out=$(HEALTH_URL="$URL" DURATION_MIN=0.02 INTERVAL_MIN=0.05 \
         ACTIVE_HOURS_UTC="08-09" bash "$SCRIPT" 2>&1)

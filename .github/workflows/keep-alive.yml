@@ -74,5 +74,8 @@ jobs:
           HEALTH_URL: ${{ vars.RENDER_HEALTH_URL }}
           DURATION_MIN: ${{ inputs.duration_min || '55' }}
           INTERVAL_MIN: '5'
-          ACTIVE_HOURS_UTC: ${{ inputs.ignore_active_hours && '' || vars.KEEP_ALIVE_HOURS_UTC || '11-05' }}
+          # '0-24' rather than '' for "always on": an empty string is falsy
+          # in a GitHub expression, so `x && '' || y` would fall straight
+          # through to y and silently keep the window it was asked to ignore.
+          ACTIVE_HOURS_UTC: ${{ inputs.ignore_active_hours && '0-24' || vars.KEEP_ALIVE_HOURS_UTC || '11-05' }}
         run: bash .github/scripts/keep-warm.sh
