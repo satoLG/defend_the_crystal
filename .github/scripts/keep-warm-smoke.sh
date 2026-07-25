@@ -102,9 +102,17 @@ check "zero-padded hours parse (no octal error)" \
   "$(grep -q "value too great for base" <<<"$out" && echo 1 || echo 0)"
 
 # ---- failure reporting ----------------------------------------------------
-# Nothing listening: every ping fails, and that is worth a red X.
-out=$(HEALTH_URL="http://localhost:9/health" DURATION_MIN=0.02 INTERVAL_MIN=0.05 \
-        ACTIVE_HOURS_UTC="" bash "$SCRIPT" 2>&1); rc=$?
+# Nothing answering: every ping fails, and that is worth a red X.
+#
+# The host is a .invalid name (reserved, never resolves) rather than a
+# closed port, because a closed port is refused instantly on some networks
+# and silently dropped on others — on a GitHub runner the latter made this
+# case sit through the full production timeout. A DNS failure is immediate
+# everywhere. The retry/timeout knobs are turned down for the same reason:
+# the point here is the exit code, not the wait.
+out=$(HEALTH_URL="http://keep-warm-smoke.invalid/health" \
+        DURATION_MIN=0.02 INTERVAL_MIN=0.05 ACTIVE_HOURS_UTC="" \
+        PING_MAX_TIME=5 PING_RETRIES=0 bash "$SCRIPT" 2>&1); rc=$?
 check "fails when the server never answers" "$([ "$rc" -ne 0 ] && echo 0 || echo 1)"
 check "says why it failed" "$(grep -q "::error::" <<<"$out" && echo 0 || echo 1)"
 

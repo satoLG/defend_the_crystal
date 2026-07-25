@@ -12,6 +12,11 @@
 #   HEALTH_URL         full URL to ping. Unset -> warn and exit 0.
 #   DURATION_MIN       how long this run keeps pinging (default 55).
 #   INTERVAL_MIN       minutes between pings (default 5).
+#   PING_MAX_TIME      curl timeout in seconds (default 90 — a cold Render
+#                      service can take ~50s to answer).
+#   PING_RETRIES       curl retries per ping (default 2). Lowered by the
+#                      smoke test so its failure cases resolve promptly
+#                      instead of waiting out a production-sized timeout.
 #   ACTIVE_HOURS_UTC   "START-END" hour window, e.g. "11-05" (wraps past
 #                      midnight). Outside it the loop idles without pinging.
 #                      Empty = always on. See the workflow for why this
@@ -25,6 +30,8 @@ HEALTH_URL="${HEALTH_URL:-}"
 DURATION_MIN="${DURATION_MIN:-55}"
 INTERVAL_MIN="${INTERVAL_MIN:-5}"
 ACTIVE_HOURS_UTC="${ACTIVE_HOURS_UTC:-}"
+PING_MAX_TIME="${PING_MAX_TIME:-90}"
+PING_RETRIES="${PING_RETRIES:-2}"
 
 if [ -z "$HEALTH_URL" ]; then
   echo "::warning::RENDER_HEALTH_URL repo variable is not set — nothing to ping."
@@ -51,7 +58,8 @@ window_open() {
 ping_once() {
   local code
   code=$(curl -sS -o /dev/null -w '%{http_code}' \
-           --max-time 90 --retry 2 --retry-delay 5 --retry-all-errors \
+           --max-time "$PING_MAX_TIME" --retry "$PING_RETRIES" \
+           --retry-delay 5 --retry-all-errors \
            "$HEALTH_URL" 2>/dev/null)
   case "$code" in
     2??) echo "$(date -u +%H:%M:%S) HTTP $code — awake"; return 0 ;;
