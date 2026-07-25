@@ -123,6 +123,38 @@ check "an unset RENDER_HEALTH_URL is a warning, not a failure" "$rc"
 check "the warning names the variable" \
   "$(grep -q "RENDER_HEALTH_URL" <<<"$out" && echo 0 || echo 1)"
 
+# ---- the default window has to fit the monthly budget ---------------------
+# The whole reason the window exists is that Render's free tier grants ~750
+# instance-hours/month and a 31-day month is 744, so a service warm 24/7
+# spends the lot and can get suspended — taking production down. Widening
+# the default is a one-character edit in the workflow, so the budget is
+# asserted here rather than left to whoever makes that edit remembering.
+WORKFLOW=".github/workflows/keep-alive.yml"
+BUDGET_H=750          # Render free tier, per month, per workspace
+MONTH_H=744           # 31 days
+MIN_SPARE_H=100       # room for dtc-server-staging and a miscount
+
+default_window=$(grep -o "vars.KEEP_ALIVE_HOURS_UTC || '[0-9]\+-[0-9]\+'" "$WORKFLOW" \
+                   | grep -o "'[0-9]\+-[0-9]\+'" | tr -d "'")
+check "the workflow declares a default window (found '${default_window:-none}')" \
+  "$([ -n "$default_window" ] && echo 0 || echo 1)"
+
+if [ -n "$default_window" ]; then
+  ws=$((10#${default_window%%-*})); we=$((10#${default_window##*-}))
+  if [ "$ws" -le "$we" ]; then per_day=$((we - ws)); else per_day=$((24 - ws + we)); fi
+  monthly=$((per_day * 31))
+  spare=$((BUDGET_H - monthly))
+  check "default window is a sane span (${per_day}h/day)" \
+    "$([ "$per_day" -gt 0 ] && [ "$per_day" -le 24 ] && echo 0 || echo 1)"
+  check "default fits the free tier with room to spare (${monthly}h/month, ${spare}h spare)" \
+    "$([ "$spare" -ge "$MIN_SPARE_H" ] && echo 0 || echo 1)"
+  # And it should be worth having: a window so narrow the server is cold
+  # through the evening is the bug this whole workflow exists to fix.
+  check "default keeps the server warm for most of the day (${per_day}h >= 16h)" \
+    "$([ "$per_day" -ge 16 ] && echo 0 || echo 1)"
+  echo "  (budget ${BUDGET_H}h/month · a 31-day month is ${MONTH_H}h)"
+fi
+
 echo
 echo "$PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ] || exit 1
