@@ -6,17 +6,24 @@ import {
   CRYSTAL_BREACH_LIMIT, GRID, JUMP, DROPS, SUMMON, BOSSES, SKILLS, NAME_MAX,
   PET, GOLD, petEffects, sanitizePetRef, jumpDurFor,
   WEAPONS, STUN, ORB, weaponEffects, sanitizeWeaponRef, classStarterWeapons,
-  TOWER_SPECIALS, STATUS,
+  TOWER_SPECIALS, STATUS, BLOOD_COURT,
 } from '../config.js';
 import {
   Grid, cellToWorld, worldToCell, canJumpFrom, enemyJumpShortcut, idx, inBounds,
   computeDashEnd, CRYSTAL_POS, HALF_W, HALF_H,
 } from './grid.js';
 import { PORTAL, CROSS_Z, NPCS, DUMMIES, TRAIN, findColliderJump } from '../sanctuary.js';
-import { buildWavePlan, enemyStats } from './waves.js';
+import { buildWavePlan, enemyStats, cycleOf } from './waves.js';
 import { clamp, dist2d, nextId } from '../utils.js';
 
 const rnd2 = (v) => Math.round(v * 100) / 100;
+
+// the weak blood magic a rank-and-file vampire carries once the court
+// has risen (see BLOOD_COURT); null for every other kind and earlier wave
+function bloodOf(kind, wave) {
+  if (kind !== 'vampire') return null;
+  return cycleOf(wave).wave >= BLOOD_COURT.fromWave ? { ...BLOOD_COURT } : null;
+}
 
 // A knockback vector of magnitude `mag` that pushes a body at `pos` straight
 // away from the origin (fx,fz) the hit came from — i.e. BACKWARD along the
@@ -48,6 +55,7 @@ export class Sim {
     this.time = 0;
     this.phase = 'lobby'; // lobby | build | combat | checkpoint | over
     this.wave = 0;
+    this.jumpWave = null; // testing: wave the host picked to start from
     this.points = 0;
     this.breaches = 0;
     this.buildT = 0;
@@ -259,6 +267,7 @@ export class Sim {
     for (const p of this.players) p.obst = stock;
     this.phase = 'build';
     this.wave = 0;
+    this.jumpWave = null;
     this.buildTimerOn = false; // first wave starts on demand
     this.emit({ t: 'phase', ph: 'build', n: 1 });
   }
@@ -291,6 +300,20 @@ export class Sim {
     this.emit({ t: 'restart' });
   }
 
+  // Testing aid: skip the counter straight to a wave so a specific
+  // fight can be reached without grinding to it. Only before the run has
+  // begun — once wave 1 has marched in, the HP curve, the point pool and
+  // everyone's level are all built on the waves actually played, and
+  // moving the counter under them would just report nonsense.
+  jumpToWave(n) {
+    if (this.wave !== 0 || this.phase !== 'build') return;
+    const target = Math.round(Number(n));
+    if (!Number.isFinite(target)) return;
+    // parked, not applied: the counter has to stay at 0 so the picker
+    // remains open and the host can change their mind before starting
+    this.jumpWave = Math.min(Math.max(target, 1), WAVES.CYCLE);
+  }
+
   startWave() {
     if (this.phase !== 'build' && this.phase !== 'checkpoint') return;
     // the first wave only starts once EVERY hero has walked up from the
@@ -301,6 +324,8 @@ export class Sim {
     }
     // training ends the moment a wave marches in
     for (const id of [...this.trainers]) this.exitTraining(id);
+    // a parked test jump lands here, once, right before the counter ticks
+    if (this.jumpWave) { this.wave = this.jumpWave - 1; this.jumpWave = null; }
     this.wave += 1;
     this.phase = 'combat';
     this.waveStartCount = this.playerCount();
@@ -376,6 +401,7 @@ export class Sim {
       case 'pet': return this.trySetPet(p, act);
       case 'loadout': return this.trySetLoadout(p, act);
       case 'start': if (this.phase === 'build') this.startWave(); return;
+      case 'setwave': return this.jumpToWave(act.n);
       case 'cont': return this.setContinue(id);
       case 'restart': if (this.phase === 'over') this.restart(); return;
     }
@@ -755,14 +781,14 @@ export class Sim {
   // gravedigger's tombs; otherwise it walks in from a top spawn pad.
   // `horde` marks a Zombie Horde trooper color ('green'|'blue'|'red');
   // `tier` (2|3) the mid/large power stages of later waves.
-  spawnEnemy(kind, boss, variant = null, at = null, horde = null, tier = 1) {
+  spawnEnemy(kind, boss, variant = null, at = null, horde = null, tier = 1, opts = null) {
     const def = ENEMIES[kind];
     const s = GRID.SPAWNS[this.spawnIdx++ % GRID.SPAWNS.length];
     const w = at || cellToWorld(s.c, s.r);
     // walk-in spawns start hidden inside the dark woods north of the
     // board and march down out of the penumbra
     if (!at) w.z = -HALF_H - 2.5 - Math.random() * 2.5;
-    const stats = enemyStats(kind, boss, this.wave, this.waveStartCount, variant, horde, tier);
+    const stats = enemyStats(kind, boss, this.wave, this.waveStartCount, variant, horde, tier, opts);
     const bossDef = boss === 2 ? BOSSES[variant] : null;
 
     const vehicle = new Vehicle();
@@ -805,10 +831,14 @@ export class Sim {
       horde, // 'green' | 'blue' | 'red' | null
       variant: boss === 2 ? variant : null,
       // visual-variant code for the snapshot: 1 stage-2 look, 2 stage-3
-      // look (recolored hide + size), 3 Brutus (props); 0 plain
+      // look (recolored hide + size), 3 Brutus (props); 0 plain.
+      // Authored sub-bosses name their own look (the blue zombie, the
+      // red orc) instead of inheriting one from a power tier.
       vr: boss === 2
         ? (variant === 'brutus' ? 3 : 0)
-        : (stats.tier === 2 ? 1 : stats.tier === 3 ? 2 : 0),
+        : boss === 1
+          ? (opts?.vr || 0)
+          : (stats.tier === 2 ? 1 : stats.tier === 3 ? 2 : 0),
       // special powers
       archer,
       jumper: !!def.jumper && !def.flying,
@@ -818,8 +848,16 @@ export class Sim {
       chainLeft: 0, chainT: 0,
       summoner: !!def.summoner, summonCd: SUMMON.FIRST,
       pumpkin: bossDef?.pumpkin || null,
+      // blood magic: a ranged drain that heals the caster for a share of
+      // the damage it lands. Drácula gets the full version from his boss
+      // entry; the vampires of his court (wave 61 on) get a weak one.
+      blood: bossDef?.blood || bloodOf(kind, this.wave),
     });
     const ev = { t: 'spawn', id: e.id, kind, boss };
+    // several bosses share a body (Zé do Caixão and Drácula are both
+    // vampires, Brutus and the Sombra both orcs), so the overhead label
+    // can't be looked up from the kind — carry the variant itself
+    if (boss === 2) ev.variant = variant;
     if (at) { ev.g = 1; ev.x = rnd2(w.x); ev.z = rnd2(w.z); } // rose from a tomb
     this.emit(ev);
     // carry the boss VARIANT / enemy KIND so clients localize the name &
@@ -1218,8 +1256,10 @@ export class Sim {
   shootArrowAt(e, p, dist) {
     const pos = e.vehicle.position;
     const ft = Math.max(dist / e.archer.projSpeed, 0.08);
+    // bone throwers lob a tumbling bone; archers loose a flat arrow
+    const proj = e.archer.proj || 'arrow';
     this.emit({
-      t: 'shoot', k: 'arrow',
+      t: 'shoot', k: proj, lob: proj === 'bone' ? 1 : 0,
       f: [rnd2(pos.x), 1.1, rnd2(pos.z)], to: [rnd2(p.x), 0.8, rnd2(p.z)], ft: rnd2(ft),
     });
     const id = p.id, dmg = e.dmg, fx = pos.x, fz = pos.z;
@@ -1228,6 +1268,35 @@ export class Sim {
       if (!q || q.dead) return;
       const n = Math.max(dist2d(fx, fz, q.x, q.z), 0.2);
       this.damagePlayer(q, dmg, ((q.x - fx) / n) * 1.1, ((q.z - fz) / n) * 1.1);
+    }});
+  }
+
+  // blood magic: a bolt that damages the target and feeds the caster
+  // back a share of what it took (capped at its own missing HP)
+  drainAt(e, p, dist) {
+    const pos = e.vehicle.position;
+    const b = e.blood;
+    const ft = Math.max(dist / b.projSpeed, 0.08);
+    this.emit({
+      t: 'shoot', k: 'blood',
+      f: [rnd2(pos.x), 1.2, rnd2(pos.z)], to: [rnd2(p.x), 0.9, rnd2(p.z)], ft: rnd2(ft),
+    });
+    const id = p.id, eid = e.id, fx = pos.x, fz = pos.z;
+    this.pending.push({ at: this.time + ft, fn: () => {
+      const q = this.getPlayer(id);
+      if (!q || q.dead) return;
+      const before = q.hp;
+      const n = Math.max(dist2d(fx, fz, q.x, q.z), 0.2);
+      this.damagePlayer(q, b.dmg, ((q.x - fx) / n) * 0.8, ((q.z - fz) / n) * 0.8);
+      // heal off what actually landed, so a blocked or absorbed hit
+      // feeds him nothing
+      const dealt = Math.max(before - q.hp, 0);
+      const caster = this.enemies.entities.find((n) => n.id === eid);
+      if (!caster || caster.hp <= 0 || dealt <= 0) return;
+      const healed = Math.min(dealt * b.leech, caster.maxHp - caster.hp);
+      if (healed <= 0) return;
+      caster.hp += healed;
+      this.emit({ t: 'drain', id: eid, x: rnd2(q.x), z: rnd2(q.z) });
     }});
   }
 
@@ -1277,7 +1346,7 @@ export class Sim {
         const s = this.spawnQueue.shift();
         // the Zombie Horde announces itself once, on its first spawn
         if (s.announce) this.emit({ t: 'boss', variant: s.announce });
-        this.spawnEnemy(s.kind, s.boss, s.variant, null, s.horde || null, s.tier || 1);
+        this.spawnEnemy(s.kind, s.boss, s.variant, null, s.horde || null, s.tier || 1, s);
       }
     }
 
@@ -1580,10 +1649,11 @@ export class Sim {
 
       e.atkCd -= dt;
 
-      // ranged attackers (skeleton archers / the pumpkin boss) hold
-      // position and fire as long as any character is inside range —
+      // ranged attackers (skeleton archers, bone throwers, the pumpkin
+      // boss, anything casting blood magic) hold position and fire as
+      // long as any character is inside range —
       // shots pass through walls, same as the characters' attacks do
-      const ranged = e.archer || e.pumpkin;
+      const ranged = e.archer || e.pumpkin || e.blood;
       let engaged = false;
       if (ranged && alive.length && this.phase !== 'over') {
         const rng = ranged.range;
@@ -1604,6 +1674,8 @@ export class Sim {
             this.emit({ t: 'atk', id: e.id, tx: rnd2(aim.p.x), tz: rnd2(aim.p.z), r: 1 });
             if (e.pumpkin) {
               this.throwPumpkinAt(e, aim.p, aim.d);
+            } else if (e.blood) {
+              this.drainAt(e, aim.p, aim.d);
             } else if (e.archer.multishot) {
               for (const f of foes) this.shootArrowAt(e, f.p, f.d); // volley at everyone
             } else {
@@ -1905,6 +1977,7 @@ export class Sim {
   buildSnapshot() {
     return {
       w: this.wave,
+      jw: this.jumpWave || 0, // testing: parked start wave, 0 = none
       ph: this.phase,
       bt: this.buildTimerOn ? rnd2(Math.max(this.buildT, 0)) : -1,
       pts: Math.round(this.points),

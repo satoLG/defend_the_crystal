@@ -4,12 +4,14 @@ import {
   PETS, PET, petXpNext, petEffects,
   WEAPONS, WEAPON_TIER_MAX, CLASS_WEAPONS,
   weaponEffects, weaponUpgradeCost,
+  WAVES, BOSS_ORDER, SUBBOSSES, PHASES,
 } from '@dtc/shared/config.js';
 import {
   t, applyStaticI18n, getLang, setLang, onLangChange,
   className, classBlurb, classWeaponName, powerName, powerDesc,
   petName, petBlurb, petEffectText, weaponName, weaponBlurb, weaponStatText,
   tierName, towerName, towerSpecName, towerSpecDesc,
+  bossName, enemyName,
 } from './i18n.js';
 import { sfx, setSfxVolume } from './audio.js';
 import { normalizeRoomCode } from '@dtc/shared/utils.js';
@@ -897,6 +899,7 @@ export class UI {
       sfx.click();
       this.cb.onAction({ t: 'start' });
     });
+    this.bindDevWave();
     bindTap($('jump-btn'), () => this.cb.onJump?.());
     bindTap($('skill-btn'), () => this.cb.onSkill?.());
     $('room-chip').addEventListener('click', async () => {
@@ -1725,6 +1728,73 @@ export class UI {
       ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   }
 
+  // ---- testing wave picker ----------------------------------------
+  // Jump straight to any wave of the authored arc so a specific fight
+  // can be inspected without playing up to it. The server only honours
+  // it before the first wave (Sim.jumpToWave); this is just the dial.
+  //
+  // Off unless asked for: the dev server and any build with
+  // VITE_DEV_TOOLS set get it, and `?dev=1` turns it on for one session
+  // anywhere — enough to poke at staging without redeploying it. It is
+  // never a security boundary (the server's own guard is), just a way to
+  // keep debug chrome out of a normal player's screen.
+
+  // what the host is about to walk into, so the pick is informed
+  devWaveSummary(n) {
+    const parts = [];
+    if (n % WAVES.CHECKPOINT_EVERY === 0) {
+      const variant = BOSS_ORDER[(n / WAVES.CHECKPOINT_EVERY - 1) % BOSS_ORDER.length];
+      parts.push(`BOSS <b>${bossName(variant)}</b>`);
+    } else if (n % WAVES.SUBBOSS_EVERY === 0) {
+      const squad = (SUBBOSSES[n] || []).map((s) => enemyName(s.kind));
+      if (squad.length) parts.push(`mini <b>${squad.join(' + ')}</b>`);
+    }
+    let mix = PHASES[0].mix;
+    for (const p of PHASES) {
+      if (n < p.from) break;
+      mix = p.mix;
+    }
+    // heaviest first — the shape of the wave in one glance
+    const kinds = Object.entries(mix)
+      .sort((a, b) => b[1] - a[1])
+      .map(([k]) => enemyName(k));
+    parts.push(kinds.join(', '));
+    return parts.join('<br/>');
+  }
+
+  setDevWave(n) {
+    const v = Math.min(Math.max(Math.round(n) || 1, 1), WAVES.CYCLE);
+    this.devWave = v;
+    $('devwave-range').value = String(v);
+    $('devwave-num').value = String(v);
+    $('devwave-current').textContent = `wave ${v}`;
+    $('devwave-info').innerHTML = this.devWaveSummary(v);
+    return v;
+  }
+
+  bindDevWave() {
+    this.devTools = !!(
+      import.meta.env?.DEV
+      || import.meta.env?.VITE_DEV_TOOLS
+      || new URLSearchParams(location.search).has('dev')
+    );
+    if (!this.devTools) return;
+    this.devWave = 1;
+    const range = $('devwave-range');
+    const num = $('devwave-num');
+    range.max = String(WAVES.CYCLE);
+    num.max = String(WAVES.CYCLE);
+    range.addEventListener('input', () => this.setDevWave(+range.value));
+    num.addEventListener('change', () => this.setDevWave(+num.value));
+    bindTap($('devwave-go'), () => {
+      sfx.click();
+      // park the target, then start — the sim applies it on the way in
+      this.cb.onAction({ t: 'setwave', n: this.devWave });
+      this.cb.onAction({ t: 'start' });
+    });
+    this.setDevWave(1);
+  }
+
   // called every frame with the freshest snapshot
   updateHud(snap, selfId) {
     if (!snap) return;
@@ -1760,6 +1830,13 @@ export class UI {
         if (!ob) this.closePanel();
       }
     }
+
+    // testing wave picker — same window the server enforces: host only,
+    // build phase, and only while no wave has run yet
+    $('devwave').classList.toggle(
+      'hidden',
+      !(this.devTools && this.isHost && snap.ph === 'build' && snap.w === 0),
+    );
 
     // start-wave button (lives in the top-right action slot)
     const btn = $('startwave-btn');

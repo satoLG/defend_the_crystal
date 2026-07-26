@@ -3,7 +3,7 @@ import { instantiate, getTemplate } from './assets.js';
 import { buildTexture, applyTexture, getSlots } from './customize.js';
 import { iconPaths } from '../icons.js';
 import { CLASSES, TOWERS, JUMP, ENEMIES, BOSSES, PETS, WEAPONS, SKILLS, classStarterWeapons } from '@dtc/shared/config.js';
-import { t, bossNameByKind } from '../i18n.js';
+import { t, bossName, bossNameByKind } from '../i18n.js';
 import { cellToWorld, CRYSTAL_POS, HALF_H, PLAZA } from '@dtc/shared/sim/grid.js';
 import {
   ELEV, terrainY, NPCS, AMBIENT_NPCS, DUMMIES, PORTAL, PET_STALL, WEAPON_STALL,
@@ -618,10 +618,20 @@ const ENEMY_PROPS = {
   archer: CLASS_PROPS.archer,
   // Zé do Caixão hauls his own coffin on his back
   coffin: [{ key: 'prop-coffin', bone: 'torso', pos: [0, -0.18, -0.16], rot: [-Math.PI / 2, 0, 0.12], scale: 0.7 }],
-  // Brutus marches in behind a great shield with a great axe raised
+  // Brutus marches in behind a great shield with a war hammer raised,
+  // both finished in max-upgrade crystal (tier 2)
   brutus: [
-    { ...WEAPON_PROPS.greataxe, tier: 0 },
-    { ...WEAPON_PROPS.greatshield, tier: 0 },
+    { ...WEAPON_PROPS.hammer, tier: 2 },
+    { ...WEAPON_PROPS.greatshield, tier: 2 },
+  ],
+  // every orc carries steel, and the rank shows in it: the plain green
+  // grunt gets a spear, the blue one a shield and axe, and the red one
+  // the same pairing forged in gold. Indexed by the enemy's VR code, so
+  // the stage-2/3 recolor and the loadout always agree.
+  orc: [
+    [{ ...WEAPON_PROPS.spear, tier: 0 }],
+    [{ ...WEAPON_PROPS.shield, tier: 0 }, { ...WEAPON_PROPS.axe, tier: 0 }],
+    [{ ...WEAPON_PROPS.shield, tier: 1 }, { ...WEAPON_PROPS.hammer, tier: 1 }],
   ],
 };
 
@@ -694,6 +704,12 @@ export class GameView {
     this.players = new Map();   // id -> actor
     this.pets = new Map();      // ownerId -> companion pet trotting at their heels
     this.enemies = new Map();
+    // enemy id -> named-boss variant, filled by the spawn event (the
+    // kind can't identify the boss once two of them share a body).
+    // Safe to read in makeEnemy: the room emits a tick's events before
+    // its snapshot and socket.io keeps that order, so the variant is
+    // always here before the body shows up in a snapshot row.
+    this.bossVariants = new Map();
     this.towers = new Map();
     this.obstacles = new Map();
     this.graves = new Map();    // gravedigger tombs, id -> {group, riseT}
@@ -1301,16 +1317,23 @@ export class GameView {
     // measure the head height now (after scale) so overhead bits sit
     // right on top no matter the model's size
     const top = modelTop(a.group);
-    a.isGhost = !!def.flying;
+    // flying decides how it moves through the air; translucent is a
+    // look the ghost happens to wear — bats and dragons fly solid
+    a.isFlying = !!def.flying;
+    a.isTranslucent = !!def.translucent;
     a.isArcher = !!def.archer;
-    if (a.isGhost) {
+    if (a.isTranslucent) {
       for (const m of a.mats) { m.transparent = true; m.opacity = 0.8; }
     }
-    if (a.isArcher) this.attachProps(a, ENEMY_PROPS.archer);
+    const bossVariant = this.bossVariants.get(id);
+    // bone throwers are archers to the sim, but they lob by hand — no bow
+    if (a.isArcher && def.archer?.proj !== 'bone') this.attachProps(a, ENEMY_PROPS.archer);
     if (kind === 'keeper') this.attachProps(a, ENEMY_PROPS.keeper);
-    if (kind === 'vampire' && isBoss) this.attachProps(a, ENEMY_PROPS.coffin);
+    // the coffin belongs to Zé do Caixão, not to every vampire boss
+    if (bossVariant === 'zecaixao') this.attachProps(a, ENEMY_PROPS.coffin);
     const vr = row[EN.VR] || 0;
     if (vr === VR_BRUTUS) this.attachProps(a, ENEMY_PROPS.brutus);
+    else if (kind === 'orc') this.attachProps(a, ENEMY_PROPS.orc[vr] || ENEMY_PROPS.orc[0]);
     // stage-2/3 power looks: swap in the recolored hide — only the
     // matching atlas pixels (skin/bone/body) change, never the whole
     // model. Materials are per-actor clones, so this stays local.
@@ -1339,8 +1362,10 @@ export class GameView {
       a.group.add(crown);
     }
     if (isBoss) {
-      // the boss announces itself: name floating over its head
-      const bossLabel = bossNameByKind(kind);
+      // the boss announces itself: name floating over its head. Prefer
+      // the variant the spawn event carried — the kind alone is
+      // ambiguous once two bosses share a body.
+      const bossLabel = bossVariant ? bossName(bossVariant) : bossNameByKind(kind);
       const label = this.makeTextSprite(bossLabel.toUpperCase(), 0xffd24a, 2.1);
       label.position.y = (top + 0.62) / scale;
       a.group.add(label);
@@ -2195,9 +2220,9 @@ export class GameView {
       }
       a.group.position.x = x;
       a.group.position.z = z;
-      // ghosts hover; everything else stands on the terrain (training
+      // flyers hover; everything else stands on the terrain (training
       // dummies live down on the sunken sanctuary floor)
-      a.group.position.y = a.isGhost
+      a.group.position.y = a.isFlying
         ? 0.25 + Math.sin(this.time * 3 + id) * 0.12
         : terrainY(z);
       if (a.kind !== 'dummy') a.group.rotation.y = yaw;
@@ -2207,8 +2232,8 @@ export class GameView {
       const fade = Math.min(Math.max((z + HALF_H + 2) / 7, 0), 1);
       if (a.fade !== fade) {
         a.fade = fade;
-        const baseOp = a.isGhost ? 0.8 : 1;
-        const full = fade >= 1 && !a.isGhost;
+        const baseOp = a.isTranslucent ? 0.8 : 1;
+        const full = fade >= 1 && !a.isTranslucent;
         for (const m of a.mats) {
           m.transparent = !full;
           m.opacity = full ? 1 : baseOp * (0.05 + 0.95 * fade);
@@ -2221,7 +2246,11 @@ export class GameView {
       this.setStatusFx(a, row[EN.ST] || 0);
     }
     for (const [id, a] of this.enemies) {
-      if (!seenE.has(id)) { this.scene.remove(a.group); this.enemies.delete(id); }
+      if (!seenE.has(id)) {
+        this.scene.remove(a.group);
+        this.enemies.delete(id);
+        this.bossVariants.delete(id);
+      }
     }
     // the static yard dummies stand in whenever no live (attackable)
     // sim dummies exist — the two never show at once
@@ -2349,11 +2378,20 @@ export class GameView {
         if (a) a.flashT = 0.12;
         break;
       }
+      case 'drain': {
+        // blood magic landed: a red gout at the victim, and the caster
+        // flushes as it drinks
+        this.burst(ev.x, ev.z, 1.1, 0xc01530);
+        const a = this.enemies.get(ev.id);
+        if (a) a.flashT = 0.18;
+        break;
+      }
       case 'die': {
         if (ev.player) break; // players just hide via snapshot
         const a = this.enemies.get(ev.id);
         if (a) {
           this.enemies.delete(ev.id);
+          this.bossVariants.delete(ev.id);
           this.spawnCorpse(a);
         }
         break;
@@ -2450,6 +2488,8 @@ export class GameView {
       case 'spawn': {
         // clawing out of a gravedigger tomb
         if (ev.g) this.burst(ev.x, ev.z, 1.0, 0x9a4ae0);
+        // remember which named boss this body is, for the overhead label
+        if (ev.variant) this.bossVariants.set(ev.id, ev.variant);
         break;
       }
       case 'ejump': {
@@ -2671,13 +2711,15 @@ export class GameView {
   }
 
   spawnProjectile(ev) {
-    if (ev.k === 'magic') {
+    if (ev.k === 'magic' || ev.k === 'blood') {
       // glowing bolt from the mage's staff (ev.big: the skill's
       // giant arcane orb — same bolt, way scaled up). Upgraded weapons
       // recolour the bolt gold / crystal instead of arcane purple.
+      // Blood magic borrows the same bolt in arterial red.
+      const blood = ev.k === 'blood';
       const s = ev.big ? 2.8 : 1;
-      const coreCol = tierEffectColor(0xe6c4ff, ev.wt);
-      const haloCol = tierEffectColor(0xa050ff, ev.wt);
+      const coreCol = blood ? 0xff5a6a : tierEffectColor(0xe6c4ff, ev.wt);
+      const haloCol = blood ? 0x8e0f1e : tierEffectColor(0xa050ff, ev.wt);
       const bolt = new THREE.Group();
       const core = new THREE.Mesh(
         new THREE.SphereGeometry(0.16 * s, 10, 10),
@@ -2708,11 +2750,24 @@ export class GameView {
     const key = {
       arrow: 'ammo-arrow', cannonball: 'ammo-cannonball',
       boulder: 'ammo-boulder', pumpkin: 'prop-pumpkin',
+      // no bone model in the kits — a stubby bone-white arrow tumbling
+      // through a lob reads as a thrown bone well enough
+      bone: 'ammo-arrow',
     }[ev.k] || 'ammo-arrow';
-    const mesh = instantiate(key, { shadows: false, cloneMaterials: ev.k === 'arrow' && ev.wt > 0 }).group;
+    const tintBone = ev.k === 'bone';
+    const mesh = instantiate(key, {
+      shadows: false,
+      cloneMaterials: tintBone || (ev.k === 'arrow' && ev.wt > 0),
+    }).group;
     if (ev.k === 'boulder') mesh.scale.setScalar(1.5);
     if (ev.k === 'arrow') mesh.scale.setScalar(0.55);
     if (ev.k === 'pumpkin') mesh.scale.setScalar(1.6);
+    if (tintBone) {
+      mesh.scale.set(0.5, 0.5, 0.34); // shorter and fatter than an arrow
+      mesh.traverse((o) => {
+        if (o.isMesh && o.material) o.material.color.set(0xe8e2d0);
+      });
+    }
     if (ev.small) mesh.scale.setScalar(0.7); // catapult scatter balls
     // a gold / crystal arrow for upgraded bows
     if (ev.k === 'arrow' && ev.wt > 0) {
