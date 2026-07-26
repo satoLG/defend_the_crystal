@@ -755,14 +755,14 @@ export class Sim {
   // gravedigger's tombs; otherwise it walks in from a top spawn pad.
   // `horde` marks a Zombie Horde trooper color ('green'|'blue'|'red');
   // `tier` (2|3) the mid/large power stages of later waves.
-  spawnEnemy(kind, boss, variant = null, at = null, horde = null, tier = 1) {
+  spawnEnemy(kind, boss, variant = null, at = null, horde = null, tier = 1, opts = null) {
     const def = ENEMIES[kind];
     const s = GRID.SPAWNS[this.spawnIdx++ % GRID.SPAWNS.length];
     const w = at || cellToWorld(s.c, s.r);
     // walk-in spawns start hidden inside the dark woods north of the
     // board and march down out of the penumbra
     if (!at) w.z = -HALF_H - 2.5 - Math.random() * 2.5;
-    const stats = enemyStats(kind, boss, this.wave, this.waveStartCount, variant, horde, tier);
+    const stats = enemyStats(kind, boss, this.wave, this.waveStartCount, variant, horde, tier, opts);
     const bossDef = boss === 2 ? BOSSES[variant] : null;
 
     const vehicle = new Vehicle();
@@ -805,10 +805,14 @@ export class Sim {
       horde, // 'green' | 'blue' | 'red' | null
       variant: boss === 2 ? variant : null,
       // visual-variant code for the snapshot: 1 stage-2 look, 2 stage-3
-      // look (recolored hide + size), 3 Brutus (props); 0 plain
+      // look (recolored hide + size), 3 Brutus (props); 0 plain.
+      // Authored sub-bosses name their own look (the blue zombie, the
+      // red orc) instead of inheriting one from a power tier.
       vr: boss === 2
         ? (variant === 'brutus' ? 3 : 0)
-        : (stats.tier === 2 ? 1 : stats.tier === 3 ? 2 : 0),
+        : boss === 1
+          ? (opts?.vr || 0)
+          : (stats.tier === 2 ? 1 : stats.tier === 3 ? 2 : 0),
       // special powers
       archer,
       jumper: !!def.jumper && !def.flying,
@@ -820,6 +824,10 @@ export class Sim {
       pumpkin: bossDef?.pumpkin || null,
     });
     const ev = { t: 'spawn', id: e.id, kind, boss };
+    // several bosses share a body (Zé do Caixão and Drácula are both
+    // vampires, Brutus and the Sombra both orcs), so the overhead label
+    // can't be looked up from the kind — carry the variant itself
+    if (boss === 2) ev.variant = variant;
     if (at) { ev.g = 1; ev.x = rnd2(w.x); ev.z = rnd2(w.z); } // rose from a tomb
     this.emit(ev);
     // carry the boss VARIANT / enemy KIND so clients localize the name &
@@ -1218,8 +1226,10 @@ export class Sim {
   shootArrowAt(e, p, dist) {
     const pos = e.vehicle.position;
     const ft = Math.max(dist / e.archer.projSpeed, 0.08);
+    // bone throwers lob a tumbling bone; archers loose a flat arrow
+    const proj = e.archer.proj || 'arrow';
     this.emit({
-      t: 'shoot', k: 'arrow',
+      t: 'shoot', k: proj, lob: proj === 'bone' ? 1 : 0,
       f: [rnd2(pos.x), 1.1, rnd2(pos.z)], to: [rnd2(p.x), 0.8, rnd2(p.z)], ft: rnd2(ft),
     });
     const id = p.id, dmg = e.dmg, fx = pos.x, fz = pos.z;
@@ -1277,7 +1287,7 @@ export class Sim {
         const s = this.spawnQueue.shift();
         // the Zombie Horde announces itself once, on its first spawn
         if (s.announce) this.emit({ t: 'boss', variant: s.announce });
-        this.spawnEnemy(s.kind, s.boss, s.variant, null, s.horde || null, s.tier || 1);
+        this.spawnEnemy(s.kind, s.boss, s.variant, null, s.horde || null, s.tier || 1, s);
       }
     }
 

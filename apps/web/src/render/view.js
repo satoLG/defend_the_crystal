@@ -3,7 +3,7 @@ import { instantiate, getTemplate } from './assets.js';
 import { buildTexture, applyTexture, getSlots } from './customize.js';
 import { iconPaths } from '../icons.js';
 import { CLASSES, TOWERS, JUMP, ENEMIES, BOSSES, PETS, WEAPONS, SKILLS, classStarterWeapons } from '@dtc/shared/config.js';
-import { t, bossNameByKind } from '../i18n.js';
+import { t, bossName, bossNameByKind } from '../i18n.js';
 import { cellToWorld, CRYSTAL_POS, HALF_H, PLAZA } from '@dtc/shared/sim/grid.js';
 import {
   ELEV, terrainY, NPCS, AMBIENT_NPCS, DUMMIES, PORTAL, PET_STALL, WEAPON_STALL,
@@ -694,6 +694,9 @@ export class GameView {
     this.players = new Map();   // id -> actor
     this.pets = new Map();      // ownerId -> companion pet trotting at their heels
     this.enemies = new Map();
+    // enemy id -> named-boss variant, filled by the spawn event (the
+    // kind can't identify the boss once two of them share a body)
+    this.bossVariants = new Map();
     this.towers = new Map();
     this.obstacles = new Map();
     this.graves = new Map();    // gravedigger tombs, id -> {group, riseT}
@@ -1342,8 +1345,11 @@ export class GameView {
       a.group.add(crown);
     }
     if (isBoss) {
-      // the boss announces itself: name floating over its head
-      const bossLabel = bossNameByKind(kind);
+      // the boss announces itself: name floating over its head. Prefer
+      // the variant the spawn event carried — the kind alone is
+      // ambiguous once two bosses share a body.
+      const variant = this.bossVariants.get(id);
+      const bossLabel = variant ? bossName(variant) : bossNameByKind(kind);
       const label = this.makeTextSprite(bossLabel.toUpperCase(), 0xffd24a, 2.1);
       label.position.y = (top + 0.62) / scale;
       a.group.add(label);
@@ -2224,7 +2230,11 @@ export class GameView {
       this.setStatusFx(a, row[EN.ST] || 0);
     }
     for (const [id, a] of this.enemies) {
-      if (!seenE.has(id)) { this.scene.remove(a.group); this.enemies.delete(id); }
+      if (!seenE.has(id)) {
+        this.scene.remove(a.group);
+        this.enemies.delete(id);
+        this.bossVariants.delete(id);
+      }
     }
     // the static yard dummies stand in whenever no live (attackable)
     // sim dummies exist — the two never show at once
@@ -2357,6 +2367,7 @@ export class GameView {
         const a = this.enemies.get(ev.id);
         if (a) {
           this.enemies.delete(ev.id);
+          this.bossVariants.delete(ev.id);
           this.spawnCorpse(a);
         }
         break;
@@ -2453,6 +2464,8 @@ export class GameView {
       case 'spawn': {
         // clawing out of a gravedigger tomb
         if (ev.g) this.burst(ev.x, ev.z, 1.0, 0x9a4ae0);
+        // remember which named boss this body is, for the overhead label
+        if (ev.variant) this.bossVariants.set(ev.id, ev.variant);
         break;
       }
       case 'ejump': {
@@ -2711,11 +2724,24 @@ export class GameView {
     const key = {
       arrow: 'ammo-arrow', cannonball: 'ammo-cannonball',
       boulder: 'ammo-boulder', pumpkin: 'prop-pumpkin',
+      // no bone model in the kits — a stubby bone-white arrow tumbling
+      // through a lob reads as a thrown bone well enough
+      bone: 'ammo-arrow',
     }[ev.k] || 'ammo-arrow';
-    const mesh = instantiate(key, { shadows: false, cloneMaterials: ev.k === 'arrow' && ev.wt > 0 }).group;
+    const tintBone = ev.k === 'bone';
+    const mesh = instantiate(key, {
+      shadows: false,
+      cloneMaterials: tintBone || (ev.k === 'arrow' && ev.wt > 0),
+    }).group;
     if (ev.k === 'boulder') mesh.scale.setScalar(1.5);
     if (ev.k === 'arrow') mesh.scale.setScalar(0.55);
     if (ev.k === 'pumpkin') mesh.scale.setScalar(1.6);
+    if (tintBone) {
+      mesh.scale.set(0.5, 0.5, 0.34); // shorter and fatter than an arrow
+      mesh.traverse((o) => {
+        if (o.isMesh && o.material) o.material.color.set(0xe8e2d0);
+      });
+    }
     if (ev.small) mesh.scale.setScalar(0.7); // catapult scatter balls
     // a gold / crystal arrow for upgraded bows
     if (ev.k === 'arrow' && ev.wt > 0) {

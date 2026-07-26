@@ -540,20 +540,58 @@ export const OBSTACLES = ['rocks', 'barrel']; // random cosmetic variety
 export const OBSTACLE_STOCK_CAP = 10;
 
 // ---------- enemies ----------
-// archer: stops and fires arrows at characters instead of melee
+// archer: stops and fires arrows at characters instead of melee.
+// Which of these actually show up on a given wave is decided by PHASES
+// below, NOT by any per-enemy field — `bossOnly` just documents the
+// kinds that exist purely as a boss body and never join a mix.
 export const ENEMIES = {
-  skeleton:   { name: 'Skeleton', hp: 40,  speed: 2.3, dmg: 8,  pts: 4,  xp: 7,  fromWave: 1, model: 'enemy-skeleton' },
-  zombie:     { name: 'Zombie',   hp: 95,  speed: 1.5, dmg: 14, pts: 6,  xp: 11, fromWave: 2, model: 'enemy-zombie' },
-  ghost:      { name: 'Ghost',    hp: 33,  speed: 2.9, dmg: 6,  pts: 5,  xp: 9,  fromWave: 4, model: 'enemy-ghost', flying: true, translucent: true },
-  bat:        { name: 'Bat',      hp: 45,  speed: 3.2, dmg: 7,  pts: 6,  xp: 10, fromWave: 3, model: 'enemy-bat', flying: true },
-  spider:     { name: 'Spider',   hp: 70,  speed: 2.7, dmg: 12, pts: 7,  xp: 12, fromWave: 7, model: 'enemy-spider' },
-  dragon:     { name: 'Dragon',   hp: 420, speed: 2.0, dmg: 36, pts: 20, xp: 40, fromWave: 12, model: 'enemy-dragon', flying: true },
-  skelarcher: { name: 'Skeleton Archer', hp: 55, speed: 2.1, dmg: 11, pts: 8, xp: 13, fromWave: 5, model: 'enemy-skeleton',
+  skeleton:   { name: 'Skeleton', hp: 40,  speed: 2.3, dmg: 8,  pts: 4,  xp: 7,  model: 'enemy-skeleton' },
+  zombie:     { name: 'Zombie',   hp: 95,  speed: 1.5, dmg: 14, pts: 6,  xp: 11, model: 'enemy-zombie' },
+  ghost:      { name: 'Ghost',    hp: 33,  speed: 2.9, dmg: 6,  pts: 5,  xp: 9,  model: 'enemy-ghost', flying: true, translucent: true },
+  // small and quick — it reads as a swarm, not as a body with weight
+  bat:        { name: 'Bat',      hp: 38,  speed: 3.6, dmg: 7,  pts: 6,  xp: 10, model: 'enemy-bat', flying: true },
+  skelarcher: { name: 'Skeleton Archer', hp: 55, speed: 2.1, dmg: 11, pts: 8, xp: 13, model: 'enemy-skeleton',
                 archer: { range: 6.5, rate: 0.55, projSpeed: 13 } },
-  orc:        { name: 'Orc',      hp: 190, speed: 1.9, dmg: 22, pts: 10, xp: 18, fromWave: 6, model: 'enemy-orc' },
-  vampire:    { name: 'Vampire',  hp: 290, speed: 2.5, dmg: 30, pts: 16, xp: 30, fromWave: 9, model: 'enemy-vampire', jumper: true },
-  keeper:     { name: 'Coveiro',  hp: 1150, speed: 1.6, dmg: 40, pts: 110, xp: 260, fromWave: 999, model: 'enemy-keeper', summoner: true }, // boss only
+  // slow, frail, and it lobs a bone instead of closing the distance —
+  // the first ranged pressure the player meets, on purpose a soft one
+  bonethrower: { name: 'Bone Thrower', hp: 30, speed: 1.2, dmg: 7, pts: 7, xp: 11, model: 'enemy-skeleton',
+                archer: { range: 5.5, rate: 0.38, projSpeed: 9, proj: 'bone' } },
+  orc:        { name: 'Orc',      hp: 190, speed: 1.9, dmg: 22, pts: 10, xp: 18, model: 'enemy-orc' },
+  vampire:    { name: 'Vampire',  hp: 290, speed: 2.5, dmg: 30, pts: 16, xp: 30, model: 'enemy-vampire', jumper: true },
+  keeper:     { name: 'Coveiro',  hp: 1150, speed: 1.6, dmg: 40, pts: 110, xp: 260, model: 'enemy-keeper', summoner: true, bossOnly: true },
+  // boss bodies only — the spider rig alone carries 39 bones, far too
+  // heavy to field 40 of at once (see CREDITS.md)
+  spider:     { name: 'Spider',   hp: 70,  speed: 2.7, dmg: 12, pts: 7,  xp: 12, model: 'enemy-spider', bossOnly: true },
+  dragon:     { name: 'Dragon',   hp: 420, speed: 2.0, dmg: 36, pts: 20, xp: 40, model: 'enemy-dragon', flying: true, bossOnly: true },
 };
+
+// ---------- wave composition ----------
+// Which mobs a wave draws from, authored per phase rather than derived
+// from how long a rank has been available. Each entry applies from its
+// `from` wave until the next one starts, and the numbers are relative
+// weights inside that phase — a kind at 4 shows up roughly four times as
+// often as one at 1. Waves past the last entry keep using it.
+export const PHASES = [
+  // Fase 1 — zombies alone, then skeletons join for the first checkpoint
+  { from: 1,  mix: { zombie: 1 } },
+  { from: 5,  mix: { zombie: 3, skeleton: 2 } },
+  // Fase 2 — a few bone throwers start heckling from the back
+  { from: 11, mix: { zombie: 3, skeleton: 2, bonethrower: 0.8 } },
+  // Fase 3 — proper archers
+  { from: 21, mix: { zombie: 2.5, skeleton: 1.5, bonethrower: 1, skelarcher: 2.5 } },
+  // Fase 4 — ghosts drift over the maze
+  { from: 31, mix: { zombie: 2, skeleton: 1, bonethrower: 1, skelarcher: 2.5, ghost: 2 } },
+  // …and the first bats arrive with Zé do Caixão
+  { from: 40, mix: { zombie: 2, skeleton: 1, bonethrower: 1, skelarcher: 2.5, ghost: 2, bat: 1.5 } },
+  // Fase 5 — ORCS take over
+  { from: 41, mix: { skeleton: 0.8, bonethrower: 0.8, skelarcher: 2, ghost: 2, bat: 1.5, orc: 5 } },
+  // Fase 6 — everything, leaning on ghosts
+  { from: 51, mix: { zombie: 1, skeleton: 1, bonethrower: 1, skelarcher: 1.5, ghost: 5, bat: 1.5, orc: 2, vampire: 1.5 } },
+  // Fase 7 — everything, leaning on vampires and bats (Drácula's court)
+  { from: 61, mix: { zombie: 1, skeleton: 1, bonethrower: 1, skelarcher: 1.5, ghost: 1.5, bat: 4, orc: 2, vampire: 4 } },
+  // Fases 8-10 — the full roster, evenly
+  { from: 71, mix: { zombie: 1.2, skeleton: 1.2, bonethrower: 1.2, skelarcher: 2, ghost: 2, bat: 2, orc: 2, vampire: 2 } },
+];
 
 export const ENEMY = {
   RADIUS: 0.42,
@@ -624,8 +662,41 @@ export const BOSSES = {
   // the slowest march you'll ever get to prepare for.
   brutus:   { kind: 'orc', name: 'Brutus',
               hpMult: 6.5, dmgMult: 2.4, speedMult: 0.55, armor: 0.35 },
+  // Drácula fights like a mage, but every bolt of blood magic he lands
+  // feeds him: `leech` is the share of the damage dealt that he heals.
+  dracula:  { kind: 'vampire', name: 'Drácula',
+              hpMult: 5.5, dmgMult: 1.8, speedMult: 0.95, jumps: 2,
+              blood: { range: 8, rate: 0.7, dmg: 34, projSpeed: 11, leech: 0.6 } },
+  // the Black Widow softens the field before she bites: venom that eats
+  // HP over time, and web patches that bog down whoever stands in them
+  viuvanegra: { kind: 'spider', name: 'Viúva Negra',
+              hpMult: 7, dmgMult: 2, speedMult: 0.9,
+              venom: { range: 7, rate: 0.5, dmg: 12, aoe: 1.6, projSpeed: 9, dps: 9, dur: 4 },
+              web: { rate: 0.22, r: 2.2, dur: 6, moveF: 0.45, rateF: 0.55 } },
+  // breathes straight down from a mouth held high — same cone the
+  // flamethrower tower uses, just mounted on a boss
+  dragao:   { kind: 'dragon', name: 'Dragão das Trevas',
+              hpMult: 4.5, dmgMult: 2.2, speedMult: 0.85,
+              breath: { r: 4.5, arc: 0.7, dps: 42, dur: 2.6, cd: 6 } },
+  // the run's own strongest hero, rendered in black with red eyes and
+  // swinging their kit back at them. `kind` is only the fallback body —
+  // the real model/stats are mirrored from that hero at spawn time.
+  sombra:   { kind: 'orc', name: 'Sombra do Herói',
+              hpMult: 8, dmgMult: 2.5, mirrorsHero: true },
 };
-export const BOSS_ORDER = ['coveiro', 'tirocego', 'horda', 'zecaixao', 'brutus', 'abobrado'];
+// waves 10, 20, 30 … 100 — one named boss each, then the cycle repeats
+export const BOSS_ORDER = [
+  'coveiro',    //  10
+  'horda',      //  20
+  'tirocego',   //  30
+  'zecaixao',   //  40
+  'brutus',     //  50
+  'abobrado',   //  60
+  'dracula',    //  70
+  'viuvanegra', //  80
+  'dragao',     //  90
+  'sombra',     // 100
+];
 
 // the zombie horde's composition & balance: per-zombie stats shrink so
 // a hundred of them stays beatable, and the spawn window is short so
@@ -641,10 +712,25 @@ export const HORDE = {
   SCALE: { green: 1, blue: 1.45, red: 1.9 },
 };
 
-// sub-bosses rotate through EVERY mob kind, never repeating until the
-// list wraps (waves 5, 15, 25, … — ordered so each kind is already a
-// familiar sight by the time its pumped-up version struts in)
-export const SUBBOSS_ORDER = ['zombie', 'skelarcher', 'orc', 'ghost', 'vampire', 'skeleton'];
+// sub-bosses (waves 5, 15, 25, … 95), authored one wave at a time so
+// each one is a familiar mob turned up rather than a random pick. `vr`
+// borrows the stage-2/3 recolor (1 = blue hide, 2 = red); `scale`
+// overrides SUBBOSS.scale when a fight wants something less towering.
+// A wave may list SEVERAL entries — they all walk in together.
+export const SUBBOSSES = {
+  5:  [{ kind: 'zombie', vr: 1 }],                                  // zumbi azul
+  15: [{ kind: 'skelarcher', scale: 1.8 }],                         // arqueiro cinza, médio
+  25: [{ kind: 'ghost', vr: 1 }],                                   // fantasma azul
+  35: [{ kind: 'orc', vr: 1 }],                                     // orc azul
+  45: [{ kind: 'vampire' }],
+  55: [{ kind: 'zombie', vr: 2, revives: 2 }],                      // zumbi vermelho que revive
+  65: [{ kind: 'skelarcher' }, { kind: 'bonethrower' }],            // os irmãos esqueleto
+  75: [{ kind: 'ghost', vr: 2 }],                                   // fantasma vermelho
+  85: [{ kind: 'orc', vr: 2 }],                                     // orc vermelho
+  95: [{ kind: 'keeper', scale: 1.6 },                              // os 3 coveiros
+       { kind: 'keeper', scale: 1.6 },
+       { kind: 'keeper', scale: 1.6 }],
+};
 
 // ---------- enemy tiers (visual power stages) ----------
 // As waves march on, regular enemies start showing up in stronger,
@@ -673,6 +759,14 @@ export const WAVES = {
   BUILD_TIME: 25,          // seconds between waves
   CHECKPOINT_EVERY: 10,
   SUBBOSS_EVERY: 5,
+  // waves 1..CYCLE are authored; past that the same arc runs again with
+  // the enemies hitting harder — wave 101 is wave 1's composition, 110
+  // is the Coveiro again. Volume and spawn pacing follow the CYCLE
+  // position (otherwise wave 200 would try to field 500 enemies); the
+  // extra difficulty rides on HP, which already grows with the raw
+  // wave number, plus this damage bump per completed lap.
+  CYCLE: 100,
+  LAP_DMG: 0.35,           // +35% enemy damage per full lap of the cycle
   BASE_COUNT: 8,
   COUNT_PER_WAVE: 2.6,
   SPAWN_WINDOW_BASE: 8,    // seconds over which a wave trickles in
