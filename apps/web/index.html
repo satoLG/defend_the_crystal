@@ -265,6 +265,22 @@
            holds the wave-advance action (Start wave during the build
            phase, Keep going during a checkpoint) so it never crowds the
            tower row along the bottom -->
+      <!-- Testing overlay: jump straight to any wave of the authored
+           1-100 arc. Host only, and only before the first wave has
+           marched in — see Sim.jumpToWave. -->
+      <div id="devwave" class="hidden">
+        <div class="devwave-head">
+          <span class="devwave-tag">TEST</span>
+          <span id="devwave-current">wave 1</span>
+        </div>
+        <input id="devwave-range" type="range" min="1" max="100" value="1" step="1" />
+        <div class="devwave-row">
+          <input id="devwave-num" type="number" min="1" max="100" value="1" />
+          <button id="devwave-go" class="btn small primary">Start</button>
+        </div>
+        <div id="devwave-info" class="devwave-info"></div>
+      </div>
+
       <div id="hud-action">
         <button id="startwave-btn" class="btn primary hidden">
           <span id="startwave-label">Start<br/>wave</span>

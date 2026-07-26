@@ -55,6 +55,7 @@ export class Sim {
     this.time = 0;
     this.phase = 'lobby'; // lobby | build | combat | checkpoint | over
     this.wave = 0;
+    this.jumpWave = null; // testing: wave the host picked to start from
     this.points = 0;
     this.breaches = 0;
     this.buildT = 0;
@@ -266,6 +267,7 @@ export class Sim {
     for (const p of this.players) p.obst = stock;
     this.phase = 'build';
     this.wave = 0;
+    this.jumpWave = null;
     this.buildTimerOn = false; // first wave starts on demand
     this.emit({ t: 'phase', ph: 'build', n: 1 });
   }
@@ -298,6 +300,20 @@ export class Sim {
     this.emit({ t: 'restart' });
   }
 
+  // Testing aid: skip the counter straight to a wave so a specific
+  // fight can be reached without grinding to it. Only before the run has
+  // begun — once wave 1 has marched in, the HP curve, the point pool and
+  // everyone's level are all built on the waves actually played, and
+  // moving the counter under them would just report nonsense.
+  jumpToWave(n) {
+    if (this.wave !== 0 || this.phase !== 'build') return;
+    const target = Math.round(Number(n));
+    if (!Number.isFinite(target)) return;
+    // parked, not applied: the counter has to stay at 0 so the picker
+    // remains open and the host can change their mind before starting
+    this.jumpWave = Math.min(Math.max(target, 1), WAVES.CYCLE);
+  }
+
   startWave() {
     if (this.phase !== 'build' && this.phase !== 'checkpoint') return;
     // the first wave only starts once EVERY hero has walked up from the
@@ -308,6 +324,8 @@ export class Sim {
     }
     // training ends the moment a wave marches in
     for (const id of [...this.trainers]) this.exitTraining(id);
+    // a parked test jump lands here, once, right before the counter ticks
+    if (this.jumpWave) { this.wave = this.jumpWave - 1; this.jumpWave = null; }
     this.wave += 1;
     this.phase = 'combat';
     this.waveStartCount = this.playerCount();
@@ -383,6 +401,7 @@ export class Sim {
       case 'pet': return this.trySetPet(p, act);
       case 'loadout': return this.trySetLoadout(p, act);
       case 'start': if (this.phase === 'build') this.startWave(); return;
+      case 'setwave': return this.jumpToWave(act.n);
       case 'cont': return this.setContinue(id);
       case 'restart': if (this.phase === 'over') this.restart(); return;
     }
@@ -1958,6 +1977,7 @@ export class Sim {
   buildSnapshot() {
     return {
       w: this.wave,
+      jw: this.jumpWave || 0, // testing: parked start wave, 0 = none
       ph: this.phase,
       bt: this.buildTimerOn ? rnd2(Math.max(this.buildT, 0)) : -1,
       pts: Math.round(this.points),

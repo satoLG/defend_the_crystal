@@ -506,6 +506,44 @@ input:focus { border-color: var(--gold); }
   display: flex; flex-direction: column; align-items: flex-end; gap: 6px;
   z-index: 11;
 }
+
+/* ---- testing wave picker ----------------------------------------
+   Deliberately plain and a bit ugly: it is a debug tool sitting on
+   top of the game, and it should never be mistaken for real UI. Sits
+   on the left so it never fights the HUD actions on the right. */
+#devwave {
+  position: absolute;
+  top: calc(max(8px, env(safe-area-inset-top)) + 44px);
+  left: 10px;
+  width: 190px;
+  display: flex; flex-direction: column; gap: 6px;
+  padding: 9px 10px;
+  background: rgba(12, 14, 20, 0.9);
+  border: 1px solid #3a4152;
+  border-radius: 6px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.55);
+  font-size: 0.78rem;
+  z-index: 12;
+}
+#devwave.hidden { display: none; }
+.devwave-head { display: flex; align-items: center; gap: 6px; }
+.devwave-tag {
+  background: #b4462a; color: #fff;
+  padding: 1px 5px; border-radius: 3px;
+  font-size: 0.62rem; font-weight: 700; letter-spacing: 0.08em;
+}
+#devwave-current { color: var(--gold); font-weight: 600; }
+#devwave-range { width: 100%; margin: 0; accent-color: #b4462a; }
+.devwave-row { display: flex; gap: 6px; align-items: center; }
+#devwave-num {
+  width: 60px; padding: 3px 5px;
+  background: #171a22; color: #e8e8ea;
+  border: 1px solid #3a4152; border-radius: 4px;
+  font: inherit;
+}
+#devwave-go { flex: 1; border-width: 7px; font-size: 0.78rem; }
+.devwave-info { color: #9aa1ab; line-height: 1.35; min-height: 2.4em; }
+.devwave-info b { color: #e0b050; font-weight: 600; }
 #hud-action .btn {
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
   text-align: center;
