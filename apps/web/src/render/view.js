@@ -2378,6 +2378,14 @@ export class GameView {
         if (a) a.flashT = 0.12;
         break;
       }
+      case 'drain': {
+        // blood magic landed: a red gout at the victim, and the caster
+        // flushes as it drinks
+        this.burst(ev.x, ev.z, 1.1, 0xc01530);
+        const a = this.enemies.get(ev.id);
+        if (a) a.flashT = 0.18;
+        break;
+      }
       case 'die': {
         if (ev.player) break; // players just hide via snapshot
         const a = this.enemies.get(ev.id);
@@ -2703,13 +2711,15 @@ export class GameView {
   }
 
   spawnProjectile(ev) {
-    if (ev.k === 'magic') {
+    if (ev.k === 'magic' || ev.k === 'blood') {
       // glowing bolt from the mage's staff (ev.big: the skill's
       // giant arcane orb — same bolt, way scaled up). Upgraded weapons
       // recolour the bolt gold / crystal instead of arcane purple.
+      // Blood magic borrows the same bolt in arterial red.
+      const blood = ev.k === 'blood';
       const s = ev.big ? 2.8 : 1;
-      const coreCol = tierEffectColor(0xe6c4ff, ev.wt);
-      const haloCol = tierEffectColor(0xa050ff, ev.wt);
+      const coreCol = blood ? 0xff5a6a : tierEffectColor(0xe6c4ff, ev.wt);
+      const haloCol = blood ? 0x8e0f1e : tierEffectColor(0xa050ff, ev.wt);
       const bolt = new THREE.Group();
       const core = new THREE.Mesh(
         new THREE.SphereGeometry(0.16 * s, 10, 10),

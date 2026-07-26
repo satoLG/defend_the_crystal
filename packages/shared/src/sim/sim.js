@@ -6,17 +6,24 @@ import {
   CRYSTAL_BREACH_LIMIT, GRID, JUMP, DROPS, SUMMON, BOSSES, SKILLS, NAME_MAX,
   PET, GOLD, petEffects, sanitizePetRef, jumpDurFor,
   WEAPONS, STUN, ORB, weaponEffects, sanitizeWeaponRef, classStarterWeapons,
-  TOWER_SPECIALS, STATUS,
+  TOWER_SPECIALS, STATUS, BLOOD_COURT,
 } from '../config.js';
 import {
   Grid, cellToWorld, worldToCell, canJumpFrom, enemyJumpShortcut, idx, inBounds,
   computeDashEnd, CRYSTAL_POS, HALF_W, HALF_H,
 } from './grid.js';
 import { PORTAL, CROSS_Z, NPCS, DUMMIES, TRAIN, findColliderJump } from '../sanctuary.js';
-import { buildWavePlan, enemyStats } from './waves.js';
+import { buildWavePlan, enemyStats, cycleOf } from './waves.js';
 import { clamp, dist2d, nextId } from '../utils.js';
 
 const rnd2 = (v) => Math.round(v * 100) / 100;
+
+// the weak blood magic a rank-and-file vampire carries once the court
+// has risen (see BLOOD_COURT); null for every other kind and earlier wave
+function bloodOf(kind, wave) {
+  if (kind !== 'vampire') return null;
+  return cycleOf(wave).wave >= BLOOD_COURT.fromWave ? { ...BLOOD_COURT } : null;
+}
 
 // A knockback vector of magnitude `mag` that pushes a body at `pos` straight
 // away from the origin (fx,fz) the hit came from — i.e. BACKWARD along the
@@ -822,6 +829,10 @@ export class Sim {
       chainLeft: 0, chainT: 0,
       summoner: !!def.summoner, summonCd: SUMMON.FIRST,
       pumpkin: bossDef?.pumpkin || null,
+      // blood magic: a ranged drain that heals the caster for a share of
+      // the damage it lands. Drácula gets the full version from his boss
+      // entry; the vampires of his court (wave 61 on) get a weak one.
+      blood: bossDef?.blood || bloodOf(kind, this.wave),
     });
     const ev = { t: 'spawn', id: e.id, kind, boss };
     // several bosses share a body (Zé do Caixão and Drácula are both
@@ -1241,6 +1252,35 @@ export class Sim {
     }});
   }
 
+  // blood magic: a bolt that damages the target and feeds the caster
+  // back a share of what it took (capped at its own missing HP)
+  drainAt(e, p, dist) {
+    const pos = e.vehicle.position;
+    const b = e.blood;
+    const ft = Math.max(dist / b.projSpeed, 0.08);
+    this.emit({
+      t: 'shoot', k: 'blood',
+      f: [rnd2(pos.x), 1.2, rnd2(pos.z)], to: [rnd2(p.x), 0.9, rnd2(p.z)], ft: rnd2(ft),
+    });
+    const id = p.id, eid = e.id, fx = pos.x, fz = pos.z;
+    this.pending.push({ at: this.time + ft, fn: () => {
+      const q = this.getPlayer(id);
+      if (!q || q.dead) return;
+      const before = q.hp;
+      const n = Math.max(dist2d(fx, fz, q.x, q.z), 0.2);
+      this.damagePlayer(q, b.dmg, ((q.x - fx) / n) * 0.8, ((q.z - fz) / n) * 0.8);
+      // heal off what actually landed, so a blocked or absorbed hit
+      // feeds him nothing
+      const dealt = Math.max(before - q.hp, 0);
+      const caster = this.enemies.entities.find((n) => n.id === eid);
+      if (!caster || caster.hp <= 0 || dealt <= 0) return;
+      const healed = Math.min(dealt * b.leech, caster.maxHp - caster.hp);
+      if (healed <= 0) return;
+      caster.hp += healed;
+      this.emit({ t: 'drain', id: eid, x: rnd2(q.x), z: rnd2(q.z) });
+    }});
+  }
+
   // lobbed pumpkin: area damage on every character near the impact
   throwPumpkinAt(e, p, dist) {
     const pos = e.vehicle.position;
@@ -1590,10 +1630,11 @@ export class Sim {
 
       e.atkCd -= dt;
 
-      // ranged attackers (skeleton archers / the pumpkin boss) hold
-      // position and fire as long as any character is inside range —
+      // ranged attackers (skeleton archers, bone throwers, the pumpkin
+      // boss, anything casting blood magic) hold position and fire as
+      // long as any character is inside range —
       // shots pass through walls, same as the characters' attacks do
-      const ranged = e.archer || e.pumpkin;
+      const ranged = e.archer || e.pumpkin || e.blood;
       let engaged = false;
       if (ranged && alive.length && this.phase !== 'over') {
         const rng = ranged.range;
@@ -1614,6 +1655,8 @@ export class Sim {
             this.emit({ t: 'atk', id: e.id, tx: rnd2(aim.p.x), tz: rnd2(aim.p.z), r: 1 });
             if (e.pumpkin) {
               this.throwPumpkinAt(e, aim.p, aim.d);
+            } else if (e.blood) {
+              this.drainAt(e, aim.p, aim.d);
             } else if (e.archer.multishot) {
               for (const f of foes) this.shootArrowAt(e, f.p, f.d); // volley at everyone
             } else {

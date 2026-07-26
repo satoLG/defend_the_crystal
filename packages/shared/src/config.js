@@ -684,6 +684,13 @@ export const BOSSES = {
   sombra:   { kind: 'orc', name: 'Sombra do Herói',
               hpMult: 8, dmgMult: 2.5, mirrorsHero: true },
 };
+// Drácula's court: from his phase on, the vampires heralding him carry a
+// watered-down version of his blood magic — the same drain-and-heal, far
+// less of it. Before this wave a vampire is just a vampire.
+export const BLOOD_COURT = {
+  fromWave: 61, range: 6, rate: 0.35, dmg: 14, projSpeed: 10, leech: 0.35,
+};
+
 // waves 10, 20, 30 … 100 — one named boss each, then the cycle repeats
 export const BOSS_ORDER = [
   'coveiro',    //  10
