@@ -544,7 +544,10 @@ export const OBSTACLE_STOCK_CAP = 10;
 export const ENEMIES = {
   skeleton:   { name: 'Skeleton', hp: 40,  speed: 2.3, dmg: 8,  pts: 4,  xp: 7,  fromWave: 1, model: 'enemy-skeleton' },
   zombie:     { name: 'Zombie',   hp: 95,  speed: 1.5, dmg: 14, pts: 6,  xp: 11, fromWave: 2, model: 'enemy-zombie' },
-  ghost:      { name: 'Ghost',    hp: 33,  speed: 2.9, dmg: 6,  pts: 5,  xp: 9,  fromWave: 4, model: 'enemy-ghost', flying: true },
+  ghost:      { name: 'Ghost',    hp: 33,  speed: 2.9, dmg: 6,  pts: 5,  xp: 9,  fromWave: 4, model: 'enemy-ghost', flying: true, translucent: true },
+  bat:        { name: 'Bat',      hp: 45,  speed: 3.2, dmg: 7,  pts: 6,  xp: 10, fromWave: 3, model: 'enemy-bat', flying: true },
+  spider:     { name: 'Spider',   hp: 70,  speed: 2.7, dmg: 12, pts: 7,  xp: 12, fromWave: 7, model: 'enemy-spider' },
+  dragon:     { name: 'Dragon',   hp: 420, speed: 2.0, dmg: 36, pts: 20, xp: 40, fromWave: 12, model: 'enemy-dragon', flying: true },
   skelarcher: { name: 'Skeleton Archer', hp: 55, speed: 2.1, dmg: 11, pts: 8, xp: 13, fromWave: 5, model: 'enemy-skeleton',
                 archer: { range: 6.5, rate: 0.55, projSpeed: 13 } },
   orc:        { name: 'Orc',      hp: 190, speed: 1.9, dmg: 22, pts: 10, xp: 18, fromWave: 6, model: 'enemy-orc' },

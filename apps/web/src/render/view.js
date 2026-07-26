@@ -1301,9 +1301,12 @@ export class GameView {
     // measure the head height now (after scale) so overhead bits sit
     // right on top no matter the model's size
     const top = modelTop(a.group);
-    a.isGhost = !!def.flying;
+    // flying decides how it moves through the air; translucent is a
+    // look the ghost happens to wear — bats and dragons fly solid
+    a.isFlying = !!def.flying;
+    a.isTranslucent = !!def.translucent;
     a.isArcher = !!def.archer;
-    if (a.isGhost) {
+    if (a.isTranslucent) {
       for (const m of a.mats) { m.transparent = true; m.opacity = 0.8; }
     }
     if (a.isArcher) this.attachProps(a, ENEMY_PROPS.archer);
@@ -2195,9 +2198,9 @@ export class GameView {
       }
       a.group.position.x = x;
       a.group.position.z = z;
-      // ghosts hover; everything else stands on the terrain (training
+      // flyers hover; everything else stands on the terrain (training
       // dummies live down on the sunken sanctuary floor)
-      a.group.position.y = a.isGhost
+      a.group.position.y = a.isFlying
         ? 0.25 + Math.sin(this.time * 3 + id) * 0.12
         : terrainY(z);
       if (a.kind !== 'dummy') a.group.rotation.y = yaw;
@@ -2207,8 +2210,8 @@ export class GameView {
       const fade = Math.min(Math.max((z + HALF_H + 2) / 7, 0), 1);
       if (a.fade !== fade) {
         a.fade = fade;
-        const baseOp = a.isGhost ? 0.8 : 1;
-        const full = fade >= 1 && !a.isGhost;
+        const baseOp = a.isTranslucent ? 0.8 : 1;
+        const full = fade >= 1 && !a.isTranslucent;
         for (const m of a.mats) {
           m.transparent = !full;
           m.opacity = full ? 1 : baseOp * (0.05 + 0.95 * fade);

@@ -45,6 +45,12 @@ const MANIFEST = {
   'enemy-orc': M('enemies/orc.glb', { char: true }),
   'enemy-vampire': M('enemies/vampire.glb', { char: true }),
   'enemy-keeper': M('enemies/keeper.glb', { char: true }),
+  // beast enemies (Quaternius) — skinned rather than node-animated, and
+  // authored several units across, so they size by their own footprint
+  // instead of the humanoid { char } factor
+  'enemy-bat': M('enemies/bat.glb', { h: 1.0 }),
+  'enemy-spider': M('enemies/spider.glb', { fp: 1.5 }),
+  'enemy-dragon': M('enemies/dragon.glb', { fp: 2.0 }),
   // towers
   'tower-ballista': M('towers/ballista.glb', { tile: true }),
   'tower-cannon': M('towers/cannon.glb', { tile: true }),

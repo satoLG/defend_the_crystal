@@ -1,6 +1,6 @@
 # Asset Credits
 
-All 3D models in `public/models/` were created and distributed by
+Most 3D models in `public/models/` were created and distributed by
 **Kenney** — [www.kenney.nl](https://www.kenney.nl) — under the
 **Creative Commons Zero (CC0)** license:
 http://creativecommons.org/publicdomain/zero/1.0/
@@ -21,6 +21,26 @@ Models were taken from the following Kenney asset packs:
 CC0 means the content can be used for personal, educational and commercial
 purposes. Crediting Kenney is not required, but very much deserved —
 consider donating at https://www.kenney.nl/donate.
+
+The bat, spider and dragon enemies are by **Quaternius** —
+[quaternius.com](https://quaternius.com) — also released under **CC0**.
+Unlike the Kenney enemies (rigid parts moved by node transforms) these
+are skinned meshes carrying 23–39 bones each, so they cost noticeably
+more CPU per instance — worth remembering before flooding a wave with
+them.
+
+They ship as raw `FBX2glTF` output, which is roughly twice the size it
+needs to be: a second UV set with no texture to sample it, animation
+baked at one keyframe per frame, and unquantized float32 throughout.
+The copies in `public/models/enemies/` were reprocessed with
+[glTF Transform](https://gltf-transform.dev) —
+`prune → dedup → resample → weld → join → quantize` — which cuts them
+~45% (bat 226→125 KB, dragon 263→148 KB, spider 439→245 KB) without
+touching the geometry. Quantization uses `KHR_mesh_quantization`, which
+three.js reads natively, so no decoder is needed. Their animation clips
+were also renamed to the names the renderer looks up (`idle`, `walk`,
+`die`, `attack-melee-right`, …); `idle`/`sprint` are aliases that share
+the source clip's accessors, so the extra names cost no bytes.
 
 UI icons are from [Lucide](https://lucide.dev) (ISC license), inlined in
 `src/icons.js`. The class-selector glyphs (axe / shield / archer / wizard
