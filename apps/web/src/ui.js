@@ -1786,9 +1786,16 @@ export class UI {
     num.max = String(WAVES.CYCLE);
     range.addEventListener('input', () => this.setDevWave(+range.value));
     num.addEventListener('change', () => this.setDevWave(+num.value));
+    // arm/disarm as it is ticked, so the crystals and the level land
+    // while there is still time to look at them before the wave hits
+    const god = $('devwave-god');
+    god.addEventListener('change', () => {
+      this.cb.onAction({ t: 'devmode', on: god.checked });
+    });
     bindTap($('devwave-go'), () => {
       sfx.click();
       // park the target, then start — the sim applies it on the way in
+      this.cb.onAction({ t: 'devmode', on: god.checked });
       this.cb.onAction({ t: 'setwave', n: this.devWave });
       this.cb.onAction({ t: 'start' });
     });
@@ -1833,10 +1840,19 @@ export class UI {
 
     // testing wave picker — same window the server enforces: host only,
     // build phase, and only while no wave has run yet
-    $('devwave').classList.toggle(
-      'hidden',
-      !(this.devTools && this.isHost && snap.ph === 'build' && snap.w === 0),
-    );
+    const devOpen = !!(this.devTools && this.isHost && snap.ph === 'build' && snap.w === 0);
+    $('devwave').classList.toggle('hidden', !devOpen);
+    if (devOpen) {
+      // the box ships ticked but the sim boots with it off, so push the
+      // checkbox's state until the snapshot agrees — one round trip
+      const want = $('devwave-god').checked ? 1 : 0;
+      if ((snap.dv || 0) !== want && this._devSent !== want) {
+        this._devSent = want;
+        this.cb.onAction({ t: 'devmode', on: !!want });
+      } else if ((snap.dv || 0) === want) {
+        this._devSent = null;
+      }
+    }
 
     // start-wave button (lives in the top-right action slot)
     const btn = $('startwave-btn');

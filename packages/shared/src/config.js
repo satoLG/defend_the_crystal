@@ -684,6 +684,15 @@ export const BOSSES = {
   sombra:   { kind: 'orc', name: 'Sombra do Herói',
               hpMult: 8, dmgMult: 2.5, mirrorsHero: true },
 };
+// ---------- testing mode ----------
+// What the dev overlay hands out so a late wave can be reached and
+// watched instead of survived. Not reachable in a normal run: the server
+// only arms it for the room owner, before the first wave.
+export const DEV = {
+  POINTS: 999999,        // crystal pool, re-pinned every tick
+  OBSTACLES: 99,         // block stock, likewise
+};
+
 // Drácula's court: from his phase on, the vampires heralding him carry a
 // watered-down version of his blood magic — the same drain-and-heal, far
 // less of it. Before this wave a vampire is just a vampire.
