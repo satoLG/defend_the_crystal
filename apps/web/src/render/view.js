@@ -618,10 +618,20 @@ const ENEMY_PROPS = {
   archer: CLASS_PROPS.archer,
   // Zé do Caixão hauls his own coffin on his back
   coffin: [{ key: 'prop-coffin', bone: 'torso', pos: [0, -0.18, -0.16], rot: [-Math.PI / 2, 0, 0.12], scale: 0.7 }],
-  // Brutus marches in behind a great shield with a great axe raised
+  // Brutus marches in behind a great shield with a war hammer raised,
+  // both finished in max-upgrade crystal (tier 2)
   brutus: [
-    { ...WEAPON_PROPS.greataxe, tier: 0 },
-    { ...WEAPON_PROPS.greatshield, tier: 0 },
+    { ...WEAPON_PROPS.hammer, tier: 2 },
+    { ...WEAPON_PROPS.greatshield, tier: 2 },
+  ],
+  // every orc carries steel, and the rank shows in it: the plain green
+  // grunt gets a spear, the blue one a shield and axe, and the red one
+  // the same pairing forged in gold. Indexed by the enemy's VR code, so
+  // the stage-2/3 recolor and the loadout always agree.
+  orc: [
+    [{ ...WEAPON_PROPS.spear, tier: 0 }],
+    [{ ...WEAPON_PROPS.shield, tier: 0 }, { ...WEAPON_PROPS.axe, tier: 0 }],
+    [{ ...WEAPON_PROPS.shield, tier: 1 }, { ...WEAPON_PROPS.hammer, tier: 1 }],
   ],
 };
 
@@ -695,7 +705,10 @@ export class GameView {
     this.pets = new Map();      // ownerId -> companion pet trotting at their heels
     this.enemies = new Map();
     // enemy id -> named-boss variant, filled by the spawn event (the
-    // kind can't identify the boss once two of them share a body)
+    // kind can't identify the boss once two of them share a body).
+    // Safe to read in makeEnemy: the room emits a tick's events before
+    // its snapshot and socket.io keeps that order, so the variant is
+    // always here before the body shows up in a snapshot row.
     this.bossVariants = new Map();
     this.towers = new Map();
     this.obstacles = new Map();
@@ -1312,11 +1325,15 @@ export class GameView {
     if (a.isTranslucent) {
       for (const m of a.mats) { m.transparent = true; m.opacity = 0.8; }
     }
-    if (a.isArcher) this.attachProps(a, ENEMY_PROPS.archer);
+    const bossVariant = this.bossVariants.get(id);
+    // bone throwers are archers to the sim, but they lob by hand — no bow
+    if (a.isArcher && def.archer?.proj !== 'bone') this.attachProps(a, ENEMY_PROPS.archer);
     if (kind === 'keeper') this.attachProps(a, ENEMY_PROPS.keeper);
-    if (kind === 'vampire' && isBoss) this.attachProps(a, ENEMY_PROPS.coffin);
+    // the coffin belongs to Zé do Caixão, not to every vampire boss
+    if (bossVariant === 'zecaixao') this.attachProps(a, ENEMY_PROPS.coffin);
     const vr = row[EN.VR] || 0;
     if (vr === VR_BRUTUS) this.attachProps(a, ENEMY_PROPS.brutus);
+    else if (kind === 'orc') this.attachProps(a, ENEMY_PROPS.orc[vr] || ENEMY_PROPS.orc[0]);
     // stage-2/3 power looks: swap in the recolored hide — only the
     // matching atlas pixels (skin/bone/body) change, never the whole
     // model. Materials are per-actor clones, so this stays local.
@@ -1348,8 +1365,7 @@ export class GameView {
       // the boss announces itself: name floating over its head. Prefer
       // the variant the spawn event carried — the kind alone is
       // ambiguous once two bosses share a body.
-      const variant = this.bossVariants.get(id);
-      const bossLabel = variant ? bossName(variant) : bossNameByKind(kind);
+      const bossLabel = bossVariant ? bossName(bossVariant) : bossNameByKind(kind);
       const label = this.makeTextSprite(bossLabel.toUpperCase(), 0xffd24a, 2.1);
       label.position.y = (top + 0.62) / scale;
       a.group.add(label);
