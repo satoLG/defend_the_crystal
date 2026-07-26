@@ -542,6 +542,11 @@ input:focus { border-color: var(--gold); }
   font: inherit;
 }
 #devwave-go { flex: 1; border-width: 7px; font-size: 0.78rem; }
+.devwave-check {
+  display: flex; align-items: center; gap: 6px;
+  color: #c8cdd6; cursor: pointer; user-select: none;
+}
+.devwave-check input { accent-color: #b4462a; margin: 0; }
 .devwave-info { color: #9aa1ab; line-height: 1.35; min-height: 2.4em; }
 .devwave-info b { color: #e0b050; font-weight: 600; }
 #hud-action .btn {
