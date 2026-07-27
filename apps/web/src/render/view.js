@@ -1302,6 +1302,11 @@ export class GameView {
     a.labelTop = top;
     a.isSelf = isSelf;
     a.tint = tint;
+    // heroes carry status now too (the Black Widow's venom and webs), so
+    // they need the same bookkeeping enemies have had
+    a.statusMask = 0;
+    a.statusFx = {};
+    a.topLocal = top;
     // HP bar for everyone, but only shown once someone is hurt
     a.hpBar = this.makeHpBar(1.0, top + 0.3);
     a.hpBar.visible = false;
@@ -1644,6 +1649,9 @@ export class GameView {
   // (burn), rising bubbles (poison), orbiting stars (stun). Driven by
   // the snapshot's status bitmask so every client shows the same state.
   setStatusFx(a, mask) {
+    // an actor that never carried status has no bookkeeping yet — seed
+    // it rather than throwing every frame inside the render loop
+    if (!a.statusFx) { a.statusFx = {}; a.statusMask = -1; }
     if (a.statusMask === mask) return;
     const defs = [
       [ST_SLOW, 'slow'], [ST_BURN, 'burn'], [ST_POISON, 'poison'], [ST_STUN, 'stun'],
@@ -1686,10 +1694,12 @@ export class GameView {
     return g;
   }
 
-  // per-frame animation for every live status overlay
+  // per-frame animation for every live status overlay. Heroes are in
+  // here too now — the Black Widow marks them, so the glow and the
+  // particles have to tick on them the same as on enemies.
   animateStatusFx(dt) {
-    for (const a of this.enemies.values()) {
-      if (!a.statusMask && !a.tintWas) continue;
+    for (const a of [...this.enemies.values(), ...this.players.values()]) {
+      if (!a.statusFx || (!a.statusMask && !a.tintWas)) continue;
       for (const [key, g] of Object.entries(a.statusFx)) {
         if (key === 'slow') {
           const ring = g.children[0];
