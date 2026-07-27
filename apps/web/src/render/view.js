@@ -960,6 +960,54 @@ export class GameView {
     return spr;
   }
 
+  // Boss nameplate. Deliberately smaller and quieter than the wave
+  // banner — it sits over the boss's head for the whole fight, so it
+  // reads better as a caption than as a shout. A skull marks it apart
+  // from hero name tags.
+  //
+  // The canvas is measured to the text rather than fixed: the shared
+  // makeTextSprite() uses a 384px canvas and centred text, which silently
+  // clipped the longer names ("SOMBRA DO HERÓI" lost its last letters).
+  makeBossLabel(text) {
+    const ss = 2, H = 52, padX = 14, gap = 9;
+    const skull = '💀';
+    const font = 'bold 30px "Trebuchet MS", sans-serif';
+    const skullFont = '26px "Apple Color Emoji", "Segoe UI Emoji", sans-serif';
+    const meas = document.createElement('canvas').getContext('2d');
+    meas.font = font;
+    const textW = meas.measureText(text).width;
+    meas.font = skullFont;
+    const skullW = meas.measureText(skull).width;
+    const W = Math.ceil(textW + skullW + gap + padX * 2);
+
+    const canvas = document.createElement('canvas');
+    canvas.width = W * ss; canvas.height = H * ss;
+    const ctx = canvas.getContext('2d');
+    ctx.scale(ss, ss);
+    ctx.textBaseline = 'middle';
+
+    ctx.font = skullFont;
+    ctx.textAlign = 'left';
+    ctx.fillText(skull, padX, H / 2);
+
+    ctx.font = font;
+    ctx.lineWidth = 6;
+    ctx.strokeStyle = 'rgba(0,0,0,0.8)';
+    ctx.strokeText(text, padX + skullW + gap, H / 2);
+    ctx.fillStyle = '#ffd24a';
+    ctx.fillText(text, padX + skullW + gap, H / 2);
+
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    const spr = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthWrite: false }));
+    const worldW = W * 0.0055;
+    spr.scale.set(worldW, worldW * H / W, 1);
+    spr.renderOrder = 12;
+    // half-height, so callers can seat it clear of whatever is below
+    spr.userData.halfH = worldW * H / W / 2;
+    return spr;
+  }
+
   makeTextSprite(text, tint, width = 3.1) {
     const canvas = document.createElement('canvas');
     canvas.width = 384; canvas.height = 84;
@@ -1361,16 +1409,19 @@ export class GameView {
       crown.position.y = (top + 0.2) / scale; // constant world margin
       a.group.add(crown);
     }
+    // the HP bar sits just over the head; the boss nameplate is stacked
+    // clear above it, by its own measured height, so the two can never
+    // overlap however long the name is
+    const barY = (top + 0.25) / scale;
     if (isBoss) {
-      // the boss announces itself: name floating over its head. Prefer
-      // the variant the spawn event carried — the kind alone is
+      // Prefer the variant the spawn event carried — the kind alone is
       // ambiguous once two bosses share a body.
       const bossLabel = bossVariant ? bossName(bossVariant) : bossNameByKind(kind);
-      const label = this.makeTextSprite(bossLabel.toUpperCase(), 0xffd24a, 2.1);
-      label.position.y = (top + 0.62) / scale;
+      const label = this.makeBossLabel(bossLabel.toUpperCase());
+      label.position.y = barY + (0.18 + label.userData.halfH) / scale;
       a.group.add(label);
     }
-    a.hpBar = this.makeHpBar(row[EN.BOSS] ? 1.3 : 0.85, (top + 0.25) / scale);
+    a.hpBar = this.makeHpBar(row[EN.BOSS] ? 1.3 : 0.85, barY);
     a.hpBar.visible = false;
     a.group.add(a.hpBar);
     a.statusMask = 0;
@@ -2470,6 +2521,8 @@ export class GameView {
         this.spawnZap(ev.x1, ev.z1, ev.x2, ev.z2);
         break;
       }
+      case 'web': this.spawnWeb(ev.x, ev.z, ev.r, ev.dur); break;
+      case 'breath': this.spawnBreath(ev); break;
       case 'flame': {
         // flamethrower jet: a fan of embers washing toward the target
         this.spawnFlameJet(ev.x, ev.z, ev.tx, ev.tz, ev.v === 1);
@@ -2753,12 +2806,26 @@ export class GameView {
       // no bone model in the kits — a stubby bone-white arrow tumbling
       // through a lob reads as a thrown bone well enough
       bone: 'ammo-arrow',
+      // the Black Widow's venom sac: a boulder, shrunk and dyed
+      venom: 'ammo-boulder',
     }[ev.k] || 'ammo-arrow';
     const tintBone = ev.k === 'bone';
+    const tintVenom = ev.k === 'venom';
     const mesh = instantiate(key, {
       shadows: false,
-      cloneMaterials: tintBone || (ev.k === 'arrow' && ev.wt > 0),
+      cloneMaterials: tintBone || tintVenom || (ev.k === 'arrow' && ev.wt > 0),
     }).group;
+    if (tintVenom) {
+      mesh.scale.setScalar(0.5);
+      mesh.traverse((o) => {
+        if (!o.isMesh || !o.material) return;
+        o.material.color.set(0x5ad24a);
+        if (o.material.emissive) {
+          o.material.emissive.set(0x1f5a18);
+          o.material.emissiveIntensity = 0.6;
+        }
+      });
+    }
     if (ev.k === 'boulder') mesh.scale.setScalar(1.5);
     if (ev.k === 'arrow') mesh.scale.setScalar(0.55);
     if (ev.k === 'pumpkin') mesh.scale.setScalar(1.6);
@@ -2800,7 +2867,7 @@ export class GameView {
   spawnAoe(ev) {
     let color = {
       mage: 0xc07dff, cannonball: 0xffa040, boulder: 0xcfa070, pumpkin: 0xff8c1a,
-      crystal: 0x8fd0ff, ice: 0x66c8ff, storm: 0xffe066,
+      crystal: 0x8fd0ff, ice: 0x66c8ff, storm: 0xffe066, venom: 0x5ad24a,
     }[ev.k] || 0xffffff;
     if (ev.k === 'mage') color = tierEffectColor(color, ev.wt); // gold/crystal blast
     if (ev.ft > 0) {
@@ -2868,6 +2935,50 @@ export class GameView {
     this.effects.push({
       mesh: g, t: 0, dur: 0.55, type: 'flamejet',
       x, z, tx, tz, parts,
+    });
+  }
+
+  // the Black Widow's web: a patch on the ground that bogs down whoever
+  // stands in it, fading out as the sim's timer runs down
+  spawnWeb(x, z, r, dur) {
+    const g = new THREE.Group();
+    const web = instantiate('prop-cobweb', { shadows: false, cloneMaterials: true }).group;
+    // the model normalizes to a 1-unit footprint, so this is the radius
+    web.scale.setScalar(r * 2);
+    web.traverse((o) => {
+      if (!o.isMesh || !o.material) return;
+      o.material.transparent = true;
+      o.material.opacity = 0.85;
+      o.material.depthWrite = false;
+      o.material.color.set(0xd8dde6);
+    });
+    g.add(web);
+    g.position.set(x, terrainY(z) + 0.05, z);
+    this.scene.add(g);
+    this.effects.push({ mesh: g, t: 0, dur: dur || 6, type: 'web' });
+  }
+
+  // the dragon's breath: the flamethrower's plume, thrown from a mouth
+  // held high and washing down over the cone in front of it
+  spawnBreath(ev) {
+    const g = new THREE.Group();
+    const parts = [];
+    for (let i = 0; i < 26; i++) {
+      const spr = new THREE.Sprite(this._statusMats.burn);
+      spr.scale.setScalar(0.3);
+      g.add(spr);
+      parts.push({
+        spr,
+        k: Math.random(),
+        // spread across the cone, and a little across its width
+        side: (Math.random() - 0.5) * 2 * ev.arc,
+        speed: 0.6 + Math.random() * 0.8,
+      });
+    }
+    this.scene.add(g);
+    this.effects.push({
+      mesh: g, t: 0, dur: ev.dur || 2.6, type: 'breath',
+      x: ev.x, z: ev.z, yaw: ev.yaw, r: ev.r, parts,
     });
   }
 
@@ -3142,6 +3253,28 @@ export class GameView {
           );
           p.spr.scale.setScalar(0.13 + kk * 0.3);
         }
+      } else if (e.type === 'breath') {
+        // the plume pours out of the mouth and washes down the cone,
+        // each ember riding its own line out to the reach
+        for (const p of e.parts) {
+          const kk = (k * p.speed + p.k) % 1;
+          const ang = e.yaw + p.side;
+          const rad = kk * e.r;
+          p.spr.position.set(
+            e.x + Math.sin(ang) * rad,
+            // starts up at the mouth, falls as it spreads out
+            2.6 - kk * 2.1,
+            e.z + Math.cos(ang) * rad
+          );
+          p.spr.scale.setScalar(0.25 + kk * 0.55);
+          p.spr.material = this._statusMats.burn;
+        }
+      } else if (e.type === 'web') {
+        // holds solid, then thins out as the patch expires
+        const fade = k > 0.7 ? 1 - (k - 0.7) / 0.3 : 1;
+        e.mesh.traverse((o) => {
+          if (o.isMesh && o.material) o.material.opacity = 0.85 * fade;
+        });
       } else if (e.type === 'gfire') {
         // flames flicker on the burning ground, fading near the end
         const fade = k > 0.75 ? 1 - (k - 0.75) / 0.25 : 1;

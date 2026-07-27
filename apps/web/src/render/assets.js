@@ -84,6 +84,9 @@ const MANIFEST = {
   'prop-pumpkin': M('props/pumpkin.glb', { h: 0.55 }),
   'prop-shovel': M('props/shovel.glb', { raw: true }),
   'prop-coffin': M('props/coffin.glb', { raw: true }),
+  // the Black Widow's web patches — laid flat on the ground, sized to
+  // the patch radius at spawn time
+  'prop-cobweb': M('props/cobweb.glb', { fp: 1.0 }),
   // obstacles — big and chunky so they read as impassable
   'obstacle-barrel': M('obstacles/barrel.glb', { fp: 1.6 }),
   'obstacle-rocks': M('env/rocks-tall.glb', { h: 1.5 }),
