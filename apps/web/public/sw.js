@@ -18,7 +18,7 @@
  * old store on activate.
  * ============================================================ */
 
-const CACHE = 'dtc-cache-v2';
+const CACHE = 'dtc-cache-v3';
 
 // the minimal shell pre-cached on install so the very first
 // offline launch has something to boot from
@@ -66,6 +66,27 @@ self.addEventListener('fetch', (event) => {
           return res;
         })
         .catch(() => caches.match(request).then((hit) => hit || caches.match('./index.html'))),
+    );
+    return;
+  }
+
+  // Models are the one asset class the build does NOT hash: a .glb keeps
+  // its filename forever, so stale-while-revalidate hands back the old
+  // copy and only picks up a changed model on the load AFTER the one
+  // that fetched it. That silently shipped a stale rig — a re-exported
+  // dragon kept playing its previous attack clip for a whole session.
+  // Network-first keeps them honest, with the cache still there offline.
+  if (url.pathname.endsWith('.glb')) {
+    event.respondWith(
+      fetch(request)
+        .then((res) => {
+          if (res && res.ok && res.type === 'basic') {
+            const copy = res.clone();
+            caches.open(CACHE).then((cache) => cache.put(request, copy)).catch(() => {});
+          }
+          return res;
+        })
+        .catch(() => caches.match(request)),
     );
     return;
   }

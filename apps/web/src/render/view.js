@@ -1548,19 +1548,25 @@ export class GameView {
       crown.position.y = (top + 0.2) / scale; // constant world margin
       a.group.add(crown);
     }
-    // the HP bar sits just over the head; the boss nameplate is stacked
-    // clear above it, by its own measured height, so the two can never
-    // overlap however long the name is
+    // The HP bar sits just over the head and the nameplate is stacked
+    // clear above it. Both are parented to the actor group, which the
+    // boss scale has already blown up — the Viúva Negra runs at 6× — so
+    // they get that scale divided back out and render at a constant
+    // world size. Without this a big boss wore a banner half the board
+    // wide, sitting right across its own health bar.
     const barY = (top + 0.25) / scale;
+    const inv = 1 / scale;
     if (isBoss) {
       // Prefer the variant the spawn event carried — the kind alone is
       // ambiguous once two bosses share a body.
       const bossLabel = bossVariant ? bossName(bossVariant) : bossNameByKind(kind);
       const label = this.makeBossLabel(bossLabel.toUpperCase());
-      label.position.y = barY + (0.18 + label.userData.halfH) / scale;
+      label.scale.multiplyScalar(inv);
+      label.position.y = barY + (0.18 + label.userData.halfH) * inv;
       a.group.add(label);
     }
     a.hpBar = this.makeHpBar(row[EN.BOSS] ? 1.3 : 0.85, barY);
+    a.hpBar.scale.setScalar(inv);
     a.hpBar.visible = false;
     a.group.add(a.hpBar);
     a.statusMask = 0;
