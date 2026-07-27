@@ -65,8 +65,12 @@ export function buildWavePlan(wave, playerCount, classes = []) {
   return plan;
 }
 
-// spread a list of {kind, n, tier} entries over the spawn window
-function spread(entries, window, playerCount, from = 0.5) {
+// Expand a list of {kind, n, tier} entries into spawns. A boss wave is
+// a set piece, not a trickle: the whole escort walks in together in the
+// first moments and the boss is right behind it, rather than the party
+// standing around while a queue drains. `spanned` keeps a little
+// stagger so they don't all materialise on the same frame.
+function spread(entries, playerCount, spanned = BOSS_ESCORT_SPAN, from = 0.4) {
   const out = [];
   const scale = scaleFor(SCALING.enemyCount, playerCount);
   for (const e of entries) {
@@ -74,10 +78,13 @@ function spread(entries, window, playerCount, from = 0.5) {
     for (let i = 0; i < n; i++) out.push({ ...e, n: undefined, kind: e.kind, boss: 0, tier: e.tier || 1 });
   }
   out.forEach((s, i) => {
-    s.at = from + (window * i) / Math.max(out.length, 1) + Math.random() * 0.4;
+    s.at = from + (spanned * i) / Math.max(out.length, 1) + Math.random() * 0.25;
   });
   return out;
 }
+
+// seconds the whole escort of a boss wave takes to walk in
+const BOSS_ESCORT_SPAN = 3;
 
 // an ordinary wave: the phase's mix, rolled per spawn, with the stage-2
 // and stage-3 giants trickling in as the arc goes on
@@ -112,9 +119,12 @@ function subBossWave(cw, playerCount, window) {
   const squad = SUBBOSSES[cw] || [];
   const escort = SUBBOSS_ESCORT[cw]
     || squad.map((s) => ({ kind: s.kind, n: SUBBOSS_ESCORT_COUNT / squad.length }));
-  const plan = spread(escort, window, playerCount);
+  // sub-bosses keep some of the wave's pacing — they are a step up, not
+  // a set piece — but nothing like the old drip
+  const plan = spread(escort, playerCount, Math.min(window * 0.5, 8));
+  const last = plan.reduce((m, s) => Math.max(m, s.at), 0);
   squad.forEach((s, i) => {
-    plan.push({ ...s, at: window * 0.6 + i * 1.2, boss: 1 });
+    plan.push({ ...s, at: last + 0.8 + i * 0.9, boss: 1 });
   });
   return plan;
 }
@@ -146,20 +156,25 @@ function bossWave(cw, playerCount, window, classes) {
     return hordePlan;
   }
 
-  const plan = spread(def.escort || [], window, playerCount);
+  const plan = spread(def.escort || [], playerCount);
 
   // the Sombra's escort is built from who is actually playing: one
   // small shade wearing each class in the party
   if (def.shades) {
     const seen = [...new Set(classes)];
+    let i = 0;
     for (const cls of seen) {
-      for (let i = 0; i < def.shades.n; i++) {
-        plan.push({ kind: def.kind, boss: 0, variant, shade: cls, at: window * 0.5 + i * 0.8 });
+      for (let k = 0; k < def.shades.n; k++, i++) {
+        plan.push({ kind: def.kind, boss: 0, variant, shade: cls, at: 0.4 + i * 0.5 });
       }
     }
   }
 
-  plan.push({ kind: def.kind, at: window * 0.7, boss: 2, variant });
+  // the boss follows its escort in, and when it comes alone it is on
+  // the field almost as soon as the wave starts — there is nothing to
+  // wait for
+  const last = plan.reduce((m, s) => Math.max(m, s.at), 0);
+  plan.push({ kind: def.kind, at: (plan.length ? last : 0) + 0.6, boss: 2, variant });
   return plan;
 }
 
