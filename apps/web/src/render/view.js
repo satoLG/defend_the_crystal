@@ -23,7 +23,7 @@ const EN = { ID: 0, KIND: 1, X: 2, Z: 3, YAW: 4, HP: 5, MHP: 6, SCALE: 7, BOSS: 
 // EN.ST status bitmask (mirrors buildSnapshot): slow|burn|poison|stun
 const ST_SLOW = 1, ST_BURN = 2, ST_POISON = 4, ST_STUN = 8;
 // EN.VR visual variants: stage-2 / stage-3 power looks, Brutus props
-const VR_T2 = 1, VR_T3 = 2, VR_BRUTUS = 3;
+const VR_T2 = 1, VR_T3 = 2, VR_BRUTUS = 3, VR_BLOOD = 4;
 
 // ---- enemy power-stage looks --------------------------------------
 // Stage-2/3 enemies swap in a recolored atlas where ONLY the matching
@@ -166,7 +166,85 @@ const MOUNTS = {
   // the original bow mount rather than the tuned longbow one
   crossbow: { bone: 'arm-right', pos: [0.02, -0.155, 0.255], rot: [-2.78, 0.23, -1] },
   staff: { bone: 'arm-right', pos: [-0.225, 0.29, 0.175], rot: [0, 0.35, 3.142] },
+  // the vampires cast off orbs held out to either side
+  orbRight: { bone: 'arm-right', pos: [-0.225, 0.06, 0.14], rot: [0, 0, 0] },
+  orbLeft: { bone: 'arm-left', pos: [0.225, 0.06, 0.14], rot: [0, 0, 0] },
 };
+
+// blood magic's palette — the mage's orb, bled red
+const BLOOD_ORB = { core: 0xff4a5a, glow: 0xa50f1e, halo: 0xd01530, mote: 0xffb0b8 };
+
+// ---- per-part body tints -----------------------------------------
+// The Kenney enemies are six separately named meshes (torso, head,
+// arm-*, leg-*) sharing ONE colormap atlas, so a look can be dialled in
+// per body part by tinting each mesh's own material clone. Eyes are
+// geometry rather than an atlas edit: the atlas is shared with every
+// other graveyard enemy, so recolouring a swatch there would follow the
+// zombies and skeletons around too.
+export const BODY_PARTS = ['head', 'torso', 'arm-right', 'arm-left', 'leg-right', 'leg-left'];
+
+// Drácula: bloodless skin gone red, with yellow eyes. Tuned live through
+// the dev overlay (`?dev=1` -> Drácula), which writes this same shape.
+export const DRACULA_LOOK = {
+  head: 0xb03a3a, torso: 0x8e1b1b, 'arm-right': 0xb03a3a, 'arm-left': 0xb03a3a,
+  'leg-right': 0x6d1414, 'leg-left': 0x6d1414,
+  eyes: 0xffd21e, eyeSize: 0.04,
+};
+// his court wears the same skin, without the eyes
+export const BLOOD_VAMPIRE_LOOK = {
+  head: 0xa54242, torso: 0x8e3030, 'arm-right': 0xa54242, 'arm-left': 0xa54242,
+  'leg-right': 0x7a2020, 'leg-left': 0x7a2020,
+};
+
+// The dev overlay stores a work-in-progress look here so it survives a
+// reload while it is being dialled in. Once it looks right, paste the
+// values into DRACULA_LOOK above and the storage entry stops mattering.
+const DRACULA_LOOK_KEY = 'dtc-dracula-look';
+
+export function loadDraculaLook() {
+  try {
+    const raw = localStorage.getItem(DRACULA_LOOK_KEY);
+    if (raw) return { ...DRACULA_LOOK, ...JSON.parse(raw) };
+  } catch { /* fall through to the built-in look */ }
+  return DRACULA_LOOK;
+}
+
+export function saveDraculaLook(look) {
+  try { localStorage.setItem(DRACULA_LOOK_KEY, JSON.stringify(look)); } catch { /* private mode */ }
+}
+
+export function applyBodyTint(group, look) {
+  if (!look) return;
+  for (const part of BODY_PARTS) {
+    const hex = look[part];
+    if (hex == null) continue;
+    const node = group.getObjectByName(part);
+    if (!node) continue;
+    node.traverse((o) => {
+      if (!o.isMesh && !o.isSkinnedMesh) return;
+      const mats = Array.isArray(o.material) ? o.material : [o.material];
+      for (const m of mats) {
+        if (!m?.color) continue;
+        // multiply, so the atlas shading survives instead of going flat
+        m.color.setHex(hex);
+        m.needsUpdate = true;
+      }
+    });
+  }
+  if (look.eyes == null) return;
+  const head = group.getObjectByName('head');
+  if (!head || head.userData.hasEyes) return;
+  head.userData.hasEyes = true;
+  const r = look.eyeSize || 0.04;
+  const mat = new THREE.MeshBasicMaterial({ color: look.eyes, toneMapped: false });
+  const geo = new THREE.SphereGeometry(r, 8, 6);
+  for (const dx of [-0.085, 0.085]) {
+    const eye = new THREE.Mesh(geo, mat);
+    eye.position.set(dx, 0.12, 0.2);
+    eye.renderOrder = 3;
+    head.add(eye);
+  }
+}
 
 // one prop spec per purchasable weapon (see WEAPONS in config.js).
 // tierMode decides how the gold/crystal upgrade finish is painted on:
@@ -354,12 +432,15 @@ export function makeWand() {
 }
 
 // a floating arcane sphere wreathed in a glowing halo + orbiting motes
-export function makeOrbProp() {
+// `pal` recolours the whole orb — the vampires carry the mage's orb in
+// blood red rather than arcane purple
+export function makeOrbProp(pal = null) {
+  const p = pal || { core: 0xb488ff, glow: 0x7a2be2, halo: 0xa050ff, mote: 0xe6c4ff };
   const holder = new THREE.Group();
   const core = new THREE.Mesh(
     new THREE.SphereGeometry(0.085, 16, 16),
     new THREE.MeshStandardMaterial({
-      color: 0xb488ff, emissive: 0x7a2be2, emissiveIntensity: 0.9,
+      color: p.core, emissive: p.glow, emissiveIntensity: 0.9,
       roughness: 0.25, metalness: 0.1,
     })
   );
@@ -368,12 +449,12 @@ export function makeOrbProp() {
   const halo = new THREE.Mesh(
     new THREE.SphereGeometry(0.13, 12, 12),
     new THREE.MeshBasicMaterial({
-      color: 0xa050ff, transparent: true, opacity: 0.3,
+      color: p.halo, transparent: true, opacity: 0.3,
       blending: THREE.AdditiveBlending, depthWrite: false,
     })
   );
   holder.add(halo);
-  const moteMat = new THREE.MeshBasicMaterial({ color: 0xe6c4ff, toneMapped: false });
+  const moteMat = new THREE.MeshBasicMaterial({ color: p.mote, toneMapped: false });
   for (let i = 0; i < 3; i++) {
     const mote = new THREE.Mesh(new THREE.SphereGeometry(0.016, 6, 6), moteMat);
     const a = (i / 3) * Math.PI * 2;
@@ -609,7 +690,7 @@ for (const b of Object.values(BOSSES)) BOSS_BY_KIND[b.kind] = b;
 
 // graveyard-kit props are authored in the same mini scale as the
 // character hand props, so they attach straight onto the bones
-const ENEMY_PROPS = {
+export const ENEMY_PROPS = {
   // the gravedigger grips his shovel exactly like the berserker holds his
   // axe (same bone-relative pos/rot); he's just scaled up as a whole, so
   // the relative placement carries straight over
@@ -632,6 +713,15 @@ const ENEMY_PROPS = {
     [{ ...WEAPON_PROPS.spear, tier: 0 }],
     [{ ...WEAPON_PROPS.shield, tier: 0 }, { ...WEAPON_PROPS.axe, tier: 0 }],
     [{ ...WEAPON_PROPS.shield, tier: 1 }, { ...WEAPON_PROPS.hammer, tier: 1 }],
+  ],
+  // blood magic is cast off the mage's orb, in red. Drácula holds one in
+  // each hand; the vampires of his court manage a single one.
+  dracula: [
+    { gen: () => makeOrbProp(BLOOD_ORB), ...MOUNTS.orbRight, scale: 1, tier: 0 },
+    { gen: () => makeOrbProp(BLOOD_ORB), ...MOUNTS.orbLeft, scale: 1, tier: 0 },
+  ],
+  bloodVampire: [
+    { gen: () => makeOrbProp(BLOOD_ORB), ...MOUNTS.orbRight, scale: 1, tier: 0 },
   ],
 };
 
@@ -710,6 +800,9 @@ export class GameView {
     // its snapshot and socket.io keeps that order, so the variant is
     // always here before the body shows up in a snapshot row.
     this.bossVariants = new Map();
+    // enemy id -> { cls, weapon, shield } for the Sombra and its shades,
+    // which wear a hero's body instead of their own kind's
+    this.mirrors = new Map();
     this.towers = new Map();
     this.obstacles = new Map();
     this.graves = new Map();    // gravedigger tombs, id -> {group, riseT}
@@ -957,6 +1050,89 @@ export class GameView {
     const worldW = W * 0.0065;
     spr.scale.set(worldW, worldW * H / W, 1);
     spr.renderOrder = 11;
+    return spr;
+  }
+
+  // Paint a mirrored hero into its shadow: the body goes to black,
+  // keeping only enough shading to read as a silhouette, and two red
+  // eyes are added. The eyes are geometry rather than a texture edit
+  // because the Kenney heroes share one colormap atlas — recolouring
+  // the eye swatch there would darken every other hero wearing it.
+  dressShadow(a, mirror) {
+    // whatever that hero actually carries, shadowed the same way
+    this.attachProps(a, loadoutProps(mirror.cls, mirror.weapon, mirror.shield));
+    a.group.traverse((o) => {
+      if (!o.isMesh && !o.isSkinnedMesh) return;
+      const mats = Array.isArray(o.material) ? o.material : [o.material];
+      for (const m of mats) {
+        if (!m) continue;
+        if (m.map) m.map = null; // drop the atlas, or it fights the black
+        m.color?.setHex(0x0a0a0f);
+        m.emissive?.setHex(0x120008);
+        if ('emissiveIntensity' in m) m.emissiveIntensity = 0.35;
+        if ('metalness' in m) m.metalness = 0.1;
+        if ('roughness' in m) m.roughness = 0.85;
+        m.needsUpdate = true;
+      }
+    });
+    // eyes, seated on the head bone when there is one so they track the
+    // animation instead of floating in front of the face
+    const head = a.group.getObjectByName('head') || a.group;
+    const eyeMat = new THREE.MeshBasicMaterial({ color: 0xff2020 });
+    const eyeGeo = new THREE.SphereGeometry(0.035, 8, 6);
+    for (const dx of [-0.075, 0.075]) {
+      const eye = new THREE.Mesh(eyeGeo, eyeMat);
+      eye.position.set(dx, head === a.group ? 1.15 : 0.1, 0.17);
+      eye.renderOrder = 3;
+      head.add(eye);
+    }
+  }
+
+  // Boss nameplate. Deliberately smaller and quieter than the wave
+  // banner — it sits over the boss's head for the whole fight, so it
+  // reads better as a caption than as a shout. A skull marks it apart
+  // from hero name tags.
+  //
+  // The canvas is measured to the text rather than fixed: the shared
+  // makeTextSprite() uses a 384px canvas and centred text, which silently
+  // clipped the longer names ("SOMBRA DO HERÓI" lost its last letters).
+  makeBossLabel(text) {
+    const ss = 2, H = 52, padX = 14, gap = 9;
+    const skull = '💀';
+    const font = 'bold 30px "Trebuchet MS", sans-serif';
+    const skullFont = '26px "Apple Color Emoji", "Segoe UI Emoji", sans-serif';
+    const meas = document.createElement('canvas').getContext('2d');
+    meas.font = font;
+    const textW = meas.measureText(text).width;
+    meas.font = skullFont;
+    const skullW = meas.measureText(skull).width;
+    const W = Math.ceil(textW + skullW + gap + padX * 2);
+
+    const canvas = document.createElement('canvas');
+    canvas.width = W * ss; canvas.height = H * ss;
+    const ctx = canvas.getContext('2d');
+    ctx.scale(ss, ss);
+    ctx.textBaseline = 'middle';
+
+    ctx.font = skullFont;
+    ctx.textAlign = 'left';
+    ctx.fillText(skull, padX, H / 2);
+
+    ctx.font = font;
+    ctx.lineWidth = 6;
+    ctx.strokeStyle = 'rgba(0,0,0,0.8)';
+    ctx.strokeText(text, padX + skullW + gap, H / 2);
+    ctx.fillStyle = '#ffd24a';
+    ctx.fillText(text, padX + skullW + gap, H / 2);
+
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    const spr = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthWrite: false }));
+    const worldW = W * 0.0055;
+    spr.scale.set(worldW, worldW * H / W, 1);
+    spr.renderOrder = 12;
+    // half-height, so callers can seat it clear of whatever is below
+    spr.userData.halfH = worldW * H / W / 2;
     return spr;
   }
 
@@ -1310,7 +1486,9 @@ export class GameView {
     }
     const def = ENEMIES[kind] || {};
     const isBoss = row[EN.BOSS] === 2;
-    a = this.makeAnimated(def.model || `enemy-${kind}`);
+    // the Sombra and its shades wear a hero's body, not their kind's
+    const mirror = this.mirrors.get(id);
+    a = this.makeAnimated(mirror ? CLASSES[mirror.cls].model : (def.model || `enemy-${kind}`));
     a.kind = kind;
     const scale = row[EN.SCALE] || 1;
     a.group.scale.setScalar(scale);
@@ -1326,14 +1504,23 @@ export class GameView {
       for (const m of a.mats) { m.transparent = true; m.opacity = 0.8; }
     }
     const bossVariant = this.bossVariants.get(id);
+    if (mirror) this.dressShadow(a, mirror);
     // bone throwers are archers to the sim, but they lob by hand — no bow
-    if (a.isArcher && def.archer?.proj !== 'bone') this.attachProps(a, ENEMY_PROPS.archer);
+    else if (a.isArcher && def.archer?.proj !== 'bone') this.attachProps(a, ENEMY_PROPS.archer);
     if (kind === 'keeper') this.attachProps(a, ENEMY_PROPS.keeper);
     // the coffin belongs to Zé do Caixão, not to every vampire boss
     if (bossVariant === 'zecaixao') this.attachProps(a, ENEMY_PROPS.coffin);
     const vr = row[EN.VR] || 0;
     if (vr === VR_BRUTUS) this.attachProps(a, ENEMY_PROPS.brutus);
-    else if (kind === 'orc') this.attachProps(a, ENEMY_PROPS.orc[vr] || ENEMY_PROPS.orc[0]);
+    else if (kind === 'orc' && !mirror) this.attachProps(a, ENEMY_PROPS.orc[vr] || ENEMY_PROPS.orc[0]);
+    // blood casters carry the orb: Drácula one per hand, his court one
+    if (bossVariant === 'dracula') {
+      this.attachProps(a, ENEMY_PROPS.dracula);
+      applyBodyTint(a.group, loadDraculaLook());
+    } else if (kind === 'vampire' && vr === VR_BLOOD) {
+      this.attachProps(a, ENEMY_PROPS.bloodVampire);
+      applyBodyTint(a.group, BLOOD_VAMPIRE_LOOK);
+    }
     // stage-2/3 power looks: swap in the recolored hide — only the
     // matching atlas pixels (skin/bone/body) change, never the whole
     // model. Materials are per-actor clones, so this stays local.
@@ -1361,16 +1548,19 @@ export class GameView {
       crown.position.y = (top + 0.2) / scale; // constant world margin
       a.group.add(crown);
     }
+    // the HP bar sits just over the head; the boss nameplate is stacked
+    // clear above it, by its own measured height, so the two can never
+    // overlap however long the name is
+    const barY = (top + 0.25) / scale;
     if (isBoss) {
-      // the boss announces itself: name floating over its head. Prefer
-      // the variant the spawn event carried — the kind alone is
+      // Prefer the variant the spawn event carried — the kind alone is
       // ambiguous once two bosses share a body.
       const bossLabel = bossVariant ? bossName(bossVariant) : bossNameByKind(kind);
-      const label = this.makeTextSprite(bossLabel.toUpperCase(), 0xffd24a, 2.1);
-      label.position.y = (top + 0.62) / scale;
+      const label = this.makeBossLabel(bossLabel.toUpperCase());
+      label.position.y = barY + (0.18 + label.userData.halfH) / scale;
       a.group.add(label);
     }
-    a.hpBar = this.makeHpBar(row[EN.BOSS] ? 1.3 : 0.85, (top + 0.25) / scale);
+    a.hpBar = this.makeHpBar(row[EN.BOSS] ? 1.3 : 0.85, barY);
     a.hpBar.visible = false;
     a.group.add(a.hpBar);
     a.statusMask = 0;
@@ -2250,6 +2440,7 @@ export class GameView {
         this.scene.remove(a.group);
         this.enemies.delete(id);
         this.bossVariants.delete(id);
+        this.mirrors.delete(id);
       }
     }
     // the static yard dummies stand in whenever no live (attackable)
@@ -2392,6 +2583,7 @@ export class GameView {
         if (a) {
           this.enemies.delete(ev.id);
           this.bossVariants.delete(ev.id);
+        this.mirrors.delete(ev.id);
           this.spawnCorpse(a);
         }
         break;
@@ -2470,6 +2662,8 @@ export class GameView {
         this.spawnZap(ev.x1, ev.z1, ev.x2, ev.z2);
         break;
       }
+      case 'web': this.spawnWeb(ev.x, ev.z, ev.r, ev.dur); break;
+      case 'breath': this.spawnBreath(ev); break;
       case 'flame': {
         // flamethrower jet: a fan of embers washing toward the target
         this.spawnFlameJet(ev.x, ev.z, ev.tx, ev.tz, ev.v === 1);
@@ -2490,6 +2684,8 @@ export class GameView {
         if (ev.g) this.burst(ev.x, ev.z, 1.0, 0x9a4ae0);
         // remember which named boss this body is, for the overhead label
         if (ev.variant) this.bossVariants.set(ev.id, ev.variant);
+        // …and which hero it is a shadow of, so it renders as that hero
+        if (ev.mirror) this.mirrors.set(ev.id, ev.mirror);
         break;
       }
       case 'ejump': {
@@ -2753,12 +2949,26 @@ export class GameView {
       // no bone model in the kits — a stubby bone-white arrow tumbling
       // through a lob reads as a thrown bone well enough
       bone: 'ammo-arrow',
+      // the Black Widow's venom sac: a boulder, shrunk and dyed
+      venom: 'ammo-boulder',
     }[ev.k] || 'ammo-arrow';
     const tintBone = ev.k === 'bone';
+    const tintVenom = ev.k === 'venom';
     const mesh = instantiate(key, {
       shadows: false,
-      cloneMaterials: tintBone || (ev.k === 'arrow' && ev.wt > 0),
+      cloneMaterials: tintBone || tintVenom || (ev.k === 'arrow' && ev.wt > 0),
     }).group;
+    if (tintVenom) {
+      mesh.scale.setScalar(0.5);
+      mesh.traverse((o) => {
+        if (!o.isMesh || !o.material) return;
+        o.material.color.set(0x5ad24a);
+        if (o.material.emissive) {
+          o.material.emissive.set(0x1f5a18);
+          o.material.emissiveIntensity = 0.6;
+        }
+      });
+    }
     if (ev.k === 'boulder') mesh.scale.setScalar(1.5);
     if (ev.k === 'arrow') mesh.scale.setScalar(0.55);
     if (ev.k === 'pumpkin') mesh.scale.setScalar(1.6);
@@ -2800,7 +3010,7 @@ export class GameView {
   spawnAoe(ev) {
     let color = {
       mage: 0xc07dff, cannonball: 0xffa040, boulder: 0xcfa070, pumpkin: 0xff8c1a,
-      crystal: 0x8fd0ff, ice: 0x66c8ff, storm: 0xffe066,
+      crystal: 0x8fd0ff, ice: 0x66c8ff, storm: 0xffe066, venom: 0x5ad24a,
     }[ev.k] || 0xffffff;
     if (ev.k === 'mage') color = tierEffectColor(color, ev.wt); // gold/crystal blast
     if (ev.ft > 0) {
@@ -2868,6 +3078,50 @@ export class GameView {
     this.effects.push({
       mesh: g, t: 0, dur: 0.55, type: 'flamejet',
       x, z, tx, tz, parts,
+    });
+  }
+
+  // the Black Widow's web: a patch on the ground that bogs down whoever
+  // stands in it, fading out as the sim's timer runs down
+  spawnWeb(x, z, r, dur) {
+    const g = new THREE.Group();
+    const web = instantiate('prop-cobweb', { shadows: false, cloneMaterials: true }).group;
+    // the model normalizes to a 1-unit footprint, so this is the radius
+    web.scale.setScalar(r * 2);
+    web.traverse((o) => {
+      if (!o.isMesh || !o.material) return;
+      o.material.transparent = true;
+      o.material.opacity = 0.85;
+      o.material.depthWrite = false;
+      o.material.color.set(0xd8dde6);
+    });
+    g.add(web);
+    g.position.set(x, terrainY(z) + 0.05, z);
+    this.scene.add(g);
+    this.effects.push({ mesh: g, t: 0, dur: dur || 6, type: 'web' });
+  }
+
+  // the dragon's breath: the flamethrower's plume, thrown from a mouth
+  // held high and washing down over the cone in front of it
+  spawnBreath(ev) {
+    const g = new THREE.Group();
+    const parts = [];
+    for (let i = 0; i < 26; i++) {
+      const spr = new THREE.Sprite(this._statusMats.burn);
+      spr.scale.setScalar(0.3);
+      g.add(spr);
+      parts.push({
+        spr,
+        k: Math.random(),
+        // spread across the cone, and a little across its width
+        side: (Math.random() - 0.5) * 2 * ev.arc,
+        speed: 0.6 + Math.random() * 0.8,
+      });
+    }
+    this.scene.add(g);
+    this.effects.push({
+      mesh: g, t: 0, dur: ev.dur || 2.6, type: 'breath',
+      x: ev.x, z: ev.z, yaw: ev.yaw, r: ev.r, parts,
     });
   }
 
@@ -3142,6 +3396,28 @@ export class GameView {
           );
           p.spr.scale.setScalar(0.13 + kk * 0.3);
         }
+      } else if (e.type === 'breath') {
+        // the plume pours out of the mouth and washes down the cone,
+        // each ember riding its own line out to the reach
+        for (const p of e.parts) {
+          const kk = (k * p.speed + p.k) % 1;
+          const ang = e.yaw + p.side;
+          const rad = kk * e.r;
+          p.spr.position.set(
+            e.x + Math.sin(ang) * rad,
+            // starts up at the mouth, falls as it spreads out
+            2.6 - kk * 2.1,
+            e.z + Math.cos(ang) * rad
+          );
+          p.spr.scale.setScalar(0.25 + kk * 0.55);
+          p.spr.material = this._statusMats.burn;
+        }
+      } else if (e.type === 'web') {
+        // holds solid, then thins out as the patch expires
+        const fade = k > 0.7 ? 1 - (k - 0.7) / 0.3 : 1;
+        e.mesh.traverse((o) => {
+          if (o.isMesh && o.material) o.material.opacity = 0.85 * fade;
+        });
       } else if (e.type === 'gfire') {
         // flames flicker on the burning ground, fading near the end
         const fade = k > 0.75 ? 1 - (k - 0.75) / 0.25 : 1;

@@ -283,6 +283,24 @@
           <span>god mode</span>
         </label>
         <div id="devwave-info" class="devwave-info"></div>
+        <button id="devskin-open" class="btn small">Drácula…</button>
+      </div>
+
+      <!-- Testing overlay: dial in Drácula's per-part tint against a live
+           turntable, then copy the values into DRACULA_LOOK. -->
+      <div id="devskin" class="hidden">
+        <div class="devwave-head">
+          <span class="devwave-tag">SKIN</span>
+          <span>Drácula</span>
+          <button id="devskin-close" class="btn small">✕</button>
+        </div>
+        <canvas id="devskin-canvas"></canvas>
+        <div id="devskin-rows"></div>
+        <div class="devwave-row">
+          <button id="devskin-copy" class="btn small primary">Copiar JSON</button>
+          <button id="devskin-reset" class="btn small">Reset</button>
+        </div>
+        <div id="devskin-note" class="devwave-info"></div>
       </div>
 
       <div id="hud-action">

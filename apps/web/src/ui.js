@@ -21,6 +21,11 @@ import { music } from './music.js';
 import { isInstalled, hasNativePrompt, promptInstall, onInstallChange } from './pwa.js';
 import { loadRoster, saveRoster, defaultCharacter, petRefOf, grantPetXp, loadoutOf } from './character.js';
 import { getSlots } from './render/customize.js';
+import { CharacterPreview } from './render/preview.js';
+import {
+  BODY_PARTS, DRACULA_LOOK, ENEMY_PROPS,
+  loadDraculaLook, saveDraculaLook,
+} from './render/view.js';
 import { NPCS } from '@dtc/shared/sanctuary.js';
 
 // class accent colours (mirror the 3D CLASS_TINT) used to tint the
@@ -1800,6 +1805,100 @@ export class UI {
       this.cb.onAction({ t: 'start' });
     });
     this.setDevWave(1);
+    this.bindDevSkin();
+  }
+
+  // ---- Drácula skin editor ----------------------------------------
+  // Per-part tint on a live turntable, running the very same
+  // applyBodyTint() the match uses so the preview can't drift from what
+  // spawns. Values persist locally while they're being dialled in;
+  // "Copiar JSON" hands back something to paste into DRACULA_LOOK.
+  bindDevSkin() {
+    const panel = $('devskin');
+    const rows = $('devskin-rows');
+    this.devLook = { ...loadDraculaLook() };
+
+    const LABELS = {
+      head: 'cabeça', torso: 'tronco',
+      'arm-right': 'braço dir', 'arm-left': 'braço esq',
+      'leg-right': 'perna dir', 'leg-left': 'perna esq',
+      eyes: 'olhos',
+    };
+    const hex = (v) => '#' + (v >>> 0).toString(16).padStart(6, '0');
+
+    for (const key of [...BODY_PARTS, 'eyes']) {
+      const row = document.createElement('label');
+      row.className = 'devskin-row';
+      row.innerHTML = `<span>${LABELS[key]}</span>`;
+      const input = document.createElement('input');
+      input.type = 'color';
+      input.value = hex(this.devLook[key] ?? 0x888888);
+      input.addEventListener('input', () => {
+        this.devLook[key] = parseInt(input.value.slice(1), 16);
+        this.refreshDevSkin();
+      });
+      row.appendChild(input);
+      rows.appendChild(row);
+    }
+    // eye size, the one thing a colour picker can't express
+    const sizeRow = document.createElement('label');
+    sizeRow.className = 'devskin-row';
+    sizeRow.innerHTML = '<span>olho ⌀</span>';
+    const size = document.createElement('input');
+    size.type = 'range';
+    size.min = '0.015'; size.max = '0.09'; size.step = '0.005';
+    size.value = String(this.devLook.eyeSize ?? 0.04);
+    size.addEventListener('input', () => {
+      this.devLook.eyeSize = +size.value;
+      this.refreshDevSkin(true);
+    });
+    sizeRow.appendChild(size);
+    rows.appendChild(sizeRow);
+
+    bindTap($('devskin-open'), () => {
+      panel.classList.remove('hidden');
+      $('devwave').classList.add('hidden');
+      if (!this.devPreview) {
+        this.devPreview = new CharacterPreview($('devskin-canvas'));
+      }
+      this.refreshDevSkin(true);
+      this.devPreview.start();
+    });
+    bindTap($('devskin-close'), () => {
+      panel.classList.add('hidden');
+      this.devPreview?.stop();
+    });
+    bindTap($('devskin-copy'), async () => {
+      const body = [...BODY_PARTS].map((k) => `  '${k}': 0x${(this.devLook[k] >>> 0).toString(16).padStart(6, '0')},`);
+      const text = `export const DRACULA_LOOK = {\n${body.join('\n')}\n`
+        + `  eyes: 0x${(this.devLook.eyes >>> 0).toString(16).padStart(6, '0')}, eyeSize: ${this.devLook.eyeSize},\n};`;
+      try {
+        await navigator.clipboard.writeText(text);
+        $('devskin-note').textContent = 'copiado — cole em DRACULA_LOOK (view.js)';
+      } catch {
+        $('devskin-note').textContent = text;
+      }
+    });
+    bindTap($('devskin-reset'), () => {
+      this.devLook = { ...DRACULA_LOOK };
+      saveDraculaLook(this.devLook);
+      // rebuild the pickers from the restored values
+      const inputs = rows.querySelectorAll('input[type="color"]');
+      [...BODY_PARTS, 'eyes'].forEach((k, i) => {
+        if (inputs[i]) inputs[i].value = hex(this.devLook[k] ?? 0x888888);
+      });
+      size.value = String(this.devLook.eyeSize ?? 0.04);
+      this.refreshDevSkin(true);
+    });
+  }
+
+  // `rebuild` when the eyes change: they're geometry added once, so a
+  // new size means a fresh body rather than a retint
+  refreshDevSkin(rebuild = false) {
+    saveDraculaLook(this.devLook);
+    if (!this.devPreview) return;
+    if (rebuild) this.devPreview.setEnemy('enemy-vampire', this.devLook, ENEMY_PROPS.dracula);
+    else this.devPreview.setLook(this.devLook);
   }
 
   // called every frame with the freshest snapshot
@@ -1840,8 +1939,14 @@ export class UI {
 
     // testing wave picker — same window the server enforces: host only,
     // build phase, and only while no wave has run yet
+    // …and never on top of the skin editor, which takes the same corner
+    const skinOpen = !$('devskin').classList.contains('hidden');
     const devOpen = !!(this.devTools && this.isHost && snap.ph === 'build' && snap.w === 0);
-    $('devwave').classList.toggle('hidden', !devOpen);
+    $('devwave').classList.toggle('hidden', !devOpen || skinOpen);
+    if (!devOpen && skinOpen) {
+      $('devskin').classList.add('hidden');
+      this.devPreview?.stop();
+    }
     if (devOpen) {
       // the box ships ticked but the sim boots with it off, so push the
       // checkbox's state until the snapshot agrees — one round trip

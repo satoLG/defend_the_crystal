@@ -642,48 +642,82 @@ export const SUBBOSS = { hpMult: 7, dmgMult: 1.8, scale: 2.4, ptsMult: 6, xpMult
 export const BOSS = { scale: 3.0, breach: 5, pts: 110, xp: 260 };
 
 // checkpoint-wave bosses (waves 10, 20, 30…), rotating in this order.
-// Multipliers sit on top of the base kind's wave-scaled stats so every
-// boss lands near the keeper's power budget.
+// Multipliers sit on top of the base kind's wave-scaled stats.
+//
+// A boss wave is NOT a normal wave with a boss dropped into it: the
+// regular mix is replaced by the boss's own `escort`, so the fight reads
+// as that boss and not as a crowd with a big thing somewhere in it. Each
+// escort entry is { kind, n, tier? }; an empty list means the boss walks
+// in alone. Because so little comes with them now, the bosses carry the
+// wave themselves — hence the heavy hp/armor budgets below.
 export const BOSSES = {
-  coveiro:  { kind: 'keeper', name: 'Coveiro' },
+  coveiro:  { kind: 'keeper', name: 'Coveiro',
+              hpMult: 2.6, dmgMult: 1.5, armor: 0.25,
+              escort: [{ kind: 'zombie', n: 4 }, { kind: 'skeleton', n: 4 }] },
   tirocego: { kind: 'skelarcher', name: 'Tiro Cego',
-              hpMult: 19, dmgMult: 2.6, speedMult: 0.85, multishot: true },
+              hpMult: 34, dmgMult: 3.2, speedMult: 0.85, armor: 0.25, multishot: true,
+              // every shape a skeleton comes in, across all three stages
+              escort: [
+                { kind: 'skeleton', n: 3 }, { kind: 'skeleton', n: 2, tier: 2 },
+                { kind: 'skeleton', n: 1, tier: 3 },
+                { kind: 'skelarcher', n: 2 }, { kind: 'skelarcher', n: 1, tier: 2 },
+                { kind: 'bonethrower', n: 2 }, { kind: 'bonethrower', n: 1, tier: 2 },
+              ] },
   zecaixao: { kind: 'vampire', name: 'Zé do Caixão',
-              hpMult: 3.6, dmgMult: 1.5, speedMult: 0.9, jumps: 2 },
+              hpMult: 7.5, dmgMult: 2.2, speedMult: 0.9, armor: 0.25, jumps: 2,
+              escort: [{ kind: 'bat', n: 6 }] },
   abobrado: { kind: 'ghost', name: 'Abobrado',
-              hpMult: 26, dmgMult: 1, speedMult: 0.72,
-              pumpkin: { range: 7.5, rate: 0.4, dmg: 26, aoe: 1.7, projSpeed: 8 } },
+              hpMult: 46, dmgMult: 1.6, speedMult: 0.72, armor: 0.2,
+              pumpkin: { range: 7.5, rate: 0.4, dmg: 26, aoe: 1.7, projSpeed: 8 },
+              escort: [{ kind: 'ghost', n: 5 }, { kind: 'ghost', n: 3, tier: 2 }] },
   // not one boss but an infestation: 100 zombies flooding in at a
   // brutal spawn rate. Green ones die normally, blue ones rise again
   // twice, red ones three times (see HORDE below).
   horda:    { kind: 'zombie', name: 'A Horda Zumbi', horde: true },
-  // Brutus hauls a great shield & great axe: by far the toughest boss
+  // Brutus hauls a great shield & war hammer: by far the toughest boss
   // on the field (heavy armor on top of a huge HP pool) — and by far
   // the slowest march you'll ever get to prepare for.
   brutus:   { kind: 'orc', name: 'Brutus',
-              hpMult: 6.5, dmgMult: 2.4, speedMult: 0.55, armor: 0.35 },
+              hpMult: 18, dmgMult: 3.2, speedMult: 0.55, armor: 0.45,
+              escort: [
+                { kind: 'orc', n: 3 }, { kind: 'orc', n: 2, tier: 2 },
+                { kind: 'orc', n: 1, tier: 3 },
+              ] },
   // Drácula fights like a mage, but every bolt of blood magic he lands
   // feeds him: `leech` is the share of the damage dealt that he heals.
+  // Unlike his court he hits EVERY character at once (`allTargets`).
   dracula:  { kind: 'vampire', name: 'Drácula',
-              hpMult: 5.5, dmgMult: 1.8, speedMult: 0.95, jumps: 2,
-              blood: { range: 8, rate: 0.7, dmg: 34, projSpeed: 11, leech: 0.6 } },
+              hpMult: 11, dmgMult: 2.4, speedMult: 0.95, armor: 0.3, jumps: 2,
+              blood: { range: 9, rate: 0.6, dmg: 34, projSpeed: 11, leech: 0.6, allTargets: true },
+              escort: [{ kind: 'vampire', n: 2 }, { kind: 'bat', n: 4, tier: 2 }] },
   // the Black Widow softens the field before she bites: venom that eats
-  // HP over time, and web patches that bog down whoever stands in them
+  // HP over time, and web patches that bog down whoever stands in them.
+  // She fights alone, so the whole budget is hers.
   viuvanegra: { kind: 'spider', name: 'Viúva Negra',
-              hpMult: 7, dmgMult: 2, speedMult: 0.9,
+              hpMult: 34, dmgMult: 3, speedMult: 0.9, armor: 0.35, scale: 2,
               venom: { range: 7, rate: 0.5, dmg: 12, aoe: 1.6, projSpeed: 9, dps: 9, dur: 4 },
-              web: { rate: 0.22, r: 2.2, dur: 6, moveF: 0.45, rateF: 0.55 } },
+              web: { rate: 0.22, r: 2.2, dur: 6, moveF: 0.45, rateF: 0.55 },
+              escort: [] },
   // breathes straight down from a mouth held high — same cone the
-  // flamethrower tower uses, just mounted on a boss
+  // flamethrower tower uses, just mounted on a boss. Also alone.
   dragao:   { kind: 'dragon', name: 'Dragão das Trevas',
-              hpMult: 4.5, dmgMult: 2.2, speedMult: 0.85,
-              breath: { r: 4.5, arc: 0.7, dps: 42, dur: 2.6, cd: 6 } },
+              hpMult: 5.5, dmgMult: 3.2, speedMult: 0.85, armor: 0.35, scale: 1.3,
+              breath: { range: 6.5, rate: 0.32, r: 5.5, arc: 0.75, dps: 60, dur: 2.6 },
+              escort: [] },
   // the run's own strongest hero, rendered in black with red eyes and
-  // swinging their kit back at them. `kind` is only the fallback body —
-  // the real model/stats are mirrored from that hero at spawn time.
+  // swinging their kit back at them. `kind` is only a fallback body —
+  // mirrorsHero swaps in that hero's class, loadout and stats at spawn.
+  // Its escort is built at runtime, one small shade per class in play.
+  // `duel` is roughly how many seconds of that hero's own sustained
+  // damage it takes to bring the Sombra down — sizing it off their
+  // output instead of their HP keeps the fight the same length whichever
+  // class is mirrored. hpMult stays as the fallback when there is
+  // somehow no hero to copy.
   sombra:   { kind: 'orc', name: 'Sombra do Herói',
-              hpMult: 8, dmgMult: 2.5, mirrorsHero: true },
+              hpMult: 12, dmgMult: 1.2, armor: 0.4, mirrorsHero: true, duel: 60,
+              shades: { n: 1, scale: 1.1, hpMult: 0.1, dmgMult: 0.5 } },
 };
+
 // ---------- testing mode ----------
 // What the dev overlay hands out so a late wave can be reached and
 // watched instead of survived. Not reachable in a normal run: the server
@@ -733,6 +767,12 @@ export const HORDE = {
 // borrows the stage-2/3 recolor (1 = blue hide, 2 = red); `scale`
 // overrides SUBBOSS.scale when a fight wants something less towering.
 // A wave may list SEVERAL entries — they all walk in together.
+//
+// Like the bosses, a sub-boss wave drops the phase mix and fields only
+// its own kin, so the fight is legible: the blue zombie arrives with
+// zombies, the red orc with orcs. `escort` overrides that when the
+// squad's own kind isn't something that can crowd a lane (the three
+// gravediggers bring what they dig up).
 export const SUBBOSSES = {
   5:  [{ kind: 'zombie', vr: 1 }],                                  // zumbi azul
   15: [{ kind: 'skelarcher', scale: 1.8 }],                         // arqueiro cinza, médio
@@ -747,6 +787,16 @@ export const SUBBOSSES = {
        { kind: 'keeper', scale: 1.6 },
        { kind: 'keeper', scale: 1.6 }],
 };
+
+// waves where the sub-boss's own kind can't fill a lane
+export const SUBBOSS_ESCORT = {
+  95: [{ kind: 'zombie', n: 5 }, { kind: 'skeleton', n: 5 }],
+};
+
+// how many mobs a sub-boss wave fields alongside it (the boss waves
+// spell their escorts out one by one; sub-boss waves just get fewer of
+// the same kind they already bring)
+export const SUBBOSS_ESCORT_COUNT = 10;
 
 // ---------- enemy tiers (visual power stages) ----------
 // As waves march on, regular enemies start showing up in stronger,
