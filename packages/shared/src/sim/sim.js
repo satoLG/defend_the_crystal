@@ -833,6 +833,30 @@ export class Sim {
     const stats = enemyStats(kind, boss, this.wave, this.waveStartCount, variant, horde, tier, opts);
     const bossDef = boss === 2 ? BOSSES[variant] : null;
 
+    // The Sombra is not its own creature: it is the party's strongest
+    // hero, copied. Class, loadout and stats all come off that hero, so
+    // it fights with whatever they brought rather than with a stat block
+    // someone guessed at.
+    let mirror = null;
+    if (bossDef?.mirrorsHero) {
+      const hero = this.players.entities
+        .slice()
+        .sort((a, b) => b.lvl - a.lvl || b.maxHp - a.maxHp)[0];
+      if (hero) {
+        mirror = { cls: hero.cls, weapon: hero.weapon, shield: hero.shield };
+        // Size it by how hard that hero HITS, not by how much HP they
+        // carry: mirroring HP would make the fight twice as long for a
+        // tanker as for a mage purely because of the class. Off their
+        // sustained damage, it takes about the same time for anyone.
+        const dps = Math.max(hero.atk * hero.rate, 1);
+        stats.hp = dps * bossDef.duel;
+        stats.dmg = hero.atk * bossDef.dmgMult;
+        stats.speed = hero.speed * 0.85; // it stalks rather than sprints
+      }
+    }
+    // one of its shades wears a class too, just a small weak one
+    if (opts?.shade) mirror = { cls: opts.shade, weapon: null, shield: null };
+
     const vehicle = new Vehicle();
     vehicle.position.set(w.x + (Math.random() - 0.5) * 0.8, 0, w.z + (Math.random() - 0.5) * 0.5);
     vehicle.maxSpeed = stats.speed;
@@ -903,12 +927,18 @@ export class Sim {
       breathT: 0,
       // one of the Sombra's shades — carries the class it echoes
       shade: opts?.shade || null,
+      mirror,
     });
     const ev = { t: 'spawn', id: e.id, kind, boss };
     // several bosses share a body (Zé do Caixão and Drácula are both
     // vampires, Brutus and the Sombra both orcs), so the overhead label
     // can't be looked up from the kind — carry the variant itself
     if (boss === 2) ev.variant = variant;
+    // the Sombra and its shades render as a hero, not as their kind.
+    // Sent on the event rather than in the snapshot row: at most a
+    // handful exist per wave, and every enemy would otherwise pay for
+    // the extra fields on every tick.
+    if (mirror) ev.mirror = mirror;
     if (at) { ev.g = 1; ev.x = rnd2(w.x); ev.z = rnd2(w.z); } // rose from a tomb
     this.emit(ev);
     // carry the boss VARIANT / enemy KIND so clients localize the name &

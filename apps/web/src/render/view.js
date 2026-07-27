@@ -710,6 +710,9 @@ export class GameView {
     // its snapshot and socket.io keeps that order, so the variant is
     // always here before the body shows up in a snapshot row.
     this.bossVariants = new Map();
+    // enemy id -> { cls, weapon, shield } for the Sombra and its shades,
+    // which wear a hero's body instead of their own kind's
+    this.mirrors = new Map();
     this.towers = new Map();
     this.obstacles = new Map();
     this.graves = new Map();    // gravedigger tombs, id -> {group, riseT}
@@ -958,6 +961,41 @@ export class GameView {
     spr.scale.set(worldW, worldW * H / W, 1);
     spr.renderOrder = 11;
     return spr;
+  }
+
+  // Paint a mirrored hero into its shadow: the body goes to black,
+  // keeping only enough shading to read as a silhouette, and two red
+  // eyes are added. The eyes are geometry rather than a texture edit
+  // because the Kenney heroes share one colormap atlas — recolouring
+  // the eye swatch there would darken every other hero wearing it.
+  dressShadow(a, mirror) {
+    // whatever that hero actually carries, shadowed the same way
+    this.attachProps(a, loadoutProps(mirror.cls, mirror.weapon, mirror.shield));
+    a.group.traverse((o) => {
+      if (!o.isMesh && !o.isSkinnedMesh) return;
+      const mats = Array.isArray(o.material) ? o.material : [o.material];
+      for (const m of mats) {
+        if (!m) continue;
+        if (m.map) m.map = null; // drop the atlas, or it fights the black
+        m.color?.setHex(0x0a0a0f);
+        m.emissive?.setHex(0x120008);
+        if ('emissiveIntensity' in m) m.emissiveIntensity = 0.35;
+        if ('metalness' in m) m.metalness = 0.1;
+        if ('roughness' in m) m.roughness = 0.85;
+        m.needsUpdate = true;
+      }
+    });
+    // eyes, seated on the head bone when there is one so they track the
+    // animation instead of floating in front of the face
+    const head = a.group.getObjectByName('head') || a.group;
+    const eyeMat = new THREE.MeshBasicMaterial({ color: 0xff2020 });
+    const eyeGeo = new THREE.SphereGeometry(0.035, 8, 6);
+    for (const dx of [-0.075, 0.075]) {
+      const eye = new THREE.Mesh(eyeGeo, eyeMat);
+      eye.position.set(dx, head === a.group ? 1.15 : 0.1, 0.17);
+      eye.renderOrder = 3;
+      head.add(eye);
+    }
   }
 
   // Boss nameplate. Deliberately smaller and quieter than the wave
@@ -1358,7 +1396,9 @@ export class GameView {
     }
     const def = ENEMIES[kind] || {};
     const isBoss = row[EN.BOSS] === 2;
-    a = this.makeAnimated(def.model || `enemy-${kind}`);
+    // the Sombra and its shades wear a hero's body, not their kind's
+    const mirror = this.mirrors.get(id);
+    a = this.makeAnimated(mirror ? CLASSES[mirror.cls].model : (def.model || `enemy-${kind}`));
     a.kind = kind;
     const scale = row[EN.SCALE] || 1;
     a.group.scale.setScalar(scale);
@@ -1374,8 +1414,9 @@ export class GameView {
       for (const m of a.mats) { m.transparent = true; m.opacity = 0.8; }
     }
     const bossVariant = this.bossVariants.get(id);
+    if (mirror) this.dressShadow(a, mirror);
     // bone throwers are archers to the sim, but they lob by hand — no bow
-    if (a.isArcher && def.archer?.proj !== 'bone') this.attachProps(a, ENEMY_PROPS.archer);
+    else if (a.isArcher && def.archer?.proj !== 'bone') this.attachProps(a, ENEMY_PROPS.archer);
     if (kind === 'keeper') this.attachProps(a, ENEMY_PROPS.keeper);
     // the coffin belongs to Zé do Caixão, not to every vampire boss
     if (bossVariant === 'zecaixao') this.attachProps(a, ENEMY_PROPS.coffin);
@@ -2301,6 +2342,7 @@ export class GameView {
         this.scene.remove(a.group);
         this.enemies.delete(id);
         this.bossVariants.delete(id);
+        this.mirrors.delete(id);
       }
     }
     // the static yard dummies stand in whenever no live (attackable)
@@ -2443,6 +2485,7 @@ export class GameView {
         if (a) {
           this.enemies.delete(ev.id);
           this.bossVariants.delete(ev.id);
+        this.mirrors.delete(ev.id);
           this.spawnCorpse(a);
         }
         break;
@@ -2543,6 +2586,8 @@ export class GameView {
         if (ev.g) this.burst(ev.x, ev.z, 1.0, 0x9a4ae0);
         // remember which named boss this body is, for the overhead label
         if (ev.variant) this.bossVariants.set(ev.id, ev.variant);
+        // …and which hero it is a shadow of, so it renders as that hero
+        if (ev.mirror) this.mirrors.set(ev.id, ev.mirror);
         break;
       }
       case 'ejump': {

@@ -708,10 +708,16 @@ export const BOSSES = {
   // swinging their kit back at them. `kind` is only a fallback body —
   // mirrorsHero swaps in that hero's class, loadout and stats at spawn.
   // Its escort is built at runtime, one small shade per class in play.
+  // `duel` is roughly how many seconds of that hero's own sustained
+  // damage it takes to bring the Sombra down — sizing it off their
+  // output instead of their HP keeps the fight the same length whichever
+  // class is mirrored. hpMult stays as the fallback when there is
+  // somehow no hero to copy.
   sombra:   { kind: 'orc', name: 'Sombra do Herói',
-              hpMult: 16, dmgMult: 3, armor: 0.4, mirrorsHero: true,
-              shades: { n: 1, scale: 1.1, hpMult: 0.12, dmgMult: 0.35 } },
+              hpMult: 12, dmgMult: 1.2, armor: 0.4, mirrorsHero: true, duel: 60,
+              shades: { n: 1, scale: 1.1, hpMult: 0.1, dmgMult: 0.5 } },
 };
+
 // ---------- testing mode ----------
 // What the dev overlay hands out so a late wave can be reached and
 // watched instead of survived. Not reachable in a normal run: the server
