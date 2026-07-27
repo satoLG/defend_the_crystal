@@ -174,6 +174,78 @@ const MOUNTS = {
 // blood magic's palette — the mage's orb, bled red
 const BLOOD_ORB = { core: 0xff4a5a, glow: 0xa50f1e, halo: 0xd01530, mote: 0xffb0b8 };
 
+// ---- per-part body tints -----------------------------------------
+// The Kenney enemies are six separately named meshes (torso, head,
+// arm-*, leg-*) sharing ONE colormap atlas, so a look can be dialled in
+// per body part by tinting each mesh's own material clone. Eyes are
+// geometry rather than an atlas edit: the atlas is shared with every
+// other graveyard enemy, so recolouring a swatch there would follow the
+// zombies and skeletons around too.
+export const BODY_PARTS = ['head', 'torso', 'arm-right', 'arm-left', 'leg-right', 'leg-left'];
+
+// Drácula: bloodless skin gone red, with yellow eyes. Tuned live through
+// the dev overlay (`?dev=1` -> Drácula), which writes this same shape.
+export const DRACULA_LOOK = {
+  head: 0xb03a3a, torso: 0x8e1b1b, 'arm-right': 0xb03a3a, 'arm-left': 0xb03a3a,
+  'leg-right': 0x6d1414, 'leg-left': 0x6d1414,
+  eyes: 0xffd21e, eyeSize: 0.04,
+};
+// his court wears the same skin, without the eyes
+export const BLOOD_VAMPIRE_LOOK = {
+  head: 0xa54242, torso: 0x8e3030, 'arm-right': 0xa54242, 'arm-left': 0xa54242,
+  'leg-right': 0x7a2020, 'leg-left': 0x7a2020,
+};
+
+// The dev overlay stores a work-in-progress look here so it survives a
+// reload while it is being dialled in. Once it looks right, paste the
+// values into DRACULA_LOOK above and the storage entry stops mattering.
+const DRACULA_LOOK_KEY = 'dtc-dracula-look';
+
+export function loadDraculaLook() {
+  try {
+    const raw = localStorage.getItem(DRACULA_LOOK_KEY);
+    if (raw) return { ...DRACULA_LOOK, ...JSON.parse(raw) };
+  } catch { /* fall through to the built-in look */ }
+  return DRACULA_LOOK;
+}
+
+export function saveDraculaLook(look) {
+  try { localStorage.setItem(DRACULA_LOOK_KEY, JSON.stringify(look)); } catch { /* private mode */ }
+}
+
+export function applyBodyTint(group, look) {
+  if (!look) return;
+  for (const part of BODY_PARTS) {
+    const hex = look[part];
+    if (hex == null) continue;
+    const node = group.getObjectByName(part);
+    if (!node) continue;
+    node.traverse((o) => {
+      if (!o.isMesh && !o.isSkinnedMesh) return;
+      const mats = Array.isArray(o.material) ? o.material : [o.material];
+      for (const m of mats) {
+        if (!m?.color) continue;
+        // multiply, so the atlas shading survives instead of going flat
+        m.color.setHex(hex);
+        m.needsUpdate = true;
+      }
+    });
+  }
+  if (look.eyes == null) return;
+  const head = group.getObjectByName('head');
+  if (!head || head.userData.hasEyes) return;
+  head.userData.hasEyes = true;
+  const r = look.eyeSize || 0.04;
+  const mat = new THREE.MeshBasicMaterial({ color: look.eyes, toneMapped: false });
+  const geo = new THREE.SphereGeometry(r, 8, 6);
+  for (const dx of [-0.085, 0.085]) {
+    const eye = new THREE.Mesh(geo, mat);
+    eye.position.set(dx, 0.12, 0.2);
+    eye.renderOrder = 3;
+    head.add(eye);
+  }
+}
+
 // one prop spec per purchasable weapon (see WEAPONS in config.js).
 // tierMode decides how the gold/crystal upgrade finish is painted on:
 //   'metal'  — only the grey metal of the weapon (blade/head), so wood
@@ -618,7 +690,7 @@ for (const b of Object.values(BOSSES)) BOSS_BY_KIND[b.kind] = b;
 
 // graveyard-kit props are authored in the same mini scale as the
 // character hand props, so they attach straight onto the bones
-const ENEMY_PROPS = {
+export const ENEMY_PROPS = {
   // the gravedigger grips his shovel exactly like the berserker holds his
   // axe (same bone-relative pos/rot); he's just scaled up as a whole, so
   // the relative placement carries straight over
@@ -1442,8 +1514,13 @@ export class GameView {
     if (vr === VR_BRUTUS) this.attachProps(a, ENEMY_PROPS.brutus);
     else if (kind === 'orc' && !mirror) this.attachProps(a, ENEMY_PROPS.orc[vr] || ENEMY_PROPS.orc[0]);
     // blood casters carry the orb: Drácula one per hand, his court one
-    if (bossVariant === 'dracula') this.attachProps(a, ENEMY_PROPS.dracula);
-    else if (kind === 'vampire' && vr === VR_BLOOD) this.attachProps(a, ENEMY_PROPS.bloodVampire);
+    if (bossVariant === 'dracula') {
+      this.attachProps(a, ENEMY_PROPS.dracula);
+      applyBodyTint(a.group, loadDraculaLook());
+    } else if (kind === 'vampire' && vr === VR_BLOOD) {
+      this.attachProps(a, ENEMY_PROPS.bloodVampire);
+      applyBodyTint(a.group, BLOOD_VAMPIRE_LOOK);
+    }
     // stage-2/3 power looks: swap in the recolored hide — only the
     // matching atlas pixels (skin/bone/body) change, never the whole
     // model. Materials are per-actor clones, so this stays local.
