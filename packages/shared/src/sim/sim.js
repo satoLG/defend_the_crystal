@@ -900,11 +900,15 @@ export class Sim {
       // look (recolored hide + size), 3 Brutus (props); 0 plain.
       // Authored sub-bosses name their own look (the blue zombie, the
       // red orc) instead of inheriting one from a power tier.
+      // 4 marks a vampire of Drácula's court, so the client hands it the
+      // blood orb — it outranks the power-stage look, which a court
+      // vampire never wears anyway
       vr: boss === 2
         ? (variant === 'brutus' ? 3 : 0)
         : boss === 1
           ? (opts?.vr || 0)
-          : (stats.tier === 2 ? 1 : stats.tier === 3 ? 2 : 0),
+          : bloodOf(kind, this.wave) ? 4
+            : (stats.tier === 2 ? 1 : stats.tier === 3 ? 2 : 0),
       // special powers
       archer,
       jumper: !!def.jumper && !def.flying,

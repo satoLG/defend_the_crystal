@@ -23,7 +23,7 @@ const EN = { ID: 0, KIND: 1, X: 2, Z: 3, YAW: 4, HP: 5, MHP: 6, SCALE: 7, BOSS: 
 // EN.ST status bitmask (mirrors buildSnapshot): slow|burn|poison|stun
 const ST_SLOW = 1, ST_BURN = 2, ST_POISON = 4, ST_STUN = 8;
 // EN.VR visual variants: stage-2 / stage-3 power looks, Brutus props
-const VR_T2 = 1, VR_T3 = 2, VR_BRUTUS = 3;
+const VR_T2 = 1, VR_T3 = 2, VR_BRUTUS = 3, VR_BLOOD = 4;
 
 // ---- enemy power-stage looks --------------------------------------
 // Stage-2/3 enemies swap in a recolored atlas where ONLY the matching
@@ -166,7 +166,13 @@ const MOUNTS = {
   // the original bow mount rather than the tuned longbow one
   crossbow: { bone: 'arm-right', pos: [0.02, -0.155, 0.255], rot: [-2.78, 0.23, -1] },
   staff: { bone: 'arm-right', pos: [-0.225, 0.29, 0.175], rot: [0, 0.35, 3.142] },
+  // the vampires cast off orbs held out to either side
+  orbRight: { bone: 'arm-right', pos: [-0.225, 0.06, 0.14], rot: [0, 0, 0] },
+  orbLeft: { bone: 'arm-left', pos: [0.225, 0.06, 0.14], rot: [0, 0, 0] },
 };
+
+// blood magic's palette — the mage's orb, bled red
+const BLOOD_ORB = { core: 0xff4a5a, glow: 0xa50f1e, halo: 0xd01530, mote: 0xffb0b8 };
 
 // one prop spec per purchasable weapon (see WEAPONS in config.js).
 // tierMode decides how the gold/crystal upgrade finish is painted on:
@@ -354,12 +360,15 @@ export function makeWand() {
 }
 
 // a floating arcane sphere wreathed in a glowing halo + orbiting motes
-export function makeOrbProp() {
+// `pal` recolours the whole orb — the vampires carry the mage's orb in
+// blood red rather than arcane purple
+export function makeOrbProp(pal = null) {
+  const p = pal || { core: 0xb488ff, glow: 0x7a2be2, halo: 0xa050ff, mote: 0xe6c4ff };
   const holder = new THREE.Group();
   const core = new THREE.Mesh(
     new THREE.SphereGeometry(0.085, 16, 16),
     new THREE.MeshStandardMaterial({
-      color: 0xb488ff, emissive: 0x7a2be2, emissiveIntensity: 0.9,
+      color: p.core, emissive: p.glow, emissiveIntensity: 0.9,
       roughness: 0.25, metalness: 0.1,
     })
   );
@@ -368,12 +377,12 @@ export function makeOrbProp() {
   const halo = new THREE.Mesh(
     new THREE.SphereGeometry(0.13, 12, 12),
     new THREE.MeshBasicMaterial({
-      color: 0xa050ff, transparent: true, opacity: 0.3,
+      color: p.halo, transparent: true, opacity: 0.3,
       blending: THREE.AdditiveBlending, depthWrite: false,
     })
   );
   holder.add(halo);
-  const moteMat = new THREE.MeshBasicMaterial({ color: 0xe6c4ff, toneMapped: false });
+  const moteMat = new THREE.MeshBasicMaterial({ color: p.mote, toneMapped: false });
   for (let i = 0; i < 3; i++) {
     const mote = new THREE.Mesh(new THREE.SphereGeometry(0.016, 6, 6), moteMat);
     const a = (i / 3) * Math.PI * 2;
@@ -632,6 +641,15 @@ const ENEMY_PROPS = {
     [{ ...WEAPON_PROPS.spear, tier: 0 }],
     [{ ...WEAPON_PROPS.shield, tier: 0 }, { ...WEAPON_PROPS.axe, tier: 0 }],
     [{ ...WEAPON_PROPS.shield, tier: 1 }, { ...WEAPON_PROPS.hammer, tier: 1 }],
+  ],
+  // blood magic is cast off the mage's orb, in red. Drácula holds one in
+  // each hand; the vampires of his court manage a single one.
+  dracula: [
+    { gen: () => makeOrbProp(BLOOD_ORB), ...MOUNTS.orbRight, scale: 1, tier: 0 },
+    { gen: () => makeOrbProp(BLOOD_ORB), ...MOUNTS.orbLeft, scale: 1, tier: 0 },
+  ],
+  bloodVampire: [
+    { gen: () => makeOrbProp(BLOOD_ORB), ...MOUNTS.orbRight, scale: 1, tier: 0 },
   ],
 };
 
@@ -1422,7 +1440,10 @@ export class GameView {
     if (bossVariant === 'zecaixao') this.attachProps(a, ENEMY_PROPS.coffin);
     const vr = row[EN.VR] || 0;
     if (vr === VR_BRUTUS) this.attachProps(a, ENEMY_PROPS.brutus);
-    else if (kind === 'orc') this.attachProps(a, ENEMY_PROPS.orc[vr] || ENEMY_PROPS.orc[0]);
+    else if (kind === 'orc' && !mirror) this.attachProps(a, ENEMY_PROPS.orc[vr] || ENEMY_PROPS.orc[0]);
+    // blood casters carry the orb: Drácula one per hand, his court one
+    if (bossVariant === 'dracula') this.attachProps(a, ENEMY_PROPS.dracula);
+    else if (kind === 'vampire' && vr === VR_BLOOD) this.attachProps(a, ENEMY_PROPS.bloodVampire);
     // stage-2/3 power looks: swap in the recolored hide — only the
     // matching atlas pixels (skin/bone/body) change, never the whole
     // model. Materials are per-actor clones, so this stays local.
