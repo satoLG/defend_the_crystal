@@ -696,7 +696,7 @@ export const BOSSES = {
   viuvanegra: { kind: 'spider', name: 'Viúva Negra',
               hpMult: 34, dmgMult: 3, speedMult: 0.9, armor: 0.35, scale: 2,
               venom: { range: 7, rate: 0.5, dmg: 12, aoe: 1.6, projSpeed: 9, dps: 9, dur: 4 },
-              web: { rate: 0.22, r: 2.2, dur: 6, moveF: 0.45, rateF: 0.55 },
+              web: { rate: 0.22, r: 1.1, dur: 6, moveF: 0.45, rateF: 0.55 },
               escort: [] },
   // breathes straight down from a mouth held high — same cone the
   // flamethrower tower uses, just mounted on a boss. Also alone.
@@ -715,6 +715,7 @@ export const BOSSES = {
   // somehow no hero to copy.
   sombra:   { kind: 'orc', name: 'Sombra do Herói',
               hpMult: 12, dmgMult: 1.2, armor: 0.4, mirrorsHero: true, duel: 60,
+              skillCd: 15,
               shades: { n: 1, scale: 1.1, hpMult: 0.1, dmgMult: 0.5 } },
 };
 

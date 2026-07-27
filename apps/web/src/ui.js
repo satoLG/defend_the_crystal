@@ -1822,11 +1822,10 @@ export class UI {
       head: 'cabeça', torso: 'tronco',
       'arm-right': 'braço dir', 'arm-left': 'braço esq',
       'leg-right': 'perna dir', 'leg-left': 'perna esq',
-      eyes: 'olhos',
     };
     const hex = (v) => '#' + (v >>> 0).toString(16).padStart(6, '0');
 
-    for (const key of [...BODY_PARTS, 'eyes']) {
+    for (const key of BODY_PARTS) {
       const row = document.createElement('label');
       row.className = 'devskin-row';
       row.innerHTML = `<span>${LABELS[key]}</span>`;
@@ -1840,20 +1839,6 @@ export class UI {
       row.appendChild(input);
       rows.appendChild(row);
     }
-    // eye size, the one thing a colour picker can't express
-    const sizeRow = document.createElement('label');
-    sizeRow.className = 'devskin-row';
-    sizeRow.innerHTML = '<span>olho ⌀</span>';
-    const size = document.createElement('input');
-    size.type = 'range';
-    size.min = '0.015'; size.max = '0.09'; size.step = '0.005';
-    size.value = String(this.devLook.eyeSize ?? 0.04);
-    size.addEventListener('input', () => {
-      this.devLook.eyeSize = +size.value;
-      this.refreshDevSkin(true);
-    });
-    sizeRow.appendChild(size);
-    rows.appendChild(sizeRow);
 
     bindTap($('devskin-open'), () => {
       panel.classList.remove('hidden');
@@ -1870,8 +1855,7 @@ export class UI {
     });
     bindTap($('devskin-copy'), async () => {
       const body = [...BODY_PARTS].map((k) => `  '${k}': 0x${(this.devLook[k] >>> 0).toString(16).padStart(6, '0')},`);
-      const text = `export const DRACULA_LOOK = {\n${body.join('\n')}\n`
-        + `  eyes: 0x${(this.devLook.eyes >>> 0).toString(16).padStart(6, '0')}, eyeSize: ${this.devLook.eyeSize},\n};`;
+      const text = `export const DRACULA_LOOK = {\n${body.join('\n')}\n};`;
       try {
         await navigator.clipboard.writeText(text);
         $('devskin-note').textContent = 'copiado — cole em DRACULA_LOOK (view.js)';
@@ -1884,16 +1868,14 @@ export class UI {
       saveDraculaLook(this.devLook);
       // rebuild the pickers from the restored values
       const inputs = rows.querySelectorAll('input[type="color"]');
-      [...BODY_PARTS, 'eyes'].forEach((k, i) => {
+      BODY_PARTS.forEach((k, i) => {
         if (inputs[i]) inputs[i].value = hex(this.devLook[k] ?? 0x888888);
       });
-      size.value = String(this.devLook.eyeSize ?? 0.04);
       this.refreshDevSkin(true);
     });
   }
 
-  // `rebuild` when the eyes change: they're geometry added once, so a
-  // new size means a fresh body rather than a retint
+  // `rebuild` when the body itself must be remade rather than retinted
   refreshDevSkin(rebuild = false) {
     saveDraculaLook(this.devLook);
     if (!this.devPreview) return;

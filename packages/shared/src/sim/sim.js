@@ -932,6 +932,10 @@ export class Sim {
       // one of the Sombra's shades — carries the class it echoes
       shade: opts?.shade || null,
       mirror,
+      // the Sombra casts the mirrored hero's power on a timer
+      skillCd: bossDef?.skillCd || 0,
+      skillT: bossDef?.skillCd || 0,
+      armorBoostT: 0,
     });
     const ev = { t: 'spawn', id: e.id, kind, boss };
     // several bosses share a body (Zé do Caixão and Drácula are both
@@ -971,7 +975,11 @@ export class Sim {
       this.emit({ t: 'crit', x: rnd2(pos.x), z: rnd2(pos.z) });
     }
     // heavy armor (Brutus): flat reduction on every hit, any source
-    if (e.armor > 0) dmg *= 1 - e.armor;
+    if (e.armor > 0) {
+      // the mirrored tanker's Taunt doubles its guard while it holds
+      const armor = Math.min(e.armorBoostT > 0 ? e.armor * 2 : e.armor, 0.85);
+      dmg *= 1 - armor;
+    }
     e.hp -= dmg;
     // training dummies never die (or aggro, or get knocked around):
     // on depletion they spring straight back to full
@@ -1450,8 +1458,17 @@ export class Sim {
       if (d < bestD) { bestD = d; best = q; }
     }
     const x = best ? best.x : pos.x, z = best ? best.z : pos.z;
-    this.webs.push({ x, z, r: e.web.r, t: e.web.dur, moveF: e.web.moveF, rateF: e.web.rateF });
-    this.emit({ t: 'web', x: rnd2(x), z: rnd2(z), r: e.web.r, dur: e.web.dur });
+    // thrown, not conjured: it flies out of her and only bites where it
+    // lands, so the patch reads as something she did
+    const ft = Math.max(dist2d(pos.x, pos.z, x, z) / 10, 0.15);
+    this.emit({
+      t: 'shoot', k: 'web', lob: 1,
+      f: [rnd2(pos.x), 1.0, rnd2(pos.z)], to: [rnd2(x), 0.15, rnd2(z)], ft: rnd2(ft),
+    });
+    this.pending.push({ at: this.time + ft, fn: () => {
+      this.webs.push({ x, z, r: e.web.r, t: e.web.dur, moveF: e.web.moveF, rateF: e.web.rateF });
+      this.emit({ t: 'web', x: rnd2(x), z: rnd2(z), r: e.web.r, dur: e.web.dur });
+    }});
   }
 
   // Dragão: the flamethrower's cone, breathed from a mouth held high
@@ -1461,7 +1478,12 @@ export class Sim {
     this.emit({
       t: 'breath', id: e.id, x: rnd2(pos.x), z: rnd2(pos.z),
       yaw: rnd2(e.yaw), r: b.r, arc: b.arc, dur: b.dur,
+      my: rnd2(2.2 * (e.scale || 1) * 0.5 + 0.9), // mouth height
     });
+    // it holds the lunge for the whole breath, head thrown forward, and
+    // creeps ahead while it pours — the sim marks the window and the
+    // client freezes the clip on its last frame for that long
+    e.breathT = b.dur;
     // damage ticks for as long as the plume is up, so walking out of it
     // actually saves you
     const ticks = Math.max(1, Math.round(b.dur / 0.35));
@@ -1483,6 +1505,85 @@ export class Sim {
           this.damagePlayer(q, b.dps * 0.35, 0, 0);
         }
       }});
+    }
+  }
+
+  // The Sombra casts its hero's own power back at the party. The
+  // player-side SKILLS functions can't be reused directly — they read a
+  // player entity and damage `this.enemies`, i.e. exactly the wrong side
+  // of the fight — so each one is mirrored here against the heroes.
+  shadowSkill(e) {
+    const cls = e.mirror?.cls;
+    const pos = e.vehicle.position;
+    const alive = this.players.entities.filter((p) => !p.dead);
+    if (!cls || !alive.length) return;
+    const nearest = alive
+      .map((p) => ({ p, d: dist2d(pos.x, pos.z, p.x, p.z) }))
+      .sort((a, b) => a.d - b.d);
+
+    if (cls === 'berserker') {
+      // charges through, flinging whoever is on the line
+      const S = SKILLS.berserker;
+      const reach = S.cells * GRID.CELL;
+      for (const { p, d } of nearest) {
+        if (d > reach) continue;
+        const n = Math.max(d, 0.2);
+        this.damagePlayer(p, e.dmg * S.dmgMult, ((p.x - pos.x) / n) * S.kb, ((p.z - pos.z) / n) * S.kb);
+      }
+      e.vehicle.position.x += Math.sin(e.yaw) * reach * 0.5;
+      e.vehicle.position.z += Math.cos(e.yaw) * reach * 0.5;
+      this.emit({ t: 'eskill', id: e.id, cls, x: rnd2(pos.x), z: rnd2(pos.z), yaw: rnd2(e.yaw) });
+      return;
+    }
+    if (cls === 'tanker') {
+      // hunkers down: the same doubled defense, on the boss
+      const S = SKILLS.tanker;
+      e.armorBoostT = S.dur;
+      this.emit({ t: 'eskill', id: e.id, cls, x: rnd2(pos.x), z: rnd2(pos.z), dur: S.dur });
+      return;
+    }
+    if (cls === 'archer') {
+      // three volleys, spread over whoever is closest
+      const S = SKILLS.archer;
+      const shoot = () => {
+        if (e.hp <= 0) return;
+        const live = this.players.entities.filter((p) => !p.dead);
+        for (let i = 0; i < S.arrows && live.length; i++) {
+          const p = live[i % live.length];
+          this.shootArrowAt(
+            { ...e, archer: { projSpeed: 13, proj: 'arrow' } },
+            p, dist2d(pos.x, pos.z, p.x, p.z),
+          );
+        }
+      };
+      shoot();
+      for (let b = 1; b < S.bursts; b++) {
+        this.pending.push({ at: this.time + b * S.gap, fn: shoot });
+      }
+      this.emit({ t: 'eskill', id: e.id, cls, x: rnd2(pos.x), z: rnd2(pos.z) });
+      return;
+    }
+    if (cls === 'mage') {
+      // one huge blast centred on the closest hero
+      const S = SKILLS.mage;
+      const target = nearest[0].p;
+      const r = 1.9 * S.aoeMult;
+      const cx = target.x, cz = target.z;
+      this.emit({
+        t: 'shoot', k: 'magic', big: 1, lob: 1,
+        f: [rnd2(pos.x), 1.2, rnd2(pos.z)], to: [rnd2(cx), 0.4, rnd2(cz)], ft: S.flightT,
+      });
+      this.pending.push({ at: this.time + S.flightT, fn: () => {
+        this.emit({ t: 'aoe', x: rnd2(cx), z: rnd2(cz), r, k: 'mage' });
+        for (const p of this.players) {
+          if (p.dead) continue;
+          const d = dist2d(cx, cz, p.x, p.z);
+          if (d > r) continue;
+          const n = Math.max(d, 0.2);
+          this.damagePlayer(p, e.dmg * S.dmgMult, ((p.x - cx) / n) * 2, ((p.z - cz) / n) * 2);
+        }
+      }});
+      this.emit({ t: 'eskill', id: e.id, cls, x: rnd2(pos.x), z: rnd2(pos.z) });
     }
   }
 
@@ -1849,6 +1950,13 @@ export class Sim {
       }
 
       e.atkCd -= dt;
+      if (e.armorBoostT > 0) e.armorBoostT = Math.max(e.armorBoostT - dt, 0);
+
+      // the Sombra throws its hero's own skill back at the party
+      if (e.skillCd > 0 && this.phase !== 'over') {
+        e.skillT -= dt;
+        if (e.skillT <= 0) { e.skillT = e.skillCd; this.shadowSkill(e); }
+      }
 
       // the Black Widow spins webs on her own beat, independent of
       // whatever she is spitting at
@@ -1875,7 +1983,9 @@ export class Sim {
           foes.sort((a, b) => a.d - b.d);
           const aim = foes[0];
           e.seek.target.copy(pos);
-          e.vehicle.velocity.multiplyScalar(0.6);
+          // a breathing dragon keeps gliding slowly onto its target
+          // instead of stopping dead like the other ranged attackers
+          e.vehicle.velocity.multiplyScalar(e.breath ? 0.85 : 0.6);
           e.yaw = Math.atan2(aim.p.x - pos.x, aim.p.z - pos.z);
           if (e.atkCd <= 0) {
             e.atkCd = 1 / ranged.rate;
@@ -2222,6 +2332,9 @@ export class Sim {
         // attack range (index 27) — the owning client turns to face any
         // foe inside it, so it needs the wave/weapon-adjusted value
         rnd2(p.range),
+        // status the Black Widow inflicts (index 28): 1 poisoned,
+        // 2 webbed — the client tints and marks the hero from this
+        (p.poisonT > 0 ? 1 : 0) | (p.webbed ? 2 : 0),
       ]),
       en: this.enemies.entities.map((e) => [
         e.id, e.kind, rnd2(e.vehicle.position.x), rnd2(e.vehicle.position.z),
