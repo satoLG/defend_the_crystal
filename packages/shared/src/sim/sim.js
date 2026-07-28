@@ -2064,7 +2064,11 @@ export class Sim {
           e.yaw = Math.atan2(aim.p.x - pos.x, aim.p.z - pos.z);
           if (e.atkCd <= 0) {
             e.atkCd = 1 / ranged.rate;
-            this.emit({ t: 'atk', id: e.id, tx: rnd2(aim.p.x), tz: rnd2(aim.p.z), r: 1 });
+            // the dragon's lunge event drives its own animation; an
+            // `atk` on top of it played the head-butt a SECOND time
+            if (!e.breath) {
+              this.emit({ t: 'atk', id: e.id, tx: rnd2(aim.p.x), tz: rnd2(aim.p.z), r: 1 });
+            }
             if (e.pumpkin) {
               this.throwPumpkinAt(e, aim.p, aim.d);
             } else if (e.breath) {
