@@ -21,10 +21,8 @@ import { music } from './music.js';
 import { isInstalled, hasNativePrompt, promptInstall, onInstallChange } from './pwa.js';
 import { loadRoster, saveRoster, defaultCharacter, petRefOf, grantPetXp, loadoutOf } from './character.js';
 import { getSlots } from './render/customize.js';
-import { CharacterPreview } from './render/preview.js';
 import {
-  BODY_PARTS, DRACULA_LOOK, ENEMY_PROPS,
-  loadDraculaLook, saveDraculaLook,
+  DRAGON_FX, loadDragonFx, saveDragonFx,
 } from './render/view.js';
 import { NPCS } from '@dtc/shared/sanctuary.js';
 
@@ -1808,80 +1806,74 @@ export class UI {
     this.bindDevSkin();
   }
 
-  // ---- Drácula skin editor ----------------------------------------
-  // Per-part tint on a live turntable, running the very same
-  // applyBodyTint() the match uses so the preview can't drift from what
-  // spawns. Values persist locally while they're being dialled in;
-  // "Copiar JSON" hands back something to paste into DRACULA_LOOK.
+  // ---- dragon FX editor -------------------------------------------
+  // Dials in where the breath leaves the model and which frame of the
+  // lunge it freezes on. Values persist locally while they're being
+  // tuned; "Copiar JSON" hands back something to paste into DRAGON_FX.
+  // Applies live — start wave 90 with the panel open and drag.
   bindDevSkin() {
     const panel = $('devskin');
     const rows = $('devskin-rows');
-    this.devLook = { ...loadDraculaLook() };
+    this.devFx = { ...loadDragonFx() };
 
-    const LABELS = {
-      head: 'cabeça', torso: 'tronco',
-      'arm-right': 'braço dir', 'arm-left': 'braço esq',
-      'leg-right': 'perna dir', 'leg-left': 'perna esq',
-    };
-    const hex = (v) => '#' + (v >>> 0).toString(16).padStart(6, '0');
-
-    for (const key of BODY_PARTS) {
+    const FIELDS = [
+      ['mouthF', 'boca ↔ frente', 0, 5, 0.05],
+      ['mouthY', 'boca ↕ altura', 0, 6, 0.05],
+      ['mouthS', 'boca ↔ lado', -2, 2, 0.05],
+      ['poseAt', 'frame da pose', 0, 1, 0.02],
+      ['spread', 'concentração', 0, 1, 0.05],
+      ['drop', 'queda do jato', 0, 1.5, 0.05],
+    ];
+    const readouts = {};
+    for (const [key, label, min, max, step] of FIELDS) {
       const row = document.createElement('label');
       row.className = 'devskin-row';
-      row.innerHTML = `<span>${LABELS[key]}</span>`;
+      const name = document.createElement('span');
+      name.textContent = label;
+      row.appendChild(name);
       const input = document.createElement('input');
-      input.type = 'color';
-      input.value = hex(this.devLook[key] ?? 0x888888);
+      input.type = 'range';
+      input.min = String(min); input.max = String(max); input.step = String(step);
+      input.value = String(this.devFx[key]);
+      const out = document.createElement('b');
+      out.textContent = String(this.devFx[key]);
+      readouts[key] = { input, out };
       input.addEventListener('input', () => {
-        this.devLook[key] = parseInt(input.value.slice(1), 16);
-        this.refreshDevSkin();
+        this.devFx[key] = +input.value;
+        out.textContent = input.value;
+        saveDragonFx(this.devFx);
       });
       row.appendChild(input);
+      row.appendChild(out);
       rows.appendChild(row);
     }
 
     bindTap($('devskin-open'), () => {
       panel.classList.remove('hidden');
       $('devwave').classList.add('hidden');
-      if (!this.devPreview) {
-        this.devPreview = new CharacterPreview($('devskin-canvas'));
-      }
-      this.refreshDevSkin(true);
-      this.devPreview.start();
+      $('devskin-note').textContent = 'inicie a wave 90 e ajuste enquanto ele cospe';
     });
-    bindTap($('devskin-close'), () => {
-      panel.classList.add('hidden');
-      this.devPreview?.stop();
-    });
+    bindTap($('devskin-close'), () => panel.classList.add('hidden'));
     bindTap($('devskin-copy'), async () => {
-      const body = [...BODY_PARTS].map((k) => `  '${k}': 0x${(this.devLook[k] >>> 0).toString(16).padStart(6, '0')},`);
-      const text = `export const DRACULA_LOOK = {\n${body.join('\n')}\n};`;
+      const body = FIELDS.map(([k]) => `  ${k}: ${this.devFx[k]},`).join('\n');
+      const text = `export const DRAGON_FX = {\n${body}\n};`;
       try {
         await navigator.clipboard.writeText(text);
-        $('devskin-note').textContent = 'copiado — cole em DRACULA_LOOK (view.js)';
+        $('devskin-note').textContent = 'copiado — cole em DRAGON_FX (view.js)';
       } catch {
         $('devskin-note').textContent = text;
       }
     });
     bindTap($('devskin-reset'), () => {
-      this.devLook = { ...DRACULA_LOOK };
-      saveDraculaLook(this.devLook);
-      // rebuild the pickers from the restored values
-      const inputs = rows.querySelectorAll('input[type="color"]');
-      BODY_PARTS.forEach((k, i) => {
-        if (inputs[i]) inputs[i].value = hex(this.devLook[k] ?? 0x888888);
-      });
-      this.refreshDevSkin(true);
+      this.devFx = { ...DRAGON_FX };
+      saveDragonFx(this.devFx);
+      for (const [key] of FIELDS) {
+        readouts[key].input.value = String(this.devFx[key]);
+        readouts[key].out.textContent = String(this.devFx[key]);
+      }
     });
   }
 
-  // `rebuild` when the body itself must be remade rather than retinted
-  refreshDevSkin(rebuild = false) {
-    saveDraculaLook(this.devLook);
-    if (!this.devPreview) return;
-    if (rebuild) this.devPreview.setEnemy('enemy-vampire', this.devLook, ENEMY_PROPS.dracula);
-    else this.devPreview.setLook(this.devLook);
-  }
 
   // called every frame with the freshest snapshot
   updateHud(snap, selfId) {
@@ -1921,14 +1913,13 @@ export class UI {
 
     // testing wave picker — same window the server enforces: host only,
     // build phase, and only while no wave has run yet
-    // …and never on top of the skin editor, which takes the same corner
+    // …and never on top of the FX editor, which takes the same corner.
+    // That editor stays available mid-wave on purpose: the whole point
+    // is dialling the dragon in WHILE it is breathing.
     const skinOpen = !$('devskin').classList.contains('hidden');
     const devOpen = !!(this.devTools && this.isHost && snap.ph === 'build' && snap.w === 0);
     $('devwave').classList.toggle('hidden', !devOpen || skinOpen);
-    if (!devOpen && skinOpen) {
-      $('devskin').classList.add('hidden');
-      this.devPreview?.stop();
-    }
+    if (skinOpen && !this.devTools) $('devskin').classList.add('hidden');
     if (devOpen) {
       // the box ships ticked but the sim boots with it off, so push the
       // checkbox's state until the snapshot agrees — one round trip

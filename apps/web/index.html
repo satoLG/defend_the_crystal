@@ -283,18 +283,19 @@
           <span>god mode</span>
         </label>
         <div id="devwave-info" class="devwave-info"></div>
-        <button id="devskin-open" class="btn small">Drácula…</button>
+        <button id="devskin-open" class="btn small">Dragão…</button>
       </div>
 
-      <!-- Testing overlay: dial in Drácula's per-part tint against a live
-           turntable, then copy the values into DRACULA_LOOK. -->
+      <!-- Testing overlay: dial in where the dragon's fire leaves the
+           model and which frame of the lunge it freezes on, against the
+           real dragon, then copy the values into DRAGON_FX. -->
       <div id="devskin" class="hidden">
         <div class="devwave-head">
-          <span class="devwave-tag">SKIN</span>
-          <span>Drácula</span>
+          <span class="devwave-tag">FX</span>
+          <span>Dragão</span>
           <button id="devskin-close" class="btn small">✕</button>
         </div>
-        <canvas id="devskin-canvas"></canvas>
+        
         <div id="devskin-rows"></div>
         <div class="devwave-row">
           <button id="devskin-copy" class="btn small primary">Copiar JSON</button>

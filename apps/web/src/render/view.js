@@ -221,6 +221,31 @@ export const BLOOD_VAMPIRE_LOOK = {
 // values into DRACULA_LOOK above and the storage entry stops mattering.
 const DRACULA_LOOK_KEY = 'dtc-dracula-look';
 
+// Where the dragon's fire leaves the model, and how its lunge is held.
+// Offsets are in the dragon's own local frame (x = right, y = up,
+// z = forward), so they follow it as it turns. Tuned live through the
+// dev overlay (`?dev=1` -> Dragão) which writes this same shape.
+export const DRAGON_FX = {
+  mouthF: 2.0,   // forward from its centre, toward the snout
+  mouthY: 2.4,   // height of the mouth
+  mouthS: 0.0,   // sideways nudge, when the head sits off-centre
+  poseAt: 1.0,   // where in the lunge clip to freeze (0..1 of its length)
+  spread: 0.55,  // how much of the cone the embers hug near the head
+  drop: 0.85,    // how hard the plume falls toward the ground
+};
+const DRAGON_FX_KEY = 'dtc-dragon-fx';
+
+export function loadDragonFx() {
+  try {
+    const raw = localStorage.getItem(DRAGON_FX_KEY);
+    if (raw) return { ...DRAGON_FX, ...JSON.parse(raw) };
+  } catch { /* fall through to the built-in values */ }
+  return DRAGON_FX;
+}
+export function saveDragonFx(fx) {
+  try { localStorage.setItem(DRAGON_FX_KEY, JSON.stringify(fx)); } catch { /* private mode */ }
+}
+
 export function loadDraculaLook() {
   try {
     const raw = localStorage.getItem(DRACULA_LOOK_KEY);
@@ -1035,19 +1060,30 @@ export class GameView {
   holdAttackPose(actor, hold) {
     const a = actor.actions['attack-melee-right'];
     if (!a) return;
+    // freeze point inside the clip, so the exact frame the head is
+    // thrown forward can be dialled in rather than guessed
+    const poseAt = loadDragonFx().poseAt;
     if (actor.oneShot) actor.oneShot.stop();
     if (actor.current) actor.current.fadeOut(0.1);
     actor.oneShot = a;
     a.reset();
     a.setLoop(THREE.LoopOnce, 1);
-    a.clampWhenFinished = true; // hold the final pose instead of snapping
+    a.clampWhenFinished = true; // hold the pose instead of snapping back
     a.timeScale = 1;
     a.fadeIn(0.1).play();
+    // stop it dead on the chosen frame once it gets there
+    const clipDur = a.getClip().duration;
+    const stopAt = Math.max(Math.min(poseAt, 1), 0) * clipDur;
+    clearTimeout(actor.poseT);
+    actor.poseT = setTimeout(() => {
+      if (actor.oneShot === a) { a.paused = true; a.time = stopAt; }
+    }, stopAt * 1000);
     // the mixer's 'finished' listener would drop it straight back into
     // locomotion, so the release is scheduled here instead
     clearTimeout(actor.holdT);
     actor.holdT = setTimeout(() => {
       if (actor.oneShot !== a) return;
+      a.paused = false;
       a.clampWhenFinished = false;
       a.fadeOut(0.25);
       actor.oneShot = null;
@@ -1055,15 +1091,23 @@ export class GameView {
     }, hold * 1000);
   }
 
-  makeHpBar(width = 1.0, y = 1.6) {
+  // `onTop` drops depth testing so the bar is never hidden by anything
+  // parented under it — the boss marker cone was covering it
+  makeHpBar(width = 1.0, y = 1.6, h = 0.13, onTop = false) {
     const g = new THREE.Group();
     const bg = new THREE.Mesh(
-      new THREE.PlaneGeometry(width, 0.13),
-      new THREE.MeshBasicMaterial({ color: 0x25101a, transparent: true, opacity: 0.85, depthWrite: false })
+      new THREE.PlaneGeometry(width, h),
+      new THREE.MeshBasicMaterial({
+        color: 0x25101a, transparent: true, opacity: 0.85,
+        depthWrite: false, depthTest: !onTop,
+      })
     );
     const fg = new THREE.Mesh(
-      new THREE.PlaneGeometry(width, 0.13),
-      new THREE.MeshBasicMaterial({ color: 0x58d858, transparent: true, opacity: 0.95, depthWrite: false })
+      new THREE.PlaneGeometry(width, h),
+      new THREE.MeshBasicMaterial({
+        color: 0x58d858, transparent: true, opacity: 0.95,
+        depthWrite: false, depthTest: !onTop,
+      })
     );
     fg.position.z = 0.001;
     g.add(bg, fg);
@@ -1602,15 +1646,18 @@ export class GameView {
     if (row[EN.BOSS] > 0) {
       const crown = new THREE.Mesh(
         new THREE.ConeGeometry(0.16, 0.22, 5),
+        // red marks a boss, orange a sub-boss — the gold it used to be
+        // read as a reward rather than a warning
         new THREE.MeshStandardMaterial({
-          color: isBoss ? 0xffd24a : 0xff7a4a,
-          emissive: isBoss ? 0xaa7a00 : 0x882200, emissiveIntensity: 0.8,
+          color: isBoss ? 0xe01a1a : 0xff8a20,
+          emissive: isBoss ? 0x8a0000 : 0xa04000, emissiveIntensity: 0.9,
         })
       );
       crown.position.y = (top + 0.2) / scale; // constant world margin
       // it grows with the boss, but only so far: on the Viúva Negra at
       // 6× the marker was swallowing its own health bar
       crown.scale.setScalar(Math.min(1, 2.5 / scale));
+      crown.renderOrder = 5; // never in front of the bar above it
       a.group.add(crown);
     }
     // The HP bar sits just over the head and the nameplate is stacked
@@ -1630,8 +1677,13 @@ export class GameView {
       label.position.y = barY + (0.18 + label.userData.halfH) * inv;
       a.group.add(label);
     }
-    a.hpBar = this.makeHpBar(row[EN.BOSS] ? 1.3 : 0.85, barY);
+    // a boss bar has to hold its own against the nameplate above it,
+    // and draw over the marker cone that used to cover it
+    const boss = row[EN.BOSS] > 0;
+    a.hpBar = this.makeHpBar(boss ? 2.1 : 0.85, barY, boss ? 0.22 : 0.13, boss);
     a.hpBar.scale.setScalar(inv);
+    a.hpBar.renderOrder = 11;
+    a.hpBar.traverse((o) => { if (o.isMesh) o.renderOrder = 11; });
     a.hpBar.visible = false;
     a.group.add(a.hpBar);
     a.statusMask = 0;
@@ -1648,27 +1700,30 @@ export class GameView {
   // one overlay per active status: chill ring (slow), rising embers
   // (burn), rising bubbles (poison), orbiting stars (stun). Driven by
   // the snapshot's status bitmask so every client shows the same state.
-  setStatusFx(a, mask) {
+  // `burnAs` swaps which sprite material the burn overlay uses, so the
+  // dragon's purple fire reads differently from an ordinary flame
+  setStatusFx(a, mask, burnAs = null) {
     // an actor that never carried status has no bookkeeping yet — seed
     // it rather than throwing every frame inside the render loop
     if (!a.statusFx) { a.statusFx = {}; a.statusMask = -1; }
+    if (burnAs !== (a.burnAs || null)) { a.burnAs = burnAs; a.statusMask = -1; }
     if (a.statusMask === mask) return;
     const defs = [
       [ST_SLOW, 'slow'], [ST_BURN, 'burn'], [ST_POISON, 'poison'], [ST_STUN, 'stun'],
     ];
     for (const [bit, key] of defs) {
       const on = (mask & bit) !== 0, had = !!a.statusFx[key];
-      if (on && !had) a.statusFx[key] = this.makeStatusFx(a, key);
+      if (on && !had) a.statusFx[key] = this.makeStatusFx(a, key, a.burnAs);
       else if (!on && had) { a.group.remove(a.statusFx[key]); delete a.statusFx[key]; }
     }
     a.statusMask = mask;
     // body glow: burn > poison > slow (the strongest tell wins)
-    a.statusTint = (mask & ST_BURN) ? 0xff7a22
+    a.statusTint = (mask & ST_BURN) ? (a.burnAs === 'voidfire' ? 0xb45cff : 0xff7a22)
       : (mask & ST_POISON) ? 0x58d84a
       : (mask & ST_SLOW) ? 0x66c8ff : null;
   }
 
-  makeStatusFx(a, key) {
+  makeStatusFx(a, key, burnAs = null) {
     const g = new THREE.Group();
     g.userData.fx = key;
     if (key === 'slow') {
@@ -1679,7 +1734,7 @@ export class GameView {
       g.add(ring);
     } else {
       // floating particles: embers (burn), bubbles (poison), stars (stun)
-      const mat = this._statusMats[key];
+      const mat = this._statusMats[(key === 'burn' && burnAs) ? burnAs : key];
       const n = key === 'stun' ? 3 : 4;
       for (let i = 0; i < n; i++) {
         const spr = new THREE.Sprite(mat);
@@ -1720,7 +1775,7 @@ export class GameView {
               0.25 + k * 1.0,
               Math.cos((spr.userData.phase + k) * Math.PI * 3) * 0.18
             );
-            spr.material = this._statusMats[key];
+            spr.material = this._statusMats[(key === 'burn' && a.burnAs) ? a.burnAs : key];
             spr.scale.setScalar((key === 'burn' ? 0.24 : 0.18) * (1 - k * 0.6));
           }
         }
@@ -2465,7 +2520,11 @@ export class GameView {
       // the Black Widow's marks read on heroes the same way tower status
       // reads on enemies: venom glows green, a web drags like a chill
       const pst = row[PL.ST] || 0;
-      this.setStatusFx(a, ((pst & 1) ? ST_POISON : 0) | ((pst & 2) ? ST_SLOW : 0));
+      this.setStatusFx(
+        a,
+        ((pst & 1) ? ST_POISON : 0) | ((pst & 2) ? ST_SLOW : 0) | ((pst & 4) ? ST_BURN : 0),
+        (pst & 4) ? 'voidfire' : null,
+      );
     }
     for (const [id, a] of this.players) {
       if (!seenP.has(id)) {
@@ -2746,6 +2805,12 @@ export class GameView {
         break;
       }
       case 'web': this.spawnWeb(ev.x, ev.z, ev.r, ev.dur); break;
+      case 'webshot': this.spawnWebShot(ev); break;
+      case 'lunge': {
+        const a = this.enemies.get(ev.id);
+        if (a) this.holdAttackPose(a, ev.hold || 2.6);
+        break;
+      }
       case 'breath': {
         this.spawnBreath(ev);
         // hold the lunge for the length of the breath: play it once,
@@ -3178,19 +3243,45 @@ export class GameView {
 
   // the Black Widow's web: a patch on the ground that bogs down whoever
   // stands in it, fading out as the sim's timer runs down
-  spawnWeb(x, z, r, dur) {
-    const g = new THREE.Group();
+  // a cobweb, dressed so it reads against the grass: near-white and
+  // half-transparent rather than the model's own dark thread, which
+  // vanished into the ground
+  makeWebMesh(radius) {
     const web = instantiate('prop-cobweb', { shadows: false, cloneMaterials: true }).group;
-    // the model normalizes to a 1-unit footprint, so this is the radius
-    web.scale.setScalar(r * 2);
+    web.scale.setScalar(radius * 2); // model normalizes to a 1-unit footprint
     web.traverse((o) => {
       if (!o.isMesh || !o.material) return;
       o.material.transparent = true;
-      o.material.opacity = 0.85;
+      o.material.opacity = 0.55;
       o.material.depthWrite = false;
-      o.material.color.set(0xd8dde6);
+      o.material.color.set(0xf2f5ff);
+      if (o.material.emissive) {
+        o.material.emissive.set(0x8fa0c0);
+        o.material.emissiveIntensity = 0.5;
+      }
     });
-    g.add(web);
+    return web;
+  }
+
+  // the web in flight: leaves her small and swells to full size as it
+  // travels, landing exactly where the patch will sit
+  spawnWebShot(ev) {
+    const g = new THREE.Group();
+    g.add(this.makeWebMesh(ev.r));
+    const from = new THREE.Vector3(...ev.f);
+    const to = new THREE.Vector3(...ev.to);
+    from.y += terrainY(from.z);
+    to.y += terrainY(to.z);
+    g.position.copy(from);
+    this.scene.add(g);
+    this.effects.push({
+      mesh: g, t: 0, dur: Math.max(ev.ft, 0.1), type: 'webshot', from, to,
+    });
+  }
+
+  spawnWeb(x, z, r, dur) {
+    const g = new THREE.Group();
+    g.add(this.makeWebMesh(r));
     g.position.set(x, terrainY(z) + 0.05, z);
     this.scene.add(g);
     this.effects.push({ mesh: g, t: 0, dur: dur || 6, type: 'web' });
@@ -3199,6 +3290,7 @@ export class GameView {
   // the dragon's breath: the flamethrower's plume, thrown from a mouth
   // held high and washing down over the cone in front of it
   spawnBreath(ev) {
+    const fx = loadDragonFx();
     const g = new THREE.Group();
     const parts = [];
     for (let i = 0; i < 44; i++) {
@@ -3213,13 +3305,13 @@ export class GameView {
         speed: 0.6 + Math.random() * 0.8,
         // most embers hug the mouth before the plume opens out; a few
         // run the full reach, so the jet reads as coming FROM the head
-        near: Math.random() < 0.55,
+        near: Math.random() < fx.spread,
       });
     }
     this.scene.add(g);
     this.effects.push({
       mesh: g, t: 0, dur: ev.dur || 2.6, type: 'breath',
-      x: ev.x, z: ev.z, yaw: ev.yaw, r: ev.r, mouthY: ev.my || 2.6, parts,
+      x: ev.x, z: ev.z, yaw: ev.yaw, r: ev.r, fx, id: ev.id, parts,
     });
   }
 
@@ -3499,24 +3591,38 @@ export class GameView {
         // cone opens with distance rather than being a fixed fan, and
         // over half the embers stay bunched near the head, so the jet
         // reads as leaving the mouth instead of appearing along a line.
+        // the mouth rides with the dragon, so the jet stays attached
+        // while it glides forward through the breath
+        const src = this.enemies.get(e.id);
+        const ox = src ? src.group.position.x : e.x;
+        const oz = src ? src.group.position.z : e.z;
+        const f = e.fx;
+        const mx = ox + Math.sin(e.yaw) * f.mouthF + Math.cos(e.yaw) * f.mouthS;
+        const mz = oz + Math.cos(e.yaw) * f.mouthF - Math.sin(e.yaw) * f.mouthS;
         for (const p of e.parts) {
           const kk = (k * p.speed + p.k) % 1;
           const reach = p.near ? kk * 0.45 : kk;
           const ang = e.yaw + p.side * reach;
           const rad = reach * e.r;
           p.spr.position.set(
-            e.x + Math.sin(ang) * rad,
+            mx + Math.sin(ang) * rad,
             // leaves at mouth height and arcs down onto the ground
-            e.mouthY - reach * reach * (e.mouthY - 0.25),
-            e.z + Math.cos(ang) * rad
+            f.mouthY - reach * reach * (f.mouthY - 0.25) * f.drop,
+            mz + Math.cos(ang) * rad
           );
           p.spr.scale.setScalar(0.22 + reach * 0.7);
         }
+      } else if (e.type === 'webshot') {
+        // sails out at half size and swells to full as it lands
+        e.mesh.position.lerpVectors(e.from, e.to, k);
+        e.mesh.position.y += Math.sin(k * Math.PI) * 0.8; // small arc
+        e.mesh.scale.setScalar(0.5 + k * 0.5);
+        e.mesh.rotation.y += dt * 3;
       } else if (e.type === 'web') {
         // holds solid, then thins out as the patch expires
         const fade = k > 0.7 ? 1 - (k - 0.7) / 0.3 : 1;
         e.mesh.traverse((o) => {
-          if (o.isMesh && o.material) o.material.opacity = 0.85 * fade;
+          if (o.isMesh && o.material) o.material.opacity = 0.55 * fade;
         });
       } else if (e.type === 'gfire') {
         // flames flicker on the burning ground, fading near the end

@@ -579,7 +579,9 @@ input:focus { border-color: var(--gold); }
   background: none; border: 1px solid #3a4152; border-radius: 3px;
   cursor: pointer;
 }
-.devskin-row input[type="range"] { flex: 1; accent-color: #b4462a; }
+.devskin-row input[type="range"] { flex: 1; accent-color: #b4462a; min-width: 0; }
+.devskin-row b { color: var(--gold); font-size: 0.7rem; min-width: 32px; text-align: right; }
+.devskin-row span { flex: 0 0 88px; font-size: 0.7rem; }
 .devwave-info b { color: #e0b050; font-weight: 600; }
 #hud-action .btn {
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
