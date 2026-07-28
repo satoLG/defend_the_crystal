@@ -1724,9 +1724,13 @@ export class GameView {
     }
     a.statusMask = mask;
     // body glow: burn > poison > slow (the strongest tell wins)
+    // Being slowed does NOT wash the body — on a hero standing in a web
+    // that pale blue glow reads as the character having been recoloured
+    // white. The chill ring at their feet already says it. Only the two
+    // damaging statuses tint the body.
     a.statusTint = (mask & ST_BURN) ? (a.burnAs === 'voidfire' ? 0xb45cff : 0xff7a22)
       : (mask & ST_POISON) ? 0x58d84a
-      : (mask & ST_SLOW) ? 0x66c8ff : null;
+      : (mask & ST_SLOW) ? (a.cls ? null : 0x66c8ff) : null;
   }
 
   makeStatusFx(a, key, burnAs = null) {
@@ -3255,20 +3259,41 @@ export class GameView {
   // half-transparent rather than the model's own dark thread, which
   // vanished into the ground
   makeWebMesh(radius) {
+    const g = new THREE.Group();
+    // A cobweb is mostly holes: the model is thin threads with nothing
+    // between them, so on grass it reads as a few stray lines. A pale,
+    // barely-there disc fills the gaps so the patch is legible as a
+    // patch, with the threads still drawn on top of it.
+    const fill = new THREE.Mesh(
+      this._discGeo,
+      new THREE.MeshBasicMaterial({
+        color: 0xeef2ff, transparent: true, opacity: 0.3,
+        depthWrite: false, side: THREE.DoubleSide,
+      })
+    );
+    fill.rotation.x = -Math.PI / 2;
+    fill.position.y = 0.02;
+    fill.scale.setScalar(radius * 0.95);
+    fill.renderOrder = 6;
+    fill.userData.webFill = true;
+    g.add(fill);
+
     const web = instantiate('prop-cobweb', { shadows: false, cloneMaterials: true }).group;
     web.scale.setScalar(radius * 2); // model normalizes to a 1-unit footprint
     web.traverse((o) => {
       if (!o.isMesh || !o.material) return;
       o.material.transparent = true;
-      o.material.opacity = 0.55;
+      o.material.opacity = 0.8;
       o.material.depthWrite = false;
       o.material.color.set(0xf2f5ff);
+      o.renderOrder = 7; // threads over the fill
       if (o.material.emissive) {
         o.material.emissive.set(0x8fa0c0);
         o.material.emissiveIntensity = 0.5;
       }
     });
-    return web;
+    g.add(web);
+    return g;
   }
 
   // the web in flight: leaves her small and swells to full size as it
@@ -3627,10 +3652,12 @@ export class GameView {
         e.mesh.scale.setScalar(0.5 + k * 0.5);
         e.mesh.rotation.y += dt * 3;
       } else if (e.type === 'web') {
-        // holds solid, then thins out as the patch expires
+        // holds solid, then thins out as the patch expires — the fill
+        // fades from its own lower base so it never outshines the threads
         const fade = k > 0.7 ? 1 - (k - 0.7) / 0.3 : 1;
         e.mesh.traverse((o) => {
-          if (o.isMesh && o.material) o.material.opacity = 0.55 * fade;
+          if (!o.isMesh || !o.material) return;
+          o.material.opacity = (o.userData.webFill ? 0.3 : 0.8) * fade;
         });
       } else if (e.type === 'gfire') {
         // flames flicker on the burning ground, fading near the end
