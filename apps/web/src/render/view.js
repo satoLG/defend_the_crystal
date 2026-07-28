@@ -1057,7 +1057,12 @@ export class GameView {
   // `hold` seconds before letting the locomotion loop take back over.
   // The dragon uses it to keep its head thrown forward for as long as
   // the fire is pouring, instead of snapping back to flapping mid-jet.
-  holdAttackPose(actor, hold) {
+  // Plays the lunge ONCE, timed so it reaches the chosen frame exactly
+  // as the wind-up ends, then freezes there for the rest of `hold` —
+  // which is the whole time the fire is pouring. Stretching the clip to
+  // fit the wind-up is what makes "stop just before the flame" true
+  // regardless of which frame is picked.
+  holdAttackPose(actor, hold, windup = 0.55) {
     const a = actor.actions['attack-melee-right'];
     if (!a) return;
     // freeze point inside the clip, so the exact frame the head is
@@ -1069,15 +1074,15 @@ export class GameView {
     a.reset();
     a.setLoop(THREE.LoopOnce, 1);
     a.clampWhenFinished = true; // hold the pose instead of snapping back
-    a.timeScale = 1;
-    a.fadeIn(0.1).play();
-    // stop it dead on the chosen frame once it gets there
     const clipDur = a.getClip().duration;
-    const stopAt = Math.max(Math.min(poseAt, 1), 0) * clipDur;
+    const stopAt = Math.max(Math.min(poseAt, 1), 0.02) * clipDur;
+    // stretch (or hurry) the clip so the pose frame lands on the beat
+    a.timeScale = Math.max(stopAt / Math.max(windup, 0.05), 0.05);
+    a.fadeIn(0.1).play();
     clearTimeout(actor.poseT);
     actor.poseT = setTimeout(() => {
       if (actor.oneShot === a) { a.paused = true; a.time = stopAt; }
-    }, stopAt * 1000);
+    }, windup * 1000);
     // the mixer's 'finished' listener would drop it straight back into
     // locomotion, so the release is scheduled here instead
     clearTimeout(actor.holdT);
@@ -1610,6 +1615,7 @@ export class GameView {
       for (const m of a.mats) { m.transparent = true; m.opacity = 0.8; }
     }
     const bossVariant = this.bossVariants.get(id);
+    if (bossVariant === 'dragao') this.dragonOnField = true;
     if (mirror) { a.mirrorCls = mirror.cls; this.dressShadow(a, mirror); }
     // bone throwers are archers to the sim, but they lob by hand — no bow
     else if (a.isArcher && def.archer?.proj !== 'bone') this.attachProps(a, ENEMY_PROPS.archer);
@@ -2576,6 +2582,7 @@ export class GameView {
     }
     for (const [id, a] of this.enemies) {
       if (!seenE.has(id)) {
+        if (this.bossVariants.get(id) === 'dragao') this.dragonOnField = false;
         this.scene.remove(a.group);
         this.enemies.delete(id);
         this.bossVariants.delete(id);
@@ -2723,9 +2730,10 @@ export class GameView {
         if (ev.player) break; // players just hide via snapshot
         const a = this.enemies.get(ev.id);
         if (a) {
+          if (this.bossVariants.get(ev.id) === 'dragao') this.dragonOnField = false;
           this.enemies.delete(ev.id);
           this.bossVariants.delete(ev.id);
-        this.mirrors.delete(ev.id);
+          this.mirrors.delete(ev.id);
           this.spawnCorpse(a);
         }
         break;
@@ -2808,7 +2816,7 @@ export class GameView {
       case 'webshot': this.spawnWebShot(ev); break;
       case 'lunge': {
         const a = this.enemies.get(ev.id);
-        if (a) this.holdAttackPose(a, ev.hold || 2.6);
+        if (a) this.holdAttackPose(a, ev.hold || 2.6, ev.windup || 0.55);
         break;
       }
       case 'breath': {

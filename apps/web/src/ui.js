@@ -1913,9 +1913,16 @@ export class UI {
 
     // testing wave picker — same window the server enforces: host only,
     // build phase, and only while no wave has run yet
-    // …and never on top of the FX editor, which takes the same corner.
-    // That editor stays available mid-wave on purpose: the whole point
-    // is dialling the dragon in WHILE it is breathing.
+    // The FX editor takes the same corner as the wave picker, and stays
+    // available mid-wave on purpose: the point is dialling the dragon in
+    // WHILE it is breathing. It opens itself the moment one is on the
+    // field and closes when it dies, so the tuning window is never
+    // missed — nothing in the picker is reachable once a wave is running.
+    const dragonUp = !!(this.devTools && this.cb.dragonOnField?.());
+    if (dragonUp !== this._dragonWas) {
+      this._dragonWas = dragonUp;
+      $('devskin').classList.toggle('hidden', !dragonUp);
+    }
     const skinOpen = !$('devskin').classList.contains('hidden');
     const devOpen = !!(this.devTools && this.isHost && snap.ph === 'build' && snap.w === 0);
     $('devwave').classList.toggle('hidden', !devOpen || skinOpen);

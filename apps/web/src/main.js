@@ -124,6 +124,9 @@ async function boot() {
   ui = new UI({
     onHost: hostGame,
     onJoin: joinGame,
+    // testing: lets the HUD surface the dragon tuner exactly while one
+    // is on the field
+    dragonOnField: () => !!view?.dragonOnField,
     onStartMatch: startMatch,
     onAction: sendAction,
     onJump: () => doJump(),
