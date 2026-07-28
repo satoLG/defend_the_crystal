@@ -702,7 +702,10 @@ export const BOSSES = {
   // flamethrower tower uses, just mounted on a boss. Also alone.
   dragao:   { kind: 'dragon', name: 'Dragão das Trevas',
               hpMult: 5.5, dmgMult: 3.2, speedMult: 0.85, armor: 0.35, scale: 1.3,
-              breath: { range: 6.5, rate: 0.32, r: 5.5, arc: 0.75, dps: 60, dur: 2.6 },
+              // windup: the lunge plays and HOLDS this long before any fire
+              // leaves the mouth; dur is how long the plume then pours
+              breath: { range: 7, rate: 0.22, r: 6, arc: 0.75, dps: 55,
+                        windup: 0.55, dur: 4.5, burnDps: 22, burnDur: 4 },
               escort: [] },
   // the run's own strongest hero, rendered in black with red eyes and
   // swinging their kit back at them. `kind` is only a fallback body —
@@ -715,6 +718,7 @@ export const BOSSES = {
   // somehow no hero to copy.
   sombra:   { kind: 'orc', name: 'Sombra do Herói',
               hpMult: 12, dmgMult: 1.2, armor: 0.4, mirrorsHero: true, duel: 60,
+              speedMult: 0.55, aggroR: 9,
               skillCd: 15,
               shades: { n: 1, scale: 1.1, hpMult: 0.1, dmgMult: 0.5 } },
 };

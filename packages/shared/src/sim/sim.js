@@ -113,6 +113,7 @@ export class Sim {
       // time, and her webs drag both the stride and the swing. Factors
       // are 1 when clean, so they can be multiplied in unconditionally.
       poisonT: 0, poisonDps: 0, poisonTick: 0,
+      burnT: 0, burnDps: 0, burnTick: 0,
       slowMove: 1, slowRate: 1, webbed: 0,
       kills: 0, obst: 0, lastInputT: this.time,
     });
@@ -851,7 +852,9 @@ export class Sim {
         const dps = Math.max(hero.atk * hero.rate, 1);
         stats.hp = dps * bossDef.duel;
         stats.dmg = hero.atk * bossDef.dmgMult;
-        stats.speed = hero.speed * 0.85; // it stalks rather than sprints
+        // it stalks: a hero's own pace on a body three times the size
+        // read as a sprint, and there was no reading its wind-ups
+        stats.speed = hero.speed * bossDef.speedMult;
       }
     }
     // one of its shades wears a class too, just a small weak one
@@ -879,6 +882,20 @@ export class Sim {
     if (archer && bossDef?.multishot) {
       archer.range += 1.5;
       archer.multishot = true;
+    }
+    // A mirrored hero fights the way that hero does. Without this the
+    // Sombra walked up and swung at everything, however the class it
+    // wore actually attacks — the archer has to shoot, the mage has to
+    // cast. Melee classes keep the default close-quarters behaviour.
+    if (mirror) {
+      const base = CLASSES[mirror.cls];
+      if (base && base.range > 3) {
+        archer = {
+          range: base.range, rate: base.rate, projSpeed: 14,
+          proj: base.aoe ? 'magic' : 'arrow',
+          aoe: base.aoe || 0,
+        };
+      }
     }
 
     const e = this.world.add({
@@ -916,6 +933,9 @@ export class Sim {
       jumpCd: ENEMY.JUMP_EVERY * (0.4 + Math.random() * 0.6),
       chainJumps: bossDef?.jumps || 1,
       chainLeft: 0, chainT: 0,
+      // most enemies notice a hero at ENEMY.AGGRO_RADIUS; a boss meant to
+      // hunt the party needs to see further than 3 units
+      aggroR: bossDef?.aggroR || ENEMY.AGGRO_RADIUS,
       summoner: !!def.summoner, summonCd: SUMMON.FIRST,
       pumpkin: bossDef?.pumpkin || null,
       // blood magic: a ranged drain that heals the caster for a share of
@@ -1230,6 +1250,14 @@ export class Sim {
     p.poisonT = Math.max(p.poisonT, dur);
   }
 
+  // the dragon's breath leaves heroes alight, the way the flamethrower
+  // tower leaves enemies alight
+  burnPlayer(p, dps, dur) {
+    if (p.dead) return;
+    p.burnDps = Math.max(p.burnDps, dps);
+    p.burnT = Math.max(p.burnT, dur);
+  }
+
   // per-frame status upkeep: venom damage, and the web factors recomputed
   // from whichever patches the hero is standing in right now
   tickPlayerStatus(p, dt) {
@@ -1241,6 +1269,15 @@ export class Sim {
         p.poisonTick = 0;
       }
       if (p.poisonT === 0) p.poisonDps = 0;
+    }
+    if (p.burnT > 0) {
+      p.burnT = Math.max(p.burnT - dt, 0);
+      p.burnTick += dt;
+      if (p.burnTick >= 0.5) {
+        this.damagePlayer(p, p.burnDps * p.burnTick, 0, 0);
+        p.burnTick = 0;
+      }
+      if (p.burnT === 0) p.burnDps = 0;
     }
     // webs don't stack — the thickest patch underfoot wins
     let move = 1, rate = 1;
@@ -1458,12 +1495,17 @@ export class Sim {
       if (d < bestD) { bestD = d; best = q; }
     }
     const x = best ? best.x : pos.x, z = best ? best.z : pos.z;
-    // thrown, not conjured: it flies out of her and only bites where it
-    // lands, so the patch reads as something she did
-    const ft = Math.max(dist2d(pos.x, pos.z, x, z) / 10, 0.15);
+    // Thrown, not conjured. She turns her back to the target first — the
+    // web comes out of the spinnerets, so she fires it over her tail —
+    // and it flies as its own effect, growing as it goes, rather than a
+    // patch blinking into existence under the hero's feet.
+    const d = dist2d(pos.x, pos.z, x, z);
+    const ft = Math.max(d / 9, 0.25);
+    e.yaw = Math.atan2(pos.x - x, pos.z - z); // back to the target
     this.emit({
-      t: 'shoot', k: 'web', lob: 1,
-      f: [rnd2(pos.x), 1.0, rnd2(pos.z)], to: [rnd2(x), 0.15, rnd2(z)], ft: rnd2(ft),
+      t: 'webshot',
+      f: [rnd2(pos.x), 0.7, rnd2(pos.z)], to: [rnd2(x), 0.1, rnd2(z)],
+      ft: rnd2(ft), r: e.web.r,
     });
     this.pending.push({ at: this.time + ft, fn: () => {
       this.webs.push({ x, z, r: e.web.r, t: e.web.dur, moveF: e.web.moveF, rateF: e.web.rateF });
@@ -1471,41 +1513,51 @@ export class Sim {
     }});
   }
 
-  // Dragão: the flamethrower's cone, breathed from a mouth held high
+  // Dragão: the flamethrower's cone, breathed from a mouth held high.
+  // The lunge plays FIRST and the fire only starts once the head is
+  // thrown forward and held there (`windup`) — pouring flame through the
+  // wind-up read as the animation and the effect being unrelated.
   breatheFire(e) {
-    const pos = e.vehicle.position;
     const b = e.breath;
+    // the client freezes the lunge on its final frame for the wind-up
+    // plus the whole plume
+    e.breathT = b.windup + b.dur;
     this.emit({
-      t: 'breath', id: e.id, x: rnd2(pos.x), z: rnd2(pos.z),
-      yaw: rnd2(e.yaw), r: b.r, arc: b.arc, dur: b.dur,
-      my: rnd2(2.2 * (e.scale || 1) * 0.5 + 0.9), // mouth height
+      t: 'lunge', id: e.id, hold: rnd2(b.windup + b.dur), windup: rnd2(b.windup),
     });
-    // it holds the lunge for the whole breath, head thrown forward, and
-    // creeps ahead while it pours — the sim marks the window and the
-    // client freezes the clip on its last frame for that long
-    e.breathT = b.dur;
-    // damage ticks for as long as the plume is up, so walking out of it
-    // actually saves you
-    const ticks = Math.max(1, Math.round(b.dur / 0.35));
-    for (let i = 1; i <= ticks; i++) {
-      this.pending.push({ at: this.time + i * 0.35, fn: () => {
-        if (e.hp <= 0) return;
-        const o = e.vehicle.position;
-        for (const q of this.players) {
-          if (q.dead) continue;
-          const dx = q.x - o.x, dz = q.z - o.z;
-          const d = Math.hypot(dx, dz);
-          if (d > b.r) continue;
-          // inside the cone the dragon is facing
-          const ang = Math.atan2(dx, dz);
-          let diff = ang - e.yaw;
-          while (diff > Math.PI) diff -= Math.PI * 2;
-          while (diff < -Math.PI) diff += Math.PI * 2;
-          if (Math.abs(diff) > b.arc) continue;
-          this.damagePlayer(q, b.dps * 0.35, 0, 0);
-        }
-      }});
-    }
+
+    this.pending.push({ at: this.time + b.windup, fn: () => {
+      if (e.hp <= 0) return;
+      const pos = e.vehicle.position;
+      this.emit({
+        t: 'breath', id: e.id, x: rnd2(pos.x), z: rnd2(pos.z),
+        yaw: rnd2(e.yaw), r: b.r, arc: b.arc, dur: b.dur,
+      });
+      // damage ticks for as long as the plume is up, so walking out of
+      // it actually saves you — and everything it washes over keeps
+      // burning after, the way the flamethrower tower's spray does
+      const ticks = Math.max(1, Math.round(b.dur / 0.3));
+      for (let i = 1; i <= ticks; i++) {
+        this.pending.push({ at: this.time + i * 0.3, fn: () => {
+          if (e.hp <= 0) return;
+          const o = e.vehicle.position;
+          for (const q of this.players) {
+            if (q.dead) continue;
+            const dx = q.x - o.x, dz = q.z - o.z;
+            const d = Math.hypot(dx, dz);
+            if (d > b.r) continue;
+            // inside the cone the dragon is facing
+            const ang = Math.atan2(dx, dz);
+            let diff = ang - e.yaw;
+            while (diff > Math.PI) diff -= Math.PI * 2;
+            while (diff < -Math.PI) diff += Math.PI * 2;
+            if (Math.abs(diff) > b.arc) continue;
+            this.damagePlayer(q, b.dps * 0.3, 0, 0);
+            this.burnPlayer(q, b.burnDps, b.burnDur);
+          }
+        }});
+      }
+    }});
   }
 
   // The Sombra casts its hero's own power back at the party. The
@@ -1585,6 +1637,29 @@ export class Sim {
       }});
       this.emit({ t: 'eskill', id: e.id, cls, x: rnd2(pos.x), z: rnd2(pos.z) });
     }
+  }
+
+  // an arcane blast, the way the mage throws one — used by the Sombra
+  // when it wears that class
+  castBlastAt(e, p, dist) {
+    const pos = e.vehicle.position;
+    const a = e.archer;
+    const ft = Math.max(dist / a.projSpeed, 0.12);
+    const cx = p.x, cz = p.z, r = a.aoe || 1.9;
+    this.emit({
+      t: 'shoot', k: 'magic',
+      f: [rnd2(pos.x), 1.2, rnd2(pos.z)], to: [rnd2(cx), 0.5, rnd2(cz)], ft: rnd2(ft),
+    });
+    this.pending.push({ at: this.time + ft, fn: () => {
+      this.emit({ t: 'aoe', x: rnd2(cx), z: rnd2(cz), r, k: 'mage' });
+      for (const q of this.players) {
+        if (q.dead) continue;
+        const d = dist2d(cx, cz, q.x, q.z);
+        if (d > r) continue;
+        const n = Math.max(d, 0.2);
+        this.damagePlayer(q, e.dmg, ((q.x - cx) / n) * 1.2, ((q.z - cz) / n) * 1.2);
+      }
+    }});
   }
 
   // lobbed pumpkin: area damage on every character near the impact
@@ -1909,7 +1984,7 @@ export class Sim {
         let best = null, bestD = Infinity;
         for (const p of alive) {
           const d = dist2d(pos.x, pos.z, p.x, p.z);
-          if (d < bestD && d < ENEMY.AGGRO_RADIUS && this.canAggro(e, p, d)) {
+          if (d < bestD && d < (e.aggroR || ENEMY.AGGRO_RADIUS) && this.canAggro(e, p, d)) {
             bestD = d; best = p;
           }
         }
@@ -2000,6 +2075,8 @@ export class Sim {
               // Drácula reaches everyone at once; his court picks one
               if (e.blood.allTargets) for (const f of foes) this.drainAt(e, f.p, f.d);
               else this.drainAt(e, aim.p, aim.d);
+            } else if (e.archer.proj === 'magic') {
+              this.castBlastAt(e, aim.p, aim.d);
             } else if (e.archer.multishot) {
               for (const f of foes) this.shootArrowAt(e, f.p, f.d); // volley at everyone
             } else {
@@ -2334,7 +2411,7 @@ export class Sim {
         rnd2(p.range),
         // status the Black Widow inflicts (index 28): 1 poisoned,
         // 2 webbed — the client tints and marks the hero from this
-        (p.poisonT > 0 ? 1 : 0) | (p.webbed ? 2 : 0),
+        (p.poisonT > 0 ? 1 : 0) | (p.webbed ? 2 : 0) | (p.burnT > 0 ? 4 : 0),
       ]),
       en: this.enemies.entities.map((e) => [
         e.id, e.kind, rnd2(e.vehicle.position.x), rnd2(e.vehicle.position.z),
