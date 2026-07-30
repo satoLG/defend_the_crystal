@@ -204,28 +204,21 @@ export function isolateMaterials(root, fn) {
   });
 }
 
-// Drácula: bloodless skin gone red, with yellow eyes. Tuned live through
-// the dev overlay (`?dev=1` -> Drácula), which writes this same shape.
-export const DRACULA_LOOK = {
+// Drácula: bloodless skin gone red, with yellow eyes.
+const DRACULA_LOOK = {
   head: 0xb03a3a, torso: 0x8e1b1b, 'arm-right': 0xb03a3a, 'arm-left': 0xb03a3a,
   'leg-right': 0x6d1414, 'leg-left': 0x6d1414,
 };
 // his court wears the same skin, without the eyes
-export const BLOOD_VAMPIRE_LOOK = {
+const BLOOD_VAMPIRE_LOOK = {
   head: 0xa54242, torso: 0x8e3030, 'arm-right': 0xa54242, 'arm-left': 0xa54242,
   'leg-right': 0x7a2020, 'leg-left': 0x7a2020,
 };
 
-// The dev overlay stores a work-in-progress look here so it survives a
-// reload while it is being dialled in. Once it looks right, paste the
-// values into DRACULA_LOOK above and the storage entry stops mattering.
-const DRACULA_LOOK_KEY = 'dtc-dracula-look';
-
 // Where the dragon's fire leaves the model, and how its lunge is held.
 // Offsets are in the dragon's own local frame (x = right, y = up,
-// z = forward), so they follow it as it turns. Tuned live through the
-// dev overlay (`?dev=1` -> Dragão) which writes this same shape.
-export const DRAGON_FX = {
+// z = forward), so they follow it as it turns.
+const DRAGON_FX = {
   mouthF: 2.0,   // forward from its centre, toward the snout
   mouthY: 1.9,   // height of the mouth
   mouthS: 0.0,   // sideways nudge, when the head sits off-centre
@@ -233,30 +226,6 @@ export const DRAGON_FX = {
   spread: 0.55,  // how much of the cone the embers hug near the head
   drop: 0.85,    // how hard the plume falls toward the ground
 };
-const DRAGON_FX_KEY = 'dtc-dragon-fx';
-
-export function loadDragonFx() {
-  try {
-    const raw = localStorage.getItem(DRAGON_FX_KEY);
-    if (raw) return { ...DRAGON_FX, ...JSON.parse(raw) };
-  } catch { /* fall through to the built-in values */ }
-  return DRAGON_FX;
-}
-export function saveDragonFx(fx) {
-  try { localStorage.setItem(DRAGON_FX_KEY, JSON.stringify(fx)); } catch { /* private mode */ }
-}
-
-export function loadDraculaLook() {
-  try {
-    const raw = localStorage.getItem(DRACULA_LOOK_KEY);
-    if (raw) return { ...DRACULA_LOOK, ...JSON.parse(raw) };
-  } catch { /* fall through to the built-in look */ }
-  return DRACULA_LOOK;
-}
-
-export function saveDraculaLook(look) {
-  try { localStorage.setItem(DRACULA_LOOK_KEY, JSON.stringify(look)); } catch { /* private mode */ }
-}
 
 // Tint named body parts. Two things the first pass got wrong and this
 // guards against:
@@ -1067,7 +1036,7 @@ export class GameView {
     if (!a) return;
     // freeze point inside the clip, so the exact frame the head is
     // thrown forward can be dialled in rather than guessed
-    const poseAt = loadDragonFx().poseAt;
+    const poseAt = DRAGON_FX.poseAt;
     if (actor.oneShot) actor.oneShot.stop();
     if (actor.current) actor.current.fadeOut(0.1);
     actor.oneShot = a;
@@ -1615,7 +1584,6 @@ export class GameView {
       for (const m of a.mats) { m.transparent = true; m.opacity = 0.8; }
     }
     const bossVariant = this.bossVariants.get(id);
-    if (bossVariant === 'dragao') this.dragonOnField = true;
     if (mirror) { a.mirrorCls = mirror.cls; this.dressShadow(a, mirror); }
     // bone throwers are archers to the sim, but they lob by hand — no bow
     else if (a.isArcher && def.archer?.proj !== 'bone') this.attachProps(a, ENEMY_PROPS.archer);
@@ -1628,7 +1596,7 @@ export class GameView {
     // blood casters carry the orb: Drácula one per hand, his court one
     if (bossVariant === 'dracula') {
       this.attachProps(a, ENEMY_PROPS.dracula);
-      applyBodyTint(a.group, loadDraculaLook());
+      applyBodyTint(a.group, DRACULA_LOOK);
     } else if (kind === 'vampire' && vr === VR_BLOOD) {
       this.attachProps(a, ENEMY_PROPS.bloodVampire);
       applyBodyTint(a.group, BLOOD_VAMPIRE_LOOK);
@@ -2586,7 +2554,6 @@ export class GameView {
     }
     for (const [id, a] of this.enemies) {
       if (!seenE.has(id)) {
-        if (this.bossVariants.get(id) === 'dragao') this.dragonOnField = false;
         this.scene.remove(a.group);
         this.enemies.delete(id);
         this.bossVariants.delete(id);
@@ -2734,7 +2701,6 @@ export class GameView {
         if (ev.player) break; // players just hide via snapshot
         const a = this.enemies.get(ev.id);
         if (a) {
-          if (this.bossVariants.get(ev.id) === 'dragao') this.dragonOnField = false;
           this.enemies.delete(ev.id);
           this.bossVariants.delete(ev.id);
           this.mirrors.delete(ev.id);
@@ -3323,7 +3289,7 @@ export class GameView {
   // the dragon's breath: the flamethrower's plume, thrown from a mouth
   // held high and washing down over the cone in front of it
   spawnBreath(ev) {
-    const fx = loadDragonFx();
+    const fx = DRAGON_FX;
     const g = new THREE.Group();
     const parts = [];
     for (let i = 0; i < 44; i++) {

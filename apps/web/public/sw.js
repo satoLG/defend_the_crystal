@@ -18,7 +18,7 @@
  * old store on activate.
  * ============================================================ */
 
-const CACHE = 'dtc-cache-v3';
+const CACHE = 'dtc-cache-v4';
 
 // the minimal shell pre-cached on install so the very first
 // offline launch has something to boot from
