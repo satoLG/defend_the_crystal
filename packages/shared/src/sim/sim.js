@@ -14,9 +14,22 @@ import {
 } from './grid.js';
 import { PORTAL, CROSS_Z, NPCS, DUMMIES, TRAIN, findColliderJump } from '../sanctuary.js';
 import { buildWavePlan, enemyStats, cycleOf } from './waves.js';
-import { clamp, dist2d, nextId } from '../utils.js';
+import { clamp, dist2d, angleGap, nextId } from '../utils.js';
 
 const rnd2 = (v) => Math.round(v * 100) / 100;
+
+// how long a hit still counts toward an assist on the eventual kill
+const ASSIST_WINDOW = 8;
+
+// what a floating number means, so the client can colour and size it:
+// a hit on an enemy, a critical hit, a hit a hero took, HP restored
+export const DMG = { ENEMY: 0, CRIT: 1, PLAYER: 2, HEAL: 3 };
+
+// With auto-aim off the hero only swings at what it is actually facing:
+// how far off its heading a foe may sit and still be a valid target.
+// Generous (a 120-degree window) so pointing roughly at something is
+// enough — this is a thumbstick, not a mouse.
+const MANUAL_AIM_ARC = Math.PI / 3;
 
 // the weak blood magic a rank-and-file vampire carries once the court
 // has risen (see BLOOD_COURT); null for every other kind and earlier wave
@@ -113,7 +126,13 @@ export class Sim {
       poisonT: 0, poisonDps: 0, poisonTick: 0,
       burnT: 0, burnDps: 0, burnTick: 0,
       slowMove: 1, slowRate: 1, webbed: 0,
-      kills: 0, obst: 0, lastInputT: this.time,
+      // client-side combat preferences, mirrored here because the sim is
+      // what actually swings (see tryAttack). Both default ON, which is
+      // the behaviour every existing player already has.
+      autoAtk: true, autoAim: true,
+      // scoreboard, read back on the defeat screen
+      kills: 0, deaths: 0, assists: 0,
+      obst: 0, lastInputT: this.time,
     });
     this.applyStats(p);
     p.hp = p.maxHp;
@@ -339,7 +358,9 @@ export class Sim {
       this.points += bonus;
       for (const p of this.players) {
         if (p.dead) this.respawnPlayer(p);
+        const before = p.hp;
         p.hp = p.maxHp;
+        this.emitDamage(rnd2(p.x), rnd2(p.z), p.hp - before, DMG.HEAL);
       }
       this.emit({ t: 'phase', ph: 'checkpoint', n: this.wave });
       this.emit({ t: 'heal', bonus });
@@ -369,12 +390,40 @@ export class Sim {
     }
   }
 
+  // The run is over: the field is cleared and the fight stops for good.
+  // Leaving the horde marching (as it used to) meant enemies kept piling
+  // in behind the defeat screen — still chasing, still hitting, still
+  // being simulated — with nothing left to defend.
   gameOver() {
     this.phase = 'over';
     this.spawnQueue = [];
-    const kills = {};
-    for (const p of this.players) kills[p.id] = { name: p.name, kills: p.kills, lvl: p.lvl };
-    this.emit({ t: 'over', wave: this.wave, kills });
+    for (const e of [...this.enemies.entities]) {
+      const pos = e.vehicle.position;
+      this.emit({ t: 'despawn', id: e.id, x: rnd2(pos.x), z: rnd2(pos.z) });
+      this.removeEnemy(e);
+    }
+    this.graves = [];
+    this.webs = [];
+    this.fires = [];
+    this.pending = [];
+    this.drops = [];
+    this.taunt = null;
+    for (const id of [...this.trainers]) this.exitTraining(id);
+    this.emit({ t: 'over', wave: this.wave, stats: this.scoreboard() });
+  }
+
+  // Best run first: kills, then assists, then fewest deaths, then level.
+  scoreboard() {
+    return this.players.entities
+      .map((p) => ({
+        id: p.id, name: p.name, cls: p.cls, lvl: p.lvl,
+        kills: p.kills, deaths: p.deaths, assists: p.assists,
+      }))
+      .sort((a, b) =>
+        b.kills - a.kills ||
+        b.assists - a.assists ||
+        a.deaths - b.deaths ||
+        b.lvl - a.lvl);
   }
 
   // ---------------- building ----------------
@@ -391,6 +440,8 @@ export class Sim {
       case 'jump': return this.tryJump(p, act);
       case 'skill': return this.trySkill(p, act);
       case 'train': return this.tryTrain(p, act);
+      case 'atk': return this.tryAttack(p);
+      case 'prefs': return this.setPrefs(p, act);
       case 'pet': return this.trySetPet(p, act);
       case 'loadout': return this.trySetLoadout(p, act);
       case 'start': if (this.phase === 'build') this.startWave(); return;
@@ -522,6 +573,14 @@ export class Sim {
     this.emit({ t: 'jump', id: p.id, dur });
   }
 
+  // Combat preferences, pushed by the owning client when it connects and
+  // whenever the player flips a switch. Only fields actually present are
+  // touched, so the action can grow without old clients losing settings.
+  setPrefs(p, act) {
+    if (typeof act?.auto === 'number') p.autoAtk = act.auto === 1;
+    if (typeof act?.aim === 'number') p.autoAim = act.aim === 1;
+  }
+
   // ---------------- training mode ----------------
 
   // talk to the drill master while the sanctuary is open to spar with
@@ -543,6 +602,16 @@ export class Sim {
     if (!this.trainers.delete(id)) return;
     this.emit({ t: 'train', id, on: 0 });
     if (this.trainers.size === 0) this.removeDummies();
+  }
+
+  // A training dummy is a foe ONLY to the players actually training on it.
+  // Before this, one player starting a round at the drill master turned the
+  // dummies into legitimate targets for the whole party: everyone else's
+  // auto-attack locked onto them from across the plaza. Takes the player id
+  // rather than the entity so delayed hits, whose caster may have left, can
+  // ask the same question.
+  canFight(pid, e) {
+    return !e.dummy || this.trainers.has(pid);
   }
 
   ensureDummies() {
@@ -569,6 +638,7 @@ export class Sim {
       enemy: true, dummy: true, id: nextId(), kind: 'dummy', vehicle,
       hp: 600, maxHp: 600, dmg: 0, speed: 0, pts: 0, xp: 0,
       scale: 1, breach: 0, boss: 0, flying: false, state: 'path', targetId: null,
+      dmgBy: null,
       atkCd: 0, kbx: 0, kbz: 0, yaw: -Math.PI / 2, stunT: 0,
       aggroCd: 0, chaseBestD: 0, dragT: 0,
       slowT: 0, slowF: 1, burnT: 0, burnDps: 0, poisonT: 0, poisonDps: 0,
@@ -612,6 +682,7 @@ export class Sim {
     p.dashT = S.dur;
     const dmg = p.atk * S.dmgMult;
     for (const e of this.enemies) {
+      if (!this.canFight(p.id, e)) continue;
       const ep = e.vehicle.position;
       const t = len2 > 0.001
         ? clamp(((ep.x - fx) * dx + (ep.z - fz) * dz) / len2, 0, 1)
@@ -642,7 +713,7 @@ export class Sim {
     this.taunt = { id: p.id, until: this.time + S.dur, r: S.radius };
     // snap nearby enemies onto him immediately so the pull is instant
     for (const e of this.enemies) {
-      if (e.dummy) continue;
+      if (!this.canFight(p.id, e)) continue;
       const pos = e.vehicle.position;
       const d = dist2d(pos.x, pos.z, p.x, p.z);
       if (d <= S.radius && (e.flying || this.hasLos(pos.x, pos.z, p.x, p.z))) {
@@ -674,6 +745,7 @@ export class Sim {
     const range = p.range * S.rangeMult;
     const foes = [];
     for (const e of this.enemies) {
+      if (!this.canFight(p.id, e)) continue;
       const ep = e.vehicle.position;
       const d = dist2d(p.x, p.z, ep.x, ep.z);
       if (d <= range + ENEMY.RADIUS) foes.push({ e, d });
@@ -713,6 +785,7 @@ export class Sim {
     const S = SKILLS.mage;
     let best = null, bestD = Infinity;
     for (const e of this.enemies) {
+      if (!this.canFight(p.id, e)) continue;
       const d = dist2d(p.x, p.z, e.vehicle.position.x, e.vehicle.position.z);
       if (d < bestD) { bestD = d; best = e; }
     }
@@ -739,6 +812,7 @@ export class Sim {
     const pid = p.id;
     this.pending.push({ at: this.time + ft, fn: () => {
       for (const e of [...this.enemies.entities]) {
+        if (!this.canFight(pid, e)) continue;
         const ep = e.vehicle.position;
         const d = dist2d(cx, cz, ep.x, ep.z);
         if (d <= r + ENEMY.RADIUS) {
@@ -857,6 +931,8 @@ export class Sim {
       hp: stats.hp, maxHp: stats.hp, dmg: stats.dmg, speed: stats.speed,
       pts: stats.pts, xp: stats.xp, scale: stats.scale, breach: stats.breach,
       boss, flying: !!def.flying, state: 'path', targetId: null,
+      // who has hurt it lately (id -> time), for assist credit on the kill
+      dmgBy: null,
       atkCd: 0, kbx: 0, kbz: 0, yaw: 0, stunT: 0,
       aggroCd: 0, chaseBestD: 0, dragT: 0,
       // status effects (towers): chill slow, fire / poison DoTs
@@ -943,9 +1019,16 @@ export class Sim {
   damageEnemy(e, dmg, kbx, kbz, killerId) {
     if (e.hp <= 0) return;
     const killer = killerId ? this.getPlayer(killerId) : null;
+    // everyone who hurt it recently shares in the kill (see creditKill)
+    if (killer) {
+      if (!e.dmgBy) e.dmgBy = new Map();
+      e.dmgBy.set(killer.id, this.time);
+    }
     // critical hits (tiger pet): player-dealt damage only, never towers
+    let crit = false;
     if (killer && killer.critCh > 0 && Math.random() < killer.critCh) {
       dmg *= PET.CRIT_MULT;
+      crit = true;
       const pos = e.vehicle.position;
       this.emit({ t: 'crit', x: rnd2(pos.x), z: rnd2(pos.z) });
     }
@@ -956,6 +1039,10 @@ export class Sim {
       dmg *= 1 - armor;
     }
     e.hp -= dmg;
+    {
+      const pos = e.vehicle.position;
+      this.emitDamage(rnd2(pos.x), rnd2(pos.z), dmg, crit ? DMG.CRIT : DMG.ENEMY);
+    }
     // training dummies never die (or aggro, or get knocked around):
     // on depletion they spring straight back to full
     if (e.dummy) {
@@ -1002,13 +1089,37 @@ export class Sim {
         return;
       }
       this.emit({ t: 'die', id: e.id, kind: e.kind, x: rnd2(pos.x), z: rnd2(pos.z), boss: e.boss });
-      if (killer) killer.kills += 1;
+      this.creditKill(e, killer);
       // nothing is granted on the kill itself — the enemy drops XP and
       // point orbs that each player has to walk over to collect
       this.spawnDrops(e);
       this.removeEnemy(e);
       this.checkWaveCleared();
     }
+  }
+
+  // A floating number over the spot a hit (or a heal) landed. Rounded to
+  // a whole number, and skipped entirely when that rounds to nothing —
+  // there is no point streaming a "0" for every damage-over-time tick.
+  emitDamage(x, z, amount, kind) {
+    const v = Math.round(amount);
+    if (v < 1) return;
+    this.emit({ t: 'dmg', x, z, v, k: kind });
+  }
+
+  // The kill goes to whoever landed the last blow; everyone ELSE who hurt
+  // the same enemy within the assist window gets an assist. A tower kill
+  // (no killer) still hands assists out — the party softened it up.
+  creditKill(e, killer) {
+    if (killer) killer.kills += 1;
+    if (!e.dmgBy) return;
+    for (const [id, at] of e.dmgBy) {
+      if (id === killer?.id) continue;
+      if (this.time - at > ASSIST_WINDOW) continue;
+      const p = this.getPlayer(id);
+      if (p) p.assists += 1;
+    }
+    e.dmgBy = null;
   }
 
   // ---------------- aggro rules ----------------
@@ -1257,8 +1368,10 @@ export class Sim {
       p.rawMaxHp = Math.round(p.rawMaxHp * PLAYER.LEVEL_HP_MULT);
       p.rawAtk *= PLAYER.LEVEL_ATK_MULT;
       this.applyStats(p);
+      const before = p.hp;
       p.hp = Math.min(p.maxHp, p.hp + (p.maxHp - p.hp) * PLAYER.LEVEL_HEAL);
       this.emit({ t: 'lvl', id: p.id, lvl: p.lvl });
+      this.emitDamage(rnd2(p.x), rnd2(p.z), p.hp - before, DMG.HEAL);
     }
   }
 
@@ -1286,9 +1399,11 @@ export class Sim {
     p.lastDmg = this.time;
     p.invT = PLAYER.HIT_IFRAME; // open the i-frame window
     this.emit({ t: 'hit', id: p.id });
+    this.emitDamage(rnd2(p.x), rnd2(p.z), dmg, DMG.PLAYER);
     if (p.hp <= 0) {
       p.hp = 0;
       p.dead = true;
+      p.deaths += 1;
       p.moving = false;
       p.respawnT = Math.min(
         PLAYER.RESPAWN_BASE + PLAYER.RESPAWN_PER_WAVE * this.wave,
@@ -1414,6 +1529,9 @@ export class Sim {
       if (healed <= 0) return;
       caster.hp += healed;
       this.emit({ t: 'drain', id: eid, x: rnd2(q.x), z: rnd2(q.z) });
+      // the life he drank, floating over him — not over his victim
+      const cp = caster.vehicle.position;
+      this.emitDamage(rnd2(cp.x), rnd2(cp.z), healed, DMG.HEAL);
     }});
   }
 
@@ -1686,6 +1804,11 @@ export class Sim {
     }
 
     this.stepPlayers(dt);
+    // once the crystal is gone the battle systems go quiet — the field is
+    // already empty (see gameOver), so this only stops them idling. The
+    // heroes still walk around their ruined sanctuary.
+    if (this.phase === 'over') return;
+
     this.stepDrops(dt);
     this.stepGraves();
     this.stepFires(dt);
@@ -1716,90 +1839,115 @@ export class Sim {
       // no attacking mid-air or mid-dash
       if (p.jumpT > 0) { p.jumpT = Math.max(p.jumpT - dt, 0); continue; }
       if (p.dashT > 0) { p.dashT = Math.max(p.dashT - dt, 0); continue; }
-      // auto-attack nearest enemy (attacks pass through walls by design)
+      // the swing cooldown always runs down, whether the hero is swinging
+      // on its own or waiting on the player's finger
       p.atkCd -= dt;
-      if (p.atkCd > 0 || this.phase === 'over') continue;
-      let best = null, bestD = Infinity;
-      for (const e of this.enemies) {
-        const d = dist2d(p.x, p.z, e.vehicle.position.x, e.vehicle.position.z);
-        if (d < bestD) { bestD = d; best = e; }
-      }
-      if (!best || bestD > p.range + ENEMY.RADIUS) continue;
-      p.atkCd = 1 / (p.rate * p.slowRate);
-      const tp = best.vehicle.position;
-      p.yaw = Math.atan2(tp.x - p.x, tp.z - p.z);
-      // weapon tier tints the swing/projectile; weapon id lets the view
-      // pick the right melee flourish (spear stab / hammer bash)
-      const wt = p.weapon?.tier || 0, wid = p.weapon?.id;
-      this.emit({ t: 'atk', id: p.id, tx: rnd2(tp.x), tz: rnd2(tp.z), wt, wid });
+      if (p.autoAtk) this.tryAttack(p);
+    }
+  }
 
-      if (p.cls === 'archer') {
-        const ft = bestD / 16;
+  // One basic attack, if one is possible right now. This is the ONLY place
+  // a hero's basic attack happens: the auto-attack loop calls it every
+  // tick, and the manual attack button calls it on every press. The
+  // cooldown lives here, so mashing the button can never out-swing the
+  // class's attack speed — an unusable press just does nothing.
+  //
+  // Finding no target does NOT burn the cooldown: swinging at air costs
+  // you nothing, so the first foe to walk into range is hit immediately.
+  tryAttack(p) {
+    if (p.dead || p.jumpT > 0 || p.dashT > 0) return false;
+    if (p.atkCd > 0 || this.phase === 'over') return false;
+    // Auto-aim picks the nearest foe outright and turns the hero onto it.
+    // Aiming by hand, the hero keeps whatever heading the player steered
+    // and only what lies within its firing arc counts as a target.
+    let best = null, bestD = Infinity;
+    for (const e of this.enemies) {
+      const ep = e.vehicle.position;
+      if (!this.canFight(p.id, e)) continue;
+      const d = dist2d(p.x, p.z, ep.x, ep.z);
+      if (d >= bestD) continue;
+      if (!p.autoAim &&
+          angleGap(p.yaw, Math.atan2(ep.x - p.x, ep.z - p.z)) > MANUAL_AIM_ARC) continue;
+      bestD = d; best = e;
+    }
+    if (!best || bestD > p.range + ENEMY.RADIUS) return false;
+    p.atkCd = 1 / (p.rate * p.slowRate);
+    const tp = best.vehicle.position;
+    if (p.autoAim) p.yaw = Math.atan2(tp.x - p.x, tp.z - p.z);
+    // weapon tier tints the swing/projectile; weapon id lets the view
+    // pick the right melee flourish (spear stab / hammer bash)
+    const wt = p.weapon?.tier || 0, wid = p.weapon?.id;
+    this.emit({ t: 'atk', id: p.id, tx: rnd2(tp.x), tz: rnd2(tp.z), wt, wid });
+
+    if (p.cls === 'archer') {
+      const ft = bestD / 16;
+      this.emit({
+        t: 'shoot', k: 'arrow', wt,
+        f: [rnd2(p.x), 1.0, rnd2(p.z)], to: [rnd2(tp.x), 0.7, rnd2(tp.z)], ft: rnd2(ft),
+      });
+      // with the hog pet even arrows carry a punch
+      const kb = p.kbDealt || 0;
+      const id = best.id, dmg = p.atk, pid = p.id, ox = p.x, oz = p.z;
+      this.pending.push({ at: this.time + ft, fn: () => {
+        const e = this.enemies.entities.find((n) => n.id === id);
+        if (!e) return;
+        const [kx, kz] = kbAway(ox, oz, e.vehicle.position, kb);
+        this.damageEnemy(e, dmg, kx, kz, pid);
+      }});
+    } else if (p.cls === 'mage' && p.bolts > 0) {
+      // arcane orb: no blast — several guided bolts split across the
+      // nearest enemies in range (cycling when there are fewer foes)
+      const foes = [];
+      for (const e of this.enemies) {
+        if (!this.canFight(p.id, e)) continue;
+        const ep = e.vehicle.position;
+        const d = dist2d(p.x, p.z, ep.x, ep.z);
+        if (d <= p.range + ENEMY.RADIUS) foes.push({ e, d });
+      }
+      foes.sort((a, b) => a.d - b.d);
+      const targets = foes.slice(0, p.bolts);
+      for (let i = 0; i < p.bolts; i++) {
+        const f = targets[i % targets.length];
+        const bp = f.e.vehicle.position;
+        const ft = Math.max(f.d / 14, 0.12) + i * 0.05; // staggered volley
         this.emit({
-          t: 'shoot', k: 'arrow', wt,
-          f: [rnd2(p.x), 1.0, rnd2(p.z)], to: [rnd2(tp.x), 0.7, rnd2(tp.z)], ft: rnd2(ft),
+          t: 'shoot', k: 'magic', wt,
+          f: [rnd2(p.x), 1.15, rnd2(p.z)], to: [rnd2(bp.x), 0.6, rnd2(bp.z)], ft: rnd2(ft),
         });
-        // with the hog pet even arrows carry a punch
-        const kb = p.kbDealt || 0;
-        const id = best.id, dmg = p.atk, pid = p.id, ox = p.x, oz = p.z;
+        const id = f.e.id, dmg = p.atk * ORB.BOLT_MULT, pid = p.id, ox = p.x, oz = p.z;
         this.pending.push({ at: this.time + ft, fn: () => {
           const e = this.enemies.entities.find((n) => n.id === id);
           if (!e) return;
-          const [kx, kz] = kbAway(ox, oz, e.vehicle.position, kb);
+          const [kx, kz] = kbAway(ox, oz, e.vehicle.position, 0.5);
           this.damageEnemy(e, dmg, kx, kz, pid);
         }});
-      } else if (p.cls === 'mage' && p.bolts > 0) {
-        // arcane orb: no blast — several guided bolts split across the
-        // nearest enemies in range (cycling when there are fewer foes)
-        const foes = [];
-        for (const e of this.enemies) {
-          const ep = e.vehicle.position;
-          const d = dist2d(p.x, p.z, ep.x, ep.z);
-          if (d <= p.range + ENEMY.RADIUS) foes.push({ e, d });
-        }
-        foes.sort((a, b) => a.d - b.d);
-        const targets = foes.slice(0, p.bolts);
-        for (let i = 0; i < p.bolts; i++) {
-          const f = targets[i % targets.length];
-          const bp = f.e.vehicle.position;
-          const ft = Math.max(f.d / 14, 0.12) + i * 0.05; // staggered volley
-          this.emit({
-            t: 'shoot', k: 'magic', wt,
-            f: [rnd2(p.x), 1.15, rnd2(p.z)], to: [rnd2(bp.x), 0.6, rnd2(bp.z)], ft: rnd2(ft),
-          });
-          const id = f.e.id, dmg = p.atk * ORB.BOLT_MULT, pid = p.id, ox = p.x, oz = p.z;
-          this.pending.push({ at: this.time + ft, fn: () => {
-            const e = this.enemies.entities.find((n) => n.id === id);
-            if (!e) return;
-            const [kx, kz] = kbAway(ox, oz, e.vehicle.position, 0.5);
-            this.damageEnemy(e, dmg, kx, kz, pid);
-          }});
-        }
-      } else if (p.cls === 'mage') {
-        const cx = tp.x, cz = tp.z, dmg = p.atk, r = p.aoe, pid = p.id, kb = p.kbPower;
-        this.emit({
-          t: 'shoot', k: 'magic', wt,
-          f: [rnd2(p.x), 1.15, rnd2(p.z)], to: [rnd2(cx), 0.5, rnd2(cz)], ft: 0.35,
-        });
-        this.emit({ t: 'aoe', x: rnd2(cx), z: rnd2(cz), r, k: 'mage', ft: 0.35, wt });
-        this.pending.push({ at: this.time + 0.35, fn: () => {
-          for (const e of [...this.enemies.entities]) {
-            const ep = e.vehicle.position;
-            const d = dist2d(cx, cz, ep.x, ep.z);
-            if (d <= r + ENEMY.RADIUS) {
-              const n = Math.max(d, 0.2);
-              this.damageEnemy(e, dmg, ((ep.x - cx) / n) * kb, ((ep.z - cz) / n) * kb, pid);
-            }
-          }
-        }});
-      } else {
-        // melee: berserker / tanker — instant hit + knockback
-        const n = Math.max(bestD, 0.2);
-        const kx = ((tp.x - p.x) / n) * p.kbPower;
-        const kz = ((tp.z - p.z) / n) * p.kbPower;
-        this.damageEnemy(best, p.atk, kx, kz, p.id);
       }
+    } else if (p.cls === 'mage') {
+      const cx = tp.x, cz = tp.z, dmg = p.atk, r = p.aoe, pid = p.id, kb = p.kbPower;
+      this.emit({
+        t: 'shoot', k: 'magic', wt,
+        f: [rnd2(p.x), 1.15, rnd2(p.z)], to: [rnd2(cx), 0.5, rnd2(cz)], ft: 0.35,
+      });
+      this.emit({ t: 'aoe', x: rnd2(cx), z: rnd2(cz), r, k: 'mage', ft: 0.35, wt });
+      this.pending.push({ at: this.time + 0.35, fn: () => {
+        for (const e of [...this.enemies.entities]) {
+          if (!this.canFight(pid, e)) continue;
+          const ep = e.vehicle.position;
+          const d = dist2d(cx, cz, ep.x, ep.z);
+          if (d <= r + ENEMY.RADIUS) {
+            const n = Math.max(d, 0.2);
+            this.damageEnemy(e, dmg, ((ep.x - cx) / n) * kb, ((ep.z - cz) / n) * kb, pid);
+          }
+        }
+      }});
+    } else {
+      // melee: berserker / tanker — instant hit + knockback
+      const n = Math.max(bestD, 0.2);
+      const kx = ((tp.x - p.x) / n) * p.kbPower;
+      const kz = ((tp.z - p.z) / n) * p.kbPower;
+      this.damageEnemy(best, p.atk, kx, kz, p.id);
     }
+    return true;
   }
 
   stepEnemies(dt) {
@@ -2359,6 +2507,9 @@ export class Sim {
         // status the Black Widow inflicts (index 28): 1 poisoned,
         // 2 webbed — the client tints and marks the hero from this
         (p.poisonT > 0 ? 1 : 0) | (p.webbed ? 2 : 0) | (p.burnT > 0 ? 4 : 0),
+        // basic-attack cooldown (index 29) — the manual attack button
+        // greys out on it, the way the skill button does on index 16
+        rnd2(Math.max(p.atkCd, 0)),
       ]),
       en: this.enemies.entities.map((e) => [
         e.id, e.kind, rnd2(e.vehicle.position.x), rnd2(e.vehicle.position.z),

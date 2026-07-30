@@ -26,6 +26,7 @@ export class Input {
         KeyB: 'build', Digit1: 'card0', Digit2: 'card1', Digit3: 'card2', Digit4: 'card3',
         Digit5: 'card4', Digit6: 'card5',
         Escape: 'cancel', Space: 'startwave', KeyJ: 'jump', KeyK: 'skill',
+        KeyH: 'attack',
       };
       if (map[e.code]) {
         if (e.code === 'Space') e.preventDefault();

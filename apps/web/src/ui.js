@@ -27,6 +27,26 @@ const CLASS_COLORS = {
   berserker: '#ff6a4d', tanker: '#6a9cff', archer: '#7de87d', mage: '#c07dff',
 };
 
+// podium marks for the top three of the defeat scoreboard
+const MEDALS = ['🥇', '🥈', '🥉'];
+
+// dedupe window for a button meant to be pressed repeatedly (see bindTap)
+const TAP_REPEAT_MS = 120;
+
+// which glyph the manual-attack button wears, per equipped weapon. The
+// bigger version of a weapon shares its family's shape.
+const WEAPON_ICONS = {
+  axe: 'wpn-axe', greataxe: 'wpn-axe', hammer: 'wpn-hammer',
+  sword: 'wpn-sword', greatsword: 'wpn-sword', spear: 'wpn-spear',
+  bow: 'wpn-bow', greatbow: 'wpn-bow', crossbow: 'wpn-crossbow',
+  staff: 'wpn-staff', wand: 'wpn-wand', orb: 'wpn-orb',
+};
+// fallback while the snapshot hasn't said what's equipped yet
+const CLASS_WEAPON_ICONS = {
+  berserker: 'wpn-axe', tanker: 'wpn-sword',
+  archer: 'wpn-bow', mage: 'wpn-staff',
+};
+
 // per-class stat bars for the character screen (labels are localized keys
 // under statbar.*; kept here so the DOM layer owns its own copy)
 const STAT_BARS = {
@@ -59,17 +79,24 @@ const $ = (id) => document.getElementById(id);
 // independent pointerdown regardless of how many other fingers are
 // down, so trigger on that (falling back to click for keyboard/
 // assistive-tech activation, which never fires pointerdown).
-const bindTap = (el, fn) => {
+const bindTap = (el, fn, dedupeMs = 500) => {
   // pointerdown fires first (snappy on touch); the browser then fires a
   // synthesized click right after. Dedupe so the handler runs ONCE per
   // tap — otherwise everything bound here double-fires on touch (which,
   // for one-shot actions like "start wave", showed the toast twice).
   // Assistive tech that only emits click still works via the same guard.
+  //
+  // The window has to stay well under the interval between two DELIBERATE
+  // presses of the same button. Half a second is fine for one-shot actions
+  // but would cap the manual attack button at 2 swings a second — an
+  // archer with a crossbow swings at over 3 — so that one passes a short
+  // window. A duplicate slipping through there is harmless anyway: the
+  // sim's cooldown eats it.
   let last = 0;
   const run = (e) => {
     if (e.type === 'pointerdown' && e.pointerType === 'mouse' && e.button !== 0) return;
     const now = performance.now();
-    if (now - last < 500) return; // the paired click after a pointerdown
+    if (now - last < dedupeMs) return; // the paired click after a pointerdown
     last = now;
     if (e.type === 'pointerdown') e.preventDefault();
     fn();
@@ -115,6 +142,8 @@ export class UI {
     this.lastSnap = null;
     this.isHost = false;
     this.skillReady = false;   // gated by this character's own 30s cooldown
+    this.attackReady = false;  // basic-attack cooldown, straight off the snapshot
+    this.myWeaponId = null;    // what the manual attack button should wear
     this.myCls = this.character.cls;
     this.shopNear = false;     // standing at Tonho's stall (main.js feeds this)
     this.petTab = 'mine';      // pet panel tab: 'mine' | 'shop'
@@ -899,6 +928,8 @@ export class UI {
     });
     bindTap($('jump-btn'), () => this.cb.onJump?.());
     bindTap($('skill-btn'), () => this.cb.onSkill?.());
+    bindTap($('attack-btn'), () => this.cb.onAttack?.(), TAP_REPEAT_MS);
+    this.applyAutoAttack();
     $('room-chip').addEventListener('click', async () => {
       try { await navigator.clipboard.writeText(this.roomCode); this.toast(t('lobby.codeCopied'), 'gold'); } catch { /* ok */ }
     });
@@ -939,6 +970,30 @@ export class UI {
   // lit only while the character faces a grid cell it can vault over
   setJumpEnabled(on) {
     $('jump-btn').disabled = !on;
+  }
+
+  // Auto-attack off puts a manual attack button on screen (and shifts jump
+  // up out of its way); on takes it away again. Called on boot and whenever
+  // the setting is flipped, so the HUD can change mid-match.
+  applyAutoAttack() {
+    const manual = !settings.get('autoAttack');
+    $('hud').classList.toggle('manual-atk', manual);
+    $('attack-btn').classList.toggle('hidden', !manual);
+    if (manual) this.paintAttackIcon();
+  }
+
+  // the button wears the symbol of what the hero is actually holding
+  paintAttackIcon() {
+    const wid = this.myWeaponId;
+    $('attack-icon').innerHTML = icon(WEAPON_ICONS[wid] || CLASS_WEAPON_ICONS[this.myCls] || 'wpn-sword');
+  }
+
+  // greyed out while the swing is still on cooldown — mashing it does
+  // nothing anyway (the sim owns the rate), so say so
+  setAttackReady(on) {
+    const btn = $('attack-btn');
+    btn.disabled = !on;
+    btn.classList.toggle('cooling', !on);
   }
 
   // ---------------- placing towers & blocks ----------------
@@ -1814,6 +1869,16 @@ export class UI {
         // paint the skill button in the class's signature colour
         $('skill-btn').style.setProperty('--skill-color', CLASS_COLORS[cls] || '#e9e9ee');
       }
+      // manual attack button (only on screen with auto-attack off): it
+      // wears the equipped weapon and follows the sim's own swing cooldown
+      if (this._atkWpn !== me[23]) {
+        this._atkWpn = me[23];
+        this.myWeaponId = me[23];
+        if (!settings.get('autoAttack')) this.paintAttackIcon();
+      }
+      this.attackReady = (me[29] || 0) <= 0 && dead !== 1;
+      this.setAttackReady(this.attackReady);
+
       const skillCd = me[16] || 0;
       this.skillReady = skillCd <= 0 && dead !== 1;
       $('skill-btn').disabled = !this.skillReady;
@@ -1878,14 +1943,41 @@ export class UI {
     $('hl-exit').addEventListener('click', () => this.cb.onExit());
   }
 
-  showGameOver(ev, isHost) {
+  // The defeat screen is the run's obituary: how far the party got, and
+  // who carried it. Rows arrive already ranked from the sim (kills, then
+  // assists, then fewest deaths) — best defender on top.
+  showGameOver(ev, isHost, selfId) {
     const best = Number(localStorage.getItem('dtc-best-wave') || 0);
-    if (ev.wave > best) localStorage.setItem('dtc-best-wave', String(ev.wave));
-    const lines = [t('over.survivedToWave', { n: ev.wave }) + (ev.wave > best ? t('over.newBest') : ''), ''];
-    for (const s of Object.values(ev.kills || {})) {
-      lines.push(t('over.killsLine', { name: s.name, kills: s.kills, lvl: s.lvl }));
-    }
-    $('go-stats').textContent = lines.join('\n');
+    const isBest = ev.wave > best;
+    if (isBest) localStorage.setItem('dtc-best-wave', String(ev.wave));
+    $('go-wave').innerHTML =
+      `<span>${t('over.survivedToWave', { n: ev.wave })}</span>` +
+      (isBest ? `<span class="go-best">${t('over.newBest')}</span>` : '');
+
+    // `stats` is the ranked array; `kills` is the old keyed shape, which a
+    // client running from the service-worker cache may still be on
+    const rows = ev.stats
+      || Object.entries(ev.kills || {}).map(([id, s]) => ({ id, ...s }));
+    const board = $('go-rows');
+    board.innerHTML = '';
+    rows.forEach((s, i) => {
+      const row = document.createElement('div');
+      row.className = 'go-row' + (s.id === selfId ? ' go-self' : '') + (i === 0 ? ' go-top' : '');
+      const color = CLASS_COLORS[s.cls] || 'var(--gold)';
+      row.innerHTML =
+        `<span class="go-rank">${MEDALS[i] || i + 1}</span>
+         <span class="go-who">
+           <span class="go-cls" style="color:${color}">${icon('cls-' + s.cls)}</span>
+           <span class="go-meta"><span class="go-name"></span>
+             <span class="go-lvl">${t('over.levelShort', { lvl: s.lvl })}</span></span>
+         </span>
+         <span class="go-col go-kills">${s.kills || 0}</span>
+         <span class="go-col">${s.assists || 0}</span>
+         <span class="go-col go-deaths">${s.deaths || 0}</span>`;
+      row.querySelector('.go-name').textContent = s.name || '';
+      board.appendChild(row);
+    });
+
     $('restart-btn').classList.toggle('hidden', !isHost);
     $('go-hint').classList.toggle('hidden', isHost);
     this.show('gameover');
@@ -1913,6 +2005,8 @@ export class UI {
       sfx.click();
       $('set-music').value = Math.round(settings.get('musicVol') * 100);
       $('set-sfx').value = Math.round(settings.get('sfxVol') * 100);
+      $('set-autoatk').checked = settings.get('autoAttack');
+      $('set-autoaim').checked = settings.get('autoAim');
       $('set-shake').checked = settings.get('shake');
       $('set-shadows').checked = settings.get('shadows');
       paintMutes();
@@ -1946,6 +2040,15 @@ export class UI {
       settings.set('sfxVol', Number(e.target.value) / 100);
       if (settings.get('sfxMuted')) { settings.set('sfxMuted', false); paintMutes(); }
       applySfx();
+    });
+    $('set-autoatk').addEventListener('change', (e) => {
+      settings.set('autoAttack', e.target.checked);
+      this.applyAutoAttack();
+      this.cb.onCombatPrefs?.();
+    });
+    $('set-autoaim').addEventListener('change', (e) => {
+      settings.set('autoAim', e.target.checked);
+      this.cb.onCombatPrefs?.();
     });
     $('set-shake').addEventListener('change', (e) => settings.set('shake', e.target.checked));
     $('set-shadows').addEventListener('change', (e) => settings.set('shadows', e.target.checked));

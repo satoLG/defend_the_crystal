@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { instantiate, getTemplate } from './assets.js';
+import { instantiate, getTemplate, sharedResources } from './assets.js';
 import { buildTexture, applyTexture, getSlots } from './customize.js';
 import { iconPaths } from '../icons.js';
 import { CLASSES, TOWERS, JUMP, ENEMIES, BOSSES, PETS, WEAPONS, SKILLS, classStarterWeapons } from '@dtc/shared/config.js';
@@ -17,7 +17,7 @@ import { sfx } from '../audio.js';
 // rules live here.
 // ============================================================
 
-const PL = { ID: 0, CLS: 1, X: 2, Z: 3, YAW: 4, HP: 5, MHP: 6, LVL: 7, XP: 8, XPN: 9, MOV: 10, DEAD: 11, RESP: 12, OBST: 13, KILLS: 14, NAME: 15, SKCD: 16, WALL: 17, ATK: 18, SPD: 19, PET: 20, PETNAME: 21, PETLVL: 22, WPN: 23, WPNT: 24, SHD: 25, SHDT: 26, RANGE: 27, ST: 28 };
+const PL = { ID: 0, CLS: 1, X: 2, Z: 3, YAW: 4, HP: 5, MHP: 6, LVL: 7, XP: 8, XPN: 9, MOV: 10, DEAD: 11, RESP: 12, OBST: 13, KILLS: 14, NAME: 15, SKCD: 16, WALL: 17, ATK: 18, SPD: 19, PET: 20, PETNAME: 21, PETLVL: 22, WPN: 23, WPNT: 24, SHD: 25, SHDT: 26, RANGE: 27, ST: 28, ATKCD: 29 };
 const EN = { ID: 0, KIND: 1, X: 2, Z: 3, YAW: 4, HP: 5, MHP: 6, SCALE: 7, BOSS: 8, MOV: 9, ST: 10, VR: 11 };
 
 // EN.ST status bitmask (mirrors buildSnapshot): slow|burn|poison|stun
@@ -44,6 +44,54 @@ const TIER_MATCHERS = {
   bone: (r, g, b) => lumOf(r, g, b) > 115 && Math.abs(r - g) < 30 && Math.abs(g - b) < 36,
   bright: (r, g, b) => lumOf(r, g, b) > 115,
 };
+
+// ---- GL resource lifetimes -----------------------------------------
+//
+// Everything the renderer throws away in flight — a corpse, a spent
+// arrow, a burst ring, a floating callout — owns real GPU memory, and
+// scene.remove() does not give any of it back: the buffers and textures
+// behind an object stay resident until dispose() is called on them.
+// Nothing used to be disposed, so a long run leaked steadily until the
+// driver ran out and dropped the WebGL context (the screen flashes white
+// on the way back), after which models rendered untextured — solid
+// black. releaseGl() below is the counterpart to every throwaway
+// allocation; KEEP is everything it must NOT touch, because something
+// permanent still points at it.
+const KEEP = new Set();
+
+// how many distinct callout textures (text + colour) stay cached
+const FLOAT_TEX_CAP = 160;
+
+// most floating numbers alive at once (each is its own draw call)
+const FLOAT_MAX = 60;
+
+// how each floating number reads, indexed by the sim's DMG kind:
+// a hit you landed, a critical, a hit you took, life restored
+const DMG_LOOK = [
+  { color: 0xfff0d0, scale: 0.85, pre: '' },   // damage dealt
+  { color: 0xffb020, scale: 1.25, pre: '' },   // critical hit
+  { color: 0xff5a4a, scale: 1, pre: '-' },     // damage taken
+  { color: 0x5dff8a, scale: 1, pre: '+' },     // healed
+];
+
+// Release the GL resources of a subtree that is being discarded for
+// good. Anything registered in KEEP (model templates, the renderer's own
+// shared geometries/materials, cached recolor atlases) is skipped — it
+// outlives this particular object.
+function releaseGl(root) {
+  if (!root) return;
+  root.traverse((o) => {
+    if (o.geometry && !KEEP.has(o.geometry)) o.geometry.dispose();
+    const mats = Array.isArray(o.material) ? o.material : o.material ? [o.material] : [];
+    for (const m of mats) {
+      if (!m || KEEP.has(m)) continue;
+      for (const v of Object.values(m)) {
+        if (v && v.isTexture && !KEEP.has(v)) v.dispose();
+      }
+      m.dispose();
+    }
+  });
+}
 
 // one recolored texture per (model, rule, stage) — shared by every
 // enemy wearing that look
@@ -99,6 +147,7 @@ function tierTexture(modelKey, kind, stage /* 0 = stage-2, 1 = stage-3 */) {
     }
   }
   tierTexCache.set(key, tex);
+  if (tex) KEEP.add(tex); // cached for every enemy wearing this look
   return tex;
 }
 
@@ -148,6 +197,7 @@ function npcHueTexture(modelKey, rules) {
     tex.needsUpdate = true;
   }
   npcHueCache.set(key, tex);
+  if (tex) KEEP.add(tex); // cached per model + rule set
   return tex;
 }
 
@@ -835,6 +885,12 @@ export class GameView {
     this.corpses = [];
     this.ghost = null;          // build-mode ghost preview
     this.time = 0;
+    this._floatTex = new Map(); // callout text+colour -> texture (LRU)
+    this._floats = [];          // live floating numbers, oldest first
+
+    // every model template's geometry/material/texture is permanent —
+    // instances share it, so a discarded instance must never dispose it
+    for (const r of sharedResources()) KEEP.add(r);
 
     this._ringGeo = new THREE.RingGeometry(0.85, 1, 40);
     this._discGeo = new THREE.CircleGeometry(1, 32);
@@ -875,6 +931,15 @@ export class GameView {
       color: 0xff5a3c, transparent: true, opacity: 0.5,
       depthWrite: false, side: THREE.DoubleSide,
     });
+
+    // the renderer's own long-lived geometries & materials: transient
+    // things borrow them (a burst reuses the ring, an aura the slab), so
+    // tearing one of those down must leave them intact
+    for (const r of [
+      this._ringGeo, this._discGeo, this._wallSlabGeo, this._wallStoneMat,
+      this._wallRingMat, this._tauntRingGeo, this._tauntRingMat,
+      ...Object.values(this._statusMats),
+    ]) KEEP.add(r);
 
     // XP (green) / point (blue) orbs — two instanced meshes with flat
     // materials keep hundreds of orbs at a single draw call each.
@@ -1405,7 +1470,7 @@ export class GameView {
     if (pet.name !== petName || pet.lvl !== petLvl) {
       if (pet.label) {
         pet.actor.group.remove(pet.label);
-        pet.label.material.map.dispose();
+        releaseGl(pet.label);
       }
       pet.label = this.makeTextSprite(`${petName || PETS[petId].name} · ${petLvl}`, 0xffd8a0, 1.9);
       pet.label.position.y = pet.actor.labelTop + 0.35;
@@ -1418,8 +1483,8 @@ export class GameView {
   removePet(ownerId) {
     const pet = this.pets.get(ownerId);
     if (!pet) return;
-    if (pet.label) pet.label.material.map.dispose();
     this.scene.remove(pet.actor.group);
+    releaseGl(pet.actor.group);   // covers the name label's canvas texture too
     this.pets.delete(ownerId);
   }
 
@@ -1982,6 +2047,18 @@ export class GameView {
     }
   }
 
+  // Is this hero still coming through the portal? True from the moment an
+  // arrival is armed until the pop-in animation has finished putting the
+  // model on the ground. Controls stay locked for exactly this window, so
+  // nobody walks off while their own body is still materializing. It always
+  // clears on its own (the arrival timer fires, then spawnT runs out), so
+  // this can never strand a player.
+  isArriving(id) {
+    if (this.arrivalArmed) return true;
+    const a = this.players.get(id);
+    return !!a && (!!a.arrivalPending || a.spawnT != null);
+  }
+
   fireArrival() {
     this.arrivalArmed = false;
     let any = false;
@@ -2310,7 +2387,7 @@ export class GameView {
         if (a.rotatePhrases && !a.bubble.visible) {
           a.phraseIdx = ((a.phraseIdx ?? -1) + 1) % 6;
           a.group.remove(a.bubble);
-          a.bubble.material.map.dispose();
+          releaseGl(a.bubble);
           a.bubble = this.makeBubbleSprite(t(`npc.inc${a.phraseIdx}`));
           a.bubble.position.y = 2.5;
           a.group.add(a.bubble);
@@ -2397,7 +2474,7 @@ export class GameView {
 
   removeTowerActor(id) {
     const a = this.towers.get(id);
-    if (a) { this.scene.remove(a.group); this.towers.delete(id); }
+    if (a) { this.scene.remove(a.group); releaseGl(a.group); this.towers.delete(id); }
   }
 
   ensureObstacle(row) {
@@ -2484,7 +2561,7 @@ export class GameView {
       // rebuild the overhead label (other players only) when name/level change
       if (a.label && (a.labelLvl !== row[PL.LVL] || a.labelName !== row[PL.NAME])) {
         a.group.remove(a.label);
-        a.label.material.map.dispose();
+        releaseGl(a.label);
         a.label = this.makePlayerLabel(row[PL.NAME], row[PL.LVL], a.cls, a.tint);
         a.label.position.y = (a.labelTop || 1.4) + 0.72;
         a.labelLvl = row[PL.LVL];
@@ -2507,6 +2584,8 @@ export class GameView {
     for (const [id, a] of this.players) {
       if (!seenP.has(id)) {
         this.scene.remove(a.group);
+        if (a.customTex) { KEEP.delete(a.customTex); a.customTex.dispose(); }
+        releaseGl(a.group);
         this.players.delete(id);
         this.removePet(id);
       }
@@ -2555,6 +2634,7 @@ export class GameView {
     for (const [id, a] of this.enemies) {
       if (!seenE.has(id)) {
         this.scene.remove(a.group);
+        releaseGl(a.group);
         this.enemies.delete(id);
         this.bossVariants.delete(id);
         this.mirrors.delete(id);
@@ -2578,7 +2658,7 @@ export class GameView {
     const seenO = new Set();
     for (const row of next.ob) { seenO.add(row[0]); this.ensureObstacle(row); }
     for (const [id, g] of this.obstacles) {
-      if (!seenO.has(id)) { this.scene.remove(g); this.obstacles.delete(id); }
+      if (!seenO.has(id)) { this.scene.remove(g); releaseGl(g); this.obstacles.delete(id); }
     }
 
     // ---- gravedigger tombs (rise on appear, crumble away on remove)
@@ -2708,6 +2788,20 @@ export class GameView {
         }
         break;
       }
+      case 'despawn': {
+        // the run ended under them — the horde dissolves instead of
+        // dropping corpses all over the field
+        const a = this.enemies.get(ev.id);
+        if (a) {
+          this.scene.remove(a.group);
+          releaseGl(a.group);
+          this.enemies.delete(ev.id);
+          this.bossVariants.delete(ev.id);
+          this.mirrors.delete(ev.id);
+        }
+        this.burst(ev.x, ev.z, 0.9, 0x6a4a8a);
+        break;
+      }
       case 'breach': {
         this.gs.crystalBreachFx();
         this.burst(CRYSTAL_POS.x, CRYSTAL_POS.z, 1.6, 0xff5540);
@@ -2739,9 +2833,19 @@ export class GameView {
         break;
       }
       case 'crit': {
-        // tiger-pet critical hit: punchy ring + floating callout
+        // tiger-pet critical hit: a punchy ring. The callout used to spell
+        // "CRIT!" here, but the damage number now lands on the same spot in
+        // the same beat — so the hit itself says it, bigger and in orange.
         this.burst(ev.x, ev.z, 0.9, 0xffb020);
-        this.spawnFloatText('CRIT!', ev.x, ev.z, 0xffb020);
+        break;
+      }
+      case 'dmg': {
+        const look = DMG_LOOK[ev.k] || DMG_LOOK[0];
+        // hits pile onto the same body — scatter them so a flurry reads as
+        // several numbers instead of one flickering in place
+        const jx = (Math.random() - 0.5) * 0.7;
+        const jz = (Math.random() - 0.5) * 0.5;
+        this.spawnFloatText(look.pre + ev.v, ev.x + jx, ev.z + jz, look.color, look.scale);
         break;
       }
       case 'dreset': {
@@ -2906,13 +3010,66 @@ export class GameView {
     if (a.actions.jump) this.playOnce(a, 'jump', a.jumpDur);
   }
 
-  // one-shot rising text callout ("CRIT!") anchored in world space
-  spawnFloatText(text, x, z, color) {
-    const spr = this.makeTextSprite(text, color, 1.7);
+  // Texture for a callout, cached by exactly what it draws. Damage
+  // numbers repeat constantly — the same handful of values, in the same
+  // handful of colours — so painting and uploading a fresh canvas per hit
+  // was pure churn. The cache is bounded and evicts oldest-first; live
+  // entries sit in KEEP so a finished callout can't dispose one that
+  // another sprite is still drawing with.
+  floatTexture(text, tint) {
+    const key = `${text}|${tint}`;
+    const hit = this._floatTex.get(key);
+    if (hit) {
+      // refresh recency: delete + re-set moves it to the end of the Map
+      this._floatTex.delete(key);
+      this._floatTex.set(key, hit);
+      return hit;
+    }
+    const canvas = document.createElement('canvas');
+    canvas.width = 384; canvas.height = 84;
+    const ctx = canvas.getContext('2d');
+    ctx.font = 'bold 52px "Trebuchet MS", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.lineWidth = 8;
+    ctx.strokeStyle = 'rgba(0,0,0,0.75)';
+    ctx.strokeText(text, 192, 60);
+    ctx.fillStyle = '#' + new THREE.Color(tint).getHexString();
+    ctx.fillText(text, 192, 60);
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    this._floatTex.set(key, tex);
+    KEEP.add(tex);
+    if (this._floatTex.size > FLOAT_TEX_CAP) {
+      const oldest = this._floatTex.keys().next().value;
+      const dead = this._floatTex.get(oldest);
+      this._floatTex.delete(oldest);
+      KEEP.delete(dead);
+      dead.dispose();
+    }
+    return tex;
+  }
+
+  // one-shot rising callout (a damage number, a "BLOCK!") in world space
+  spawnFloatText(text, x, z, color, scale = 1) {
+    // an AoE landing on a hundred-zombie horde would otherwise put a
+    // hundred sprites on screen at once — each its own draw call. Past the
+    // cap the oldest number is cut short to make room for the newest, so
+    // what's on screen always reflects the hits happening now.
+    while (this._floats.length >= FLOAT_MAX) {
+      const old = this._floats.shift();
+      old.t = old.dur; // torn down (and released) by the next update pass
+    }
+    const spr = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: this.floatTexture(text, color), depthWrite: false, transparent: true,
+    }));
+    spr.scale.set(1.7 * scale, 1.7 * 0.22 * scale, 1);
+    spr.renderOrder = 11;
     spr.position.set(x, terrainY(z) + 1.35, z);
     spr.userData.baseY = terrainY(z);
     this.scene.add(spr);
-    this.effects.push({ type: 'float-text', mesh: spr, t: 0, dur: 0.7 });
+    const fx = { type: 'float-text', mesh: spr, t: 0, dur: 0.7 };
+    this.effects.push(fx);
+    this._floats.push(fx);
   }
 
   // flutter of little black bats swirling around a jumping vampire;
@@ -3512,6 +3669,7 @@ export class GameView {
       }
       if (k >= 1) {
         this.scene.remove(p.mesh);
+        releaseGl(p.mesh);
         this.projectiles.splice(i, 1);
       }
     }
@@ -3530,7 +3688,13 @@ export class GameView {
       const k = e.t / e.dur;
       if (k >= 1) {
         this.scene.remove(e.mesh);
+        releaseGl(e.mesh);
         this.effects.splice(i, 1);
+        if (e.type === 'float-text') {
+          // they expire in the order they were spawned, so this is index 0
+          const at = this._floats.indexOf(e);
+          if (at >= 0) this._floats.splice(at, 1);
+        }
         continue;
       }
       if (e.type === 'burst') {
@@ -3645,33 +3809,38 @@ export class GameView {
       if (c.t > 0.9) c.actor.group.position.y -= dt * 0.9;
       if (c.t > 1.6) {
         this.scene.remove(c.actor.group);
+        releaseGl(c.actor.group);
         this.corpses.splice(i, 1);
       }
     }
   }
 
   reset() {
-    for (const a of this.players.values()) {
-      if (a.customTex) a.customTex.dispose();
-      this.scene.remove(a.group);
-    }
+    const drop = (obj) => { if (obj) { this.scene.remove(obj); releaseGl(obj); } };
+    // a customized hero's atlas hangs off its body materials, so drop()
+    // releases it along with everything else the actor owns
+    for (const a of this.players.values()) drop(a.group);
     for (const id of [...this.pets.keys()]) this.removePet(id);
-    for (const a of this.enemies.values()) this.scene.remove(a.group);
-    for (const a of this.towers.values()) this.scene.remove(a.group);
-    for (const g of this.obstacles.values()) this.scene.remove(g);
-    for (const g of this.graves.values()) this.scene.remove(g.group);
-    for (const p of this.projectiles) this.scene.remove(p.mesh);
-    for (const e of this.effects) if (e.mesh) this.scene.remove(e.mesh);
-    for (const c of this.corpses) this.scene.remove(c.actor.group);
+    for (const a of this.enemies.values()) drop(a.group);
+    for (const a of this.towers.values()) drop(a.group);
+    for (const g of this.obstacles.values()) drop(g);
+    for (const g of this.graves.values()) drop(g.group);
+    for (const p of this.projectiles) drop(p.mesh);
+    for (const e of this.effects) drop(e.mesh);
+    for (const c of this.corpses) drop(c.actor.group);
     this.players.clear(); this.enemies.clear(); this.towers.clear();
     this.obstacles.clear(); this.graves.clear();
-    this.projectiles = []; this.effects = []; this.corpses = [];
+    this.projectiles = []; this.effects = []; this.corpses = []; this._floats = [];
     this.xpOrbs.count = 0; this.ptsOrbs.count = 0; this.goldOrbs.count = 0;
     this.goldSparkle.count = 0;
     if (this.portalFx) {
-      this.scene.remove(this.portalFx.disc, this.portalFx.beam, this.portalFx.light);
+      // the disc rides in `group`; its material is shared with the next
+      // portal (this._portalMat), so only the group's own geometry goes
+      this.scene.remove(this.portalFx.group, this.portalFx.light);
+      this.portalFx.disc.geometry.dispose();
       this.portalFx = null;
     }
+    this.arrivalArmed = false;
     this.clearGhost();
   }
 }

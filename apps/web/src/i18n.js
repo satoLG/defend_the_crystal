@@ -257,6 +257,7 @@ const STRINGS = {
       stats: 'View character stats', petDetails: 'Pet details',
       jump: 'Jump over the block ahead (J / Space)',
       skill: 'Class special attack (K)',
+      attack: 'Attack (H)',
       copyCode: 'Copy code', shareLink: 'Share link', rename: 'Rename',
       muteMusic: 'Mute music', muteSfx: 'Mute sound effects',
       randomize: 'Randomize colours',
@@ -276,7 +277,7 @@ const STRINGS = {
     respawn: { youFell: 'You fell…' },
     settings: {
       music: 'Music', sfx: 'Sound effects', cameraShake: 'Camera shake',
-      shadows: 'Shadows',
+      shadows: 'Shadows', autoAttack: 'Auto-attack', autoAim: 'Auto-aim',
     },
     stat: {
       health: 'Health', attack: 'Attack', magicPower: 'Magic power',
@@ -328,8 +329,10 @@ const STRINGS = {
     over: {
       crystalShattered: 'The crystal shattered', tryAgain: 'Try again',
       backToMenu: 'Back to menu', waitingHostRestart: 'Waiting for the host to restart…',
-      survivedToWave: 'Survived to wave {n}', newBest: ' — new best!',
+      survivedToWave: 'Survived to wave {n}', newBest: 'new best!',
       killsLine: '{name} — {kills} kills · level {lvl}',
+      colDefender: 'Defender', colKills: 'Kills', colAssists: 'Assists',
+      colDeaths: 'Deaths', levelShort: 'Lv {lvl}',
     },
     hostlost: {
       connectionLost: 'Connection lost', hostLeft: 'The host has left the realm.',
@@ -373,6 +376,7 @@ const STRINGS = {
     },
     toast: {
       joined: '{name} joined the defense!', left: '{name} left.',
+      graphicsRestored: 'Graphics restored',
       noBlocks: 'No blocks left — earn more each wave',
       notEnoughCrystals: 'Not enough crystals', spotTaken: 'That spot is taken',
       cantBuildThere: "Can't build there", cantBlockPath: "You can't fully block the path!",
@@ -507,6 +511,7 @@ const STRINGS = {
       stats: 'Ver atributos do personagem', petDetails: 'Detalhes do pet',
       jump: 'Pule sobre o bloco à frente (J / Espaço)',
       skill: 'Ataque especial da classe (K)',
+      attack: 'Atacar (H)',
       copyCode: 'Copiar código', shareLink: 'Compartilhar link', rename: 'Renomear',
       muteMusic: 'Silenciar música', muteSfx: 'Silenciar efeitos sonoros',
       randomize: 'Cores aleatórias',
@@ -526,7 +531,7 @@ const STRINGS = {
     respawn: { youFell: 'Você caiu…' },
     settings: {
       music: 'Música', sfx: 'Efeitos sonoros', cameraShake: 'Tremor de câmera',
-      shadows: 'Sombras',
+      shadows: 'Sombras', autoAttack: 'Ataque automático', autoAim: 'Mira automática',
     },
     stat: {
       health: 'Vida', attack: 'Ataque', magicPower: 'Poder mágico',
@@ -579,8 +584,10 @@ const STRINGS = {
     over: {
       crystalShattered: 'O cristal se estilhaçou', tryAgain: 'Tentar de novo',
       backToMenu: 'Voltar ao menu', waitingHostRestart: 'Aguardando o anfitrião reiniciar…',
-      survivedToWave: 'Sobreviveu até a onda {n}', newBest: ' — novo recorde!',
+      survivedToWave: 'Sobreviveu até a onda {n}', newBest: 'novo recorde!',
       killsLine: '{name} — {kills} abates · nível {lvl}',
+      colDefender: 'Defensor', colKills: 'Abates', colAssists: 'Assist.',
+      colDeaths: 'Mortes', levelShort: 'Nv {lvl}',
     },
     hostlost: {
       connectionLost: 'Conexão perdida', hostLeft: 'O anfitrião deixou o reino.',
@@ -623,6 +630,7 @@ const STRINGS = {
     },
     toast: {
       joined: '{name} entrou na defesa!', left: '{name} saiu.',
+      graphicsRestored: 'Gráficos restaurados',
       noBlocks: 'Sem blocos — ganhe mais a cada onda',
       notEnoughCrystals: 'Cristais insuficientes', spotTaken: 'Esse lugar já está ocupado',
       cantBuildThere: 'Não dá para construir aí', cantBlockPath: 'Você não pode bloquear todo o caminho!',

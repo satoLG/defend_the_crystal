@@ -66,6 +66,10 @@ const state = {
   // mirrors the sim's free-roam rule: the sanctuary only opens during
   // checkpoints / before wave 1 — local prediction clamps the same way
   allowPlaza: true,
+  // sparring at the drill master's yard. The dummies are only OUR foes
+  // while this is on — mirrors Sim.canFight, so the hero doesn't turn to
+  // face a dummy some ally is training on.
+  training: false,
   // we cache the static geometry (towers/obstacles/graves) from the last
   // snapshot that carried it, and re-merge it into the lean per-tick
   // snapshots so the rest of the pipeline still sees a full snapshot.
@@ -128,6 +132,10 @@ async function boot() {
     onAction: sendAction,
     onJump: () => doJump(),
     onSkill: () => doSkill(),
+    onAttack: () => doAttack(),
+    // a combat preference changed — the sim is what actually swings, so
+    // it has to hear about it
+    onCombatPrefs: () => sendCombatPrefs(),
     onBuildMode: (on) => { gs.setBuildMode(on); if (!on) view.clearGhost(); },
     onDragMove: (x, y) => onDragMove(x, y),
     onDragEnd: (item, drop) => onDragEnd(item, drop),
@@ -152,6 +160,9 @@ async function boot() {
 
   await loadAssets((f) => ui.loadProgress(f));
   gs = new GameScene(canvas);
+  // a dropped WebGL context used to look like the game breaking (white
+  // flashes, then black models); say what happened and confirm the recovery
+  gs.onContextRestored = () => ui.toast(t('toast.graphicsRestored'), 'gold');
   gs.shakeEnabled = settings.get('shake');
   gs.setShadows(settings.get('shadows'));
   settings.onChange((k, v) => {
@@ -207,7 +218,12 @@ function connectRoom({ create, code, character }) {
   // connection can take ~30-50s while the instance wakes; keep the player
   // informed instead of leaving them on a silent screen.
   net.onStatus = (status) => {
-    if (state.net !== net || state.started) return;
+    if (state.net !== net) return;
+    // a drop long enough to outlive the server's grace window rebuilds the
+    // hero from defaults, so re-declare our combat preferences on every
+    // connect rather than only on the first one
+    if (status === 'connected') sendCombatPrefs();
+    if (state.started) return;
     if (status === 'reconnecting') $status(t('lobby.reconnecting'));
     else if (status === 'error') $status(t('lobby.serverWaking'));
   };
@@ -292,19 +308,35 @@ function startMatch() {
   state.net?.send('act', { t: 'begin' });
 }
 
+// How long after the intro's black screen clears the portal flares open.
+// The temple title card runs for 2.6s from that same moment, so a short
+// lead puts the whole arrival (portal + step-out, ~1.1s) INSIDE the card
+// instead of making the player wait for it to fade first.
+const ARRIVAL_LEAD = 0.55;
+
 function enterGame() {
   state.started = true;
   state.over = false;
   // black screen typing the crystal's plea, then a "Crystal Temple"
   // title card as the scene fades in, and the hero steps out of the
-  // portal the moment that card clears — no dead wait
+  // portal while that card is still up — no dead wait
   const introDur = ui.playIntro();
-  // the title card appears right as the black screen clears, and the
-  // hero steps out of the portal the moment the card fades
   setTimeout(() => { if (state.started && !state.over) ui.showLocationBanner(); }, introDur * 1000);
-  view.beginArrival(introDur + 2.6);
+  view.beginArrival(introDur + ARRIVAL_LEAD);
   ui.showHud();
+  sendCombatPrefs(); // the sim starts every hero on the defaults
   sfx.notify();
+}
+
+// The hero is not controllable until the portal has actually put them on
+// the ground: no walking, jumping, casting or building while the arrival
+// animation is still running (or while the intro is holding it armed).
+function selfArriving() {
+  return !!view?.isArriving(selfId);
+}
+
+function canControlSelf() {
+  return state.started && !state.over && !selfArriving();
 }
 
 function sendAction(act) {
@@ -390,7 +422,7 @@ function dragCellAt(x, y) {
 }
 
 function onDragMove(x, y) {
-  if (!state.started || state.over || !ui.dragItem) return;
+  if (!canControlSelf() || !ui.dragItem) return;
   const cell = dragCellAt(x, y);
   if (!cell) return view.clearGhost();
   view.setGhost(ui.dragItem, cell.c, cell.r, canPlaceLocal(ui.dragItem, cell.c, cell.r));
@@ -400,7 +432,7 @@ function onDragMove(x, y) {
 // go over the HUD or off the board is a silent cancel; releasing on a
 // red (invalid) tile answers with the error buzz.
 function onDragEnd(item, drop) {
-  if (!drop || !state.started || state.over) return;
+  if (!drop || !canControlSelf()) return;
   const cell = dragCellAt(drop.x, drop.y);
   if (!cell) return;
   if (canPlaceLocal(item, cell.c, cell.r)) {
@@ -424,7 +456,7 @@ function afterPlace(item) {
 }
 
 function onCanvasTap(x, y, pointerType, button) {
-  if (!state.started) return;
+  if (!state.started || selfArriving()) return;
   if (button === 2) return; // right-click cancels via contextmenu
   const cell = cellFromPointer(x, y);
   const offBoard = !cell ||
@@ -484,7 +516,7 @@ function towerRangeOf(row) {
 }
 
 function onKeyAction(action) {
-  if (!state.started) return;
+  if (!state.started || selfArriving()) return;
   switch (action) {
     case 'build': ui.selectItem(ui.selectedItem ? null : 'obstacle'); break;
     case 'card0': ui.selectCardByIndex(0); break;
@@ -501,6 +533,7 @@ function onKeyAction(action) {
       break;
     case 'jump': doJump(); break;
     case 'skill': doSkill(); break;
+    case 'attack': doAttack(); break;
     case 'startwave':
       // Space jumps when a jump is possible; otherwise it keeps its
       // old job of starting the next wave (owner only; the server enforces it)
@@ -539,7 +572,7 @@ function findAnyJump() {
 
 function doJump() {
   const s = state.self;
-  if (!state.started || state.over || s.dead || s.jump || s.dash) return false;
+  if (!canControlSelf() || s.dead || s.jump || s.dash) return false;
   if (!state.selfInit) return false;
   const info = findAnyJump();
   if (!info) return false;
@@ -557,7 +590,7 @@ function doJump() {
 let jumpWasEnabled = null;
 function updateJumpButton() {
   const s = state.self;
-  const ok = state.started && !state.over && !s.dead && !s.jump && !s.dash &&
+  const ok = canControlSelf() && !s.dead && !s.jump && !s.dash &&
     state.selfInit &&
     (!!findJump(clientGridRef(), s.x, s.z, localJumpCells()) ||
       (state.allowPlaza && !!findColliderJump(s.x, s.z, PLAYER.RADIUS)));
@@ -571,9 +604,30 @@ function updateJumpButton() {
 // class special attacks
 // ---------------------------------------------------------
 
+// One basic attack, with auto-attack switched off. The sim owns the rate
+// limit (see Sim.tryAttack), so holding the button down or mashing it can
+// never swing faster than the class allows — this only stops the obviously
+// dead presses from going over the wire.
+function doAttack() {
+  const s = state.self;
+  if (!canControlSelf() || s.dead || s.jump || s.dash) return;
+  if (!state.selfInit || !ui.attackReady) return;
+  sendAction({ t: 'atk' });
+}
+
+// push this client's combat preferences to the sim (on join and on change)
+function sendCombatPrefs() {
+  if (!state.started) return;
+  sendAction({
+    t: 'prefs',
+    auto: settings.get('autoAttack') ? 1 : 0,
+    aim: settings.get('autoAim') ? 1 : 0,
+  });
+}
+
 function doSkill() {
   const s = state.self;
-  if (!state.started || state.over || s.dead || s.jump || s.dash) return;
+  if (!canControlSelf() || s.dead || s.jump || s.dash) return;
   if (!state.selfInit) return;
   if (!ui.skillReady) return;
   // the berserker's dash moves the character, and movement is
@@ -675,7 +729,10 @@ function handleEvent(ev) {
     case 'train':
       // the on-screen "exit training" button follows the sim's word —
       // it also ends by distance or when a wave starts
-      if (ev.id === selfId) ui.setTraining(ev.on === 1);
+      if (ev.id === selfId) {
+        state.training = ev.on === 1;
+        ui.setTraining(state.training);
+      }
       break;
     case 'petswap':
       if (ev.id === selfId) sfx.notify();
@@ -707,7 +764,7 @@ function handleEvent(ev) {
       state.over = true;
       ui.cancelDrag?.();
       ui.selectItem(null);
-      ui.showGameOver(ev, state.isOwner);
+      ui.showGameOver(ev, state.isOwner, selfId);
       sfx.error();
       break;
     case 'restart':
@@ -721,7 +778,7 @@ function handleEvent(ev) {
       { // the party re-enters through the portal after the plea + title
         const dur = ui.playIntro();
         setTimeout(() => { if (state.started && !state.over) ui.showLocationBanner(); }, dur * 1000);
-        view.beginArrival(dur + 2.6);
+        view.beginArrival(dur + ARRIVAL_LEAD);
       }
       ui.toast(t('toast.newDefense'), 'gold');
       break;
@@ -783,12 +840,14 @@ const FACE_STICK = 0.8;
 // [id, kind, x, z, ...]). Mirrors the sim's auto-attack acquisition, with
 // hysteresis so it commits to whatever it's already turned toward.
 function foeToFace(x, z, range) {
-  if (!range) return null;
+  // auto-aim IS this turn — off, the hero simply looks where you steer
+  if (!range || !settings.get('autoAim')) { state.self.faceId = null; return null; }
   const en = state.snaps.latest()?.en;
   if (!en) return null;
   const maxD = range + ENEMY.RADIUS + FACE_MARGIN;
   let best = null, bestD = maxD, cur = null, curD = Infinity;
   for (const e of en) {
+    if (e[1] === 'dummy' && !state.training) continue;
     const d = Math.hypot(e[2] - x, e[3] - z);
     if (d > maxD) continue;
     if (d < bestD) { bestD = d; best = e; }
@@ -892,7 +951,11 @@ function frame(t) {
   const freeRoam = phase === 'checkpoint' || (phase === 'build' && waveN === 0);
   state.allowPlaza = !state.started || state.over || freeRoam;
 
-  if (state.started && !state.over) stepSelf(dt);
+  // no self-prediction while the hero is still stepping out of the portal:
+  // the spawn animation owns the model until it lands
+  const arriving = selfArriving();
+  if (arriving) state.self.moving = false;
+  else if (state.started && !state.over) stepSelf(dt);
   updateJumpButton();
 
   if (state.started) {
@@ -957,8 +1020,8 @@ function frame(t) {
 
   // standing at Tonho's stall in the plaza unlocks buying at the shop
   // (vendors are only reachable while the sanctuary is open anyway)
-  const canRoam = state.started && !state.over && !state.self.dead && freeRoam &&
-    state.selfInit;
+  const canRoam = state.started && !state.over && !arriving && !state.self.dead &&
+    freeRoam && state.selfInit;
   const atShop = canRoam &&
     dist2d(state.self.x, state.self.z, PET_SHOP_POS.x, PET_SHOP_POS.z) < PET_SHOP_RADIUS;
   ui.setShopNear(atShop);
