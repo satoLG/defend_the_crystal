@@ -604,6 +604,16 @@ export class Sim {
     if (this.trainers.size === 0) this.removeDummies();
   }
 
+  // A training dummy is a foe ONLY to the players actually training on it.
+  // Before this, one player starting a round at the drill master turned the
+  // dummies into legitimate targets for the whole party: everyone else's
+  // auto-attack locked onto them from across the plaza. Takes the player id
+  // rather than the entity so delayed hits, whose caster may have left, can
+  // ask the same question.
+  canFight(pid, e) {
+    return !e.dummy || this.trainers.has(pid);
+  }
+
   ensureDummies() {
     if (this.enemies.entities.some((e) => e.dummy)) return;
     for (const d of DUMMIES) this.spawnDummy(d.x, d.z);
@@ -672,6 +682,7 @@ export class Sim {
     p.dashT = S.dur;
     const dmg = p.atk * S.dmgMult;
     for (const e of this.enemies) {
+      if (!this.canFight(p.id, e)) continue;
       const ep = e.vehicle.position;
       const t = len2 > 0.001
         ? clamp(((ep.x - fx) * dx + (ep.z - fz) * dz) / len2, 0, 1)
@@ -702,7 +713,7 @@ export class Sim {
     this.taunt = { id: p.id, until: this.time + S.dur, r: S.radius };
     // snap nearby enemies onto him immediately so the pull is instant
     for (const e of this.enemies) {
-      if (e.dummy) continue;
+      if (!this.canFight(p.id, e)) continue;
       const pos = e.vehicle.position;
       const d = dist2d(pos.x, pos.z, p.x, p.z);
       if (d <= S.radius && (e.flying || this.hasLos(pos.x, pos.z, p.x, p.z))) {
@@ -734,6 +745,7 @@ export class Sim {
     const range = p.range * S.rangeMult;
     const foes = [];
     for (const e of this.enemies) {
+      if (!this.canFight(p.id, e)) continue;
       const ep = e.vehicle.position;
       const d = dist2d(p.x, p.z, ep.x, ep.z);
       if (d <= range + ENEMY.RADIUS) foes.push({ e, d });
@@ -773,6 +785,7 @@ export class Sim {
     const S = SKILLS.mage;
     let best = null, bestD = Infinity;
     for (const e of this.enemies) {
+      if (!this.canFight(p.id, e)) continue;
       const d = dist2d(p.x, p.z, e.vehicle.position.x, e.vehicle.position.z);
       if (d < bestD) { bestD = d; best = e; }
     }
@@ -799,6 +812,7 @@ export class Sim {
     const pid = p.id;
     this.pending.push({ at: this.time + ft, fn: () => {
       for (const e of [...this.enemies.entities]) {
+        if (!this.canFight(pid, e)) continue;
         const ep = e.vehicle.position;
         const d = dist2d(cx, cz, ep.x, ep.z);
         if (d <= r + ENEMY.RADIUS) {
@@ -1849,6 +1863,7 @@ export class Sim {
     let best = null, bestD = Infinity;
     for (const e of this.enemies) {
       const ep = e.vehicle.position;
+      if (!this.canFight(p.id, e)) continue;
       const d = dist2d(p.x, p.z, ep.x, ep.z);
       if (d >= bestD) continue;
       if (!p.autoAim &&
@@ -1884,6 +1899,7 @@ export class Sim {
       // nearest enemies in range (cycling when there are fewer foes)
       const foes = [];
       for (const e of this.enemies) {
+        if (!this.canFight(p.id, e)) continue;
         const ep = e.vehicle.position;
         const d = dist2d(p.x, p.z, ep.x, ep.z);
         if (d <= p.range + ENEMY.RADIUS) foes.push({ e, d });
@@ -1915,6 +1931,7 @@ export class Sim {
       this.emit({ t: 'aoe', x: rnd2(cx), z: rnd2(cz), r, k: 'mage', ft: 0.35, wt });
       this.pending.push({ at: this.time + 0.35, fn: () => {
         for (const e of [...this.enemies.entities]) {
+          if (!this.canFight(pid, e)) continue;
           const ep = e.vehicle.position;
           const d = dist2d(cx, cz, ep.x, ep.z);
           if (d <= r + ENEMY.RADIUS) {

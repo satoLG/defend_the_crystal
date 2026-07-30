@@ -66,6 +66,10 @@ const state = {
   // mirrors the sim's free-roam rule: the sanctuary only opens during
   // checkpoints / before wave 1 — local prediction clamps the same way
   allowPlaza: true,
+  // sparring at the drill master's yard. The dummies are only OUR foes
+  // while this is on — mirrors Sim.canFight, so the hero doesn't turn to
+  // face a dummy some ally is training on.
+  training: false,
   // we cache the static geometry (towers/obstacles/graves) from the last
   // snapshot that carried it, and re-merge it into the lean per-tick
   // snapshots so the rest of the pipeline still sees a full snapshot.
@@ -720,7 +724,10 @@ function handleEvent(ev) {
     case 'train':
       // the on-screen "exit training" button follows the sim's word —
       // it also ends by distance or when a wave starts
-      if (ev.id === selfId) ui.setTraining(ev.on === 1);
+      if (ev.id === selfId) {
+        state.training = ev.on === 1;
+        ui.setTraining(state.training);
+      }
       break;
     case 'petswap':
       if (ev.id === selfId) sfx.notify();
@@ -835,6 +842,7 @@ function foeToFace(x, z, range) {
   const maxD = range + ENEMY.RADIUS + FACE_MARGIN;
   let best = null, bestD = maxD, cur = null, curD = Infinity;
   for (const e of en) {
+    if (e[1] === 'dummy' && !state.training) continue;
     const d = Math.hypot(e[2] - x, e[3] - z);
     if (d > maxD) continue;
     if (d < bestD) { bestD = d; best = e; }
