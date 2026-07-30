@@ -18,6 +18,9 @@ import { clamp, dist2d, nextId } from '../utils.js';
 
 const rnd2 = (v) => Math.round(v * 100) / 100;
 
+// how long a hit still counts toward an assist on the eventual kill
+const ASSIST_WINDOW = 8;
+
 // the weak blood magic a rank-and-file vampire carries once the court
 // has risen (see BLOOD_COURT); null for every other kind and earlier wave
 function bloodOf(kind, wave) {
@@ -113,7 +116,9 @@ export class Sim {
       poisonT: 0, poisonDps: 0, poisonTick: 0,
       burnT: 0, burnDps: 0, burnTick: 0,
       slowMove: 1, slowRate: 1, webbed: 0,
-      kills: 0, obst: 0, lastInputT: this.time,
+      // scoreboard, read back on the defeat screen
+      kills: 0, deaths: 0, assists: 0,
+      obst: 0, lastInputT: this.time,
     });
     this.applyStats(p);
     p.hp = p.maxHp;
@@ -369,12 +374,40 @@ export class Sim {
     }
   }
 
+  // The run is over: the field is cleared and the fight stops for good.
+  // Leaving the horde marching (as it used to) meant enemies kept piling
+  // in behind the defeat screen — still chasing, still hitting, still
+  // being simulated — with nothing left to defend.
   gameOver() {
     this.phase = 'over';
     this.spawnQueue = [];
-    const kills = {};
-    for (const p of this.players) kills[p.id] = { name: p.name, kills: p.kills, lvl: p.lvl };
-    this.emit({ t: 'over', wave: this.wave, kills });
+    for (const e of [...this.enemies.entities]) {
+      const pos = e.vehicle.position;
+      this.emit({ t: 'despawn', id: e.id, x: rnd2(pos.x), z: rnd2(pos.z) });
+      this.removeEnemy(e);
+    }
+    this.graves = [];
+    this.webs = [];
+    this.fires = [];
+    this.pending = [];
+    this.drops = [];
+    this.taunt = null;
+    for (const id of [...this.trainers]) this.exitTraining(id);
+    this.emit({ t: 'over', wave: this.wave, stats: this.scoreboard() });
+  }
+
+  // Best run first: kills, then assists, then fewest deaths, then level.
+  scoreboard() {
+    return this.players.entities
+      .map((p) => ({
+        id: p.id, name: p.name, cls: p.cls, lvl: p.lvl,
+        kills: p.kills, deaths: p.deaths, assists: p.assists,
+      }))
+      .sort((a, b) =>
+        b.kills - a.kills ||
+        b.assists - a.assists ||
+        a.deaths - b.deaths ||
+        b.lvl - a.lvl);
   }
 
   // ---------------- building ----------------
@@ -569,6 +602,7 @@ export class Sim {
       enemy: true, dummy: true, id: nextId(), kind: 'dummy', vehicle,
       hp: 600, maxHp: 600, dmg: 0, speed: 0, pts: 0, xp: 0,
       scale: 1, breach: 0, boss: 0, flying: false, state: 'path', targetId: null,
+      dmgBy: null,
       atkCd: 0, kbx: 0, kbz: 0, yaw: -Math.PI / 2, stunT: 0,
       aggroCd: 0, chaseBestD: 0, dragT: 0,
       slowT: 0, slowF: 1, burnT: 0, burnDps: 0, poisonT: 0, poisonDps: 0,
@@ -857,6 +891,8 @@ export class Sim {
       hp: stats.hp, maxHp: stats.hp, dmg: stats.dmg, speed: stats.speed,
       pts: stats.pts, xp: stats.xp, scale: stats.scale, breach: stats.breach,
       boss, flying: !!def.flying, state: 'path', targetId: null,
+      // who has hurt it lately (id -> time), for assist credit on the kill
+      dmgBy: null,
       atkCd: 0, kbx: 0, kbz: 0, yaw: 0, stunT: 0,
       aggroCd: 0, chaseBestD: 0, dragT: 0,
       // status effects (towers): chill slow, fire / poison DoTs
@@ -943,6 +979,11 @@ export class Sim {
   damageEnemy(e, dmg, kbx, kbz, killerId) {
     if (e.hp <= 0) return;
     const killer = killerId ? this.getPlayer(killerId) : null;
+    // everyone who hurt it recently shares in the kill (see creditKill)
+    if (killer) {
+      if (!e.dmgBy) e.dmgBy = new Map();
+      e.dmgBy.set(killer.id, this.time);
+    }
     // critical hits (tiger pet): player-dealt damage only, never towers
     if (killer && killer.critCh > 0 && Math.random() < killer.critCh) {
       dmg *= PET.CRIT_MULT;
@@ -1002,13 +1043,28 @@ export class Sim {
         return;
       }
       this.emit({ t: 'die', id: e.id, kind: e.kind, x: rnd2(pos.x), z: rnd2(pos.z), boss: e.boss });
-      if (killer) killer.kills += 1;
+      this.creditKill(e, killer);
       // nothing is granted on the kill itself — the enemy drops XP and
       // point orbs that each player has to walk over to collect
       this.spawnDrops(e);
       this.removeEnemy(e);
       this.checkWaveCleared();
     }
+  }
+
+  // The kill goes to whoever landed the last blow; everyone ELSE who hurt
+  // the same enemy within the assist window gets an assist. A tower kill
+  // (no killer) still hands assists out — the party softened it up.
+  creditKill(e, killer) {
+    if (killer) killer.kills += 1;
+    if (!e.dmgBy) return;
+    for (const [id, at] of e.dmgBy) {
+      if (id === killer?.id) continue;
+      if (this.time - at > ASSIST_WINDOW) continue;
+      const p = this.getPlayer(id);
+      if (p) p.assists += 1;
+    }
+    e.dmgBy = null;
   }
 
   // ---------------- aggro rules ----------------
@@ -1289,6 +1345,7 @@ export class Sim {
     if (p.hp <= 0) {
       p.hp = 0;
       p.dead = true;
+      p.deaths += 1;
       p.moving = false;
       p.respawnT = Math.min(
         PLAYER.RESPAWN_BASE + PLAYER.RESPAWN_PER_WAVE * this.wave,
@@ -1686,6 +1743,11 @@ export class Sim {
     }
 
     this.stepPlayers(dt);
+    // once the crystal is gone the battle systems go quiet — the field is
+    // already empty (see gameOver), so this only stops them idling. The
+    // heroes still walk around their ruined sanctuary.
+    if (this.phase === 'over') return;
+
     this.stepDrops(dt);
     this.stepGraves();
     this.stepFires(dt);

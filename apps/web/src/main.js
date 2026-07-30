@@ -722,7 +722,7 @@ function handleEvent(ev) {
       state.over = true;
       ui.cancelDrag?.();
       ui.selectItem(null);
-      ui.showGameOver(ev, state.isOwner);
+      ui.showGameOver(ev, state.isOwner, selfId);
       sfx.error();
       break;
     case 'restart':

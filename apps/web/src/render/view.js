@@ -2720,6 +2720,19 @@ export class GameView {
         }
         break;
       }
+      case 'despawn': {
+        // the run ended under them — the horde dissolves instead of
+        // dropping corpses all over the field
+        const a = this.enemies.get(ev.id);
+        if (a) {
+          this.scene.remove(a.group);
+          this.enemies.delete(ev.id);
+          this.bossVariants.delete(ev.id);
+          this.mirrors.delete(ev.id);
+        }
+        this.burst(ev.x, ev.z, 0.9, 0x6a4a8a);
+        break;
+      }
       case 'breach': {
         this.gs.crystalBreachFx();
         this.burst(CRYSTAL_POS.x, CRYSTAL_POS.z, 1.6, 0xff5540);

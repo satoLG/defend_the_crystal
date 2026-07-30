@@ -486,9 +486,19 @@
 
     <!-- ============ GAME OVER ============ -->
     <div id="gameover" class="screen overlay hidden">
-      <div class="panel center-panel">
+      <div class="panel center-panel over-modal">
         <h2><i data-icon="gemcrack"></i> <span data-i18n="over.crystalShattered">The crystal shattered</span></h2>
-        <div id="go-stats"></div>
+        <div id="go-wave" class="go-wave"></div>
+        <div class="go-board">
+          <div class="go-row go-head">
+            <span class="go-rank">#</span>
+            <span class="go-who" data-i18n="over.colDefender">Defender</span>
+            <span class="go-col" id="go-h-kills" data-i18n="over.colKills">Kills</span>
+            <span class="go-col" id="go-h-assists" data-i18n="over.colAssists">Assists</span>
+            <span class="go-col" id="go-h-deaths" data-i18n="over.colDeaths">Deaths</span>
+          </div>
+          <div id="go-rows"></div>
+        </div>
         <div class="menu-actions">
           <button id="restart-btn" class="btn primary big hidden" data-i18n="over.tryAgain">Try again</button>
           <div id="go-hint" class="muted hidden" data-i18n="over.waitingHostRestart">Waiting for the host to restart…</div>

@@ -328,8 +328,10 @@ const STRINGS = {
     over: {
       crystalShattered: 'The crystal shattered', tryAgain: 'Try again',
       backToMenu: 'Back to menu', waitingHostRestart: 'Waiting for the host to restart…',
-      survivedToWave: 'Survived to wave {n}', newBest: ' — new best!',
+      survivedToWave: 'Survived to wave {n}', newBest: 'new best!',
       killsLine: '{name} — {kills} kills · level {lvl}',
+      colDefender: 'Defender', colKills: 'Kills', colAssists: 'Assists',
+      colDeaths: 'Deaths', levelShort: 'Lv {lvl}',
     },
     hostlost: {
       connectionLost: 'Connection lost', hostLeft: 'The host has left the realm.',
@@ -579,8 +581,10 @@ const STRINGS = {
     over: {
       crystalShattered: 'O cristal se estilhaçou', tryAgain: 'Tentar de novo',
       backToMenu: 'Voltar ao menu', waitingHostRestart: 'Aguardando o anfitrião reiniciar…',
-      survivedToWave: 'Sobreviveu até a onda {n}', newBest: ' — novo recorde!',
+      survivedToWave: 'Sobreviveu até a onda {n}', newBest: 'novo recorde!',
       killsLine: '{name} — {kills} abates · nível {lvl}',
+      colDefender: 'Defensor', colKills: 'Abates', colAssists: 'Assist.',
+      colDeaths: 'Mortes', levelShort: 'Nv {lvl}',
     },
     hostlost: {
       connectionLost: 'Conexão perdida', hostLeft: 'O anfitrião deixou o reino.',

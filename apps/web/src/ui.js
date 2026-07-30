@@ -27,6 +27,9 @@ const CLASS_COLORS = {
   berserker: '#ff6a4d', tanker: '#6a9cff', archer: '#7de87d', mage: '#c07dff',
 };
 
+// podium marks for the top three of the defeat scoreboard
+const MEDALS = ['🥇', '🥈', '🥉'];
+
 // per-class stat bars for the character screen (labels are localized keys
 // under statbar.*; kept here so the DOM layer owns its own copy)
 const STAT_BARS = {
@@ -1878,14 +1881,41 @@ export class UI {
     $('hl-exit').addEventListener('click', () => this.cb.onExit());
   }
 
-  showGameOver(ev, isHost) {
+  // The defeat screen is the run's obituary: how far the party got, and
+  // who carried it. Rows arrive already ranked from the sim (kills, then
+  // assists, then fewest deaths) — best defender on top.
+  showGameOver(ev, isHost, selfId) {
     const best = Number(localStorage.getItem('dtc-best-wave') || 0);
-    if (ev.wave > best) localStorage.setItem('dtc-best-wave', String(ev.wave));
-    const lines = [t('over.survivedToWave', { n: ev.wave }) + (ev.wave > best ? t('over.newBest') : ''), ''];
-    for (const s of Object.values(ev.kills || {})) {
-      lines.push(t('over.killsLine', { name: s.name, kills: s.kills, lvl: s.lvl }));
-    }
-    $('go-stats').textContent = lines.join('\n');
+    const isBest = ev.wave > best;
+    if (isBest) localStorage.setItem('dtc-best-wave', String(ev.wave));
+    $('go-wave').innerHTML =
+      `<span>${t('over.survivedToWave', { n: ev.wave })}</span>` +
+      (isBest ? `<span class="go-best">${t('over.newBest')}</span>` : '');
+
+    // `stats` is the ranked array; `kills` is the old keyed shape, which a
+    // client running from the service-worker cache may still be on
+    const rows = ev.stats
+      || Object.entries(ev.kills || {}).map(([id, s]) => ({ id, ...s }));
+    const board = $('go-rows');
+    board.innerHTML = '';
+    rows.forEach((s, i) => {
+      const row = document.createElement('div');
+      row.className = 'go-row' + (s.id === selfId ? ' go-self' : '') + (i === 0 ? ' go-top' : '');
+      const color = CLASS_COLORS[s.cls] || 'var(--gold)';
+      row.innerHTML =
+        `<span class="go-rank">${MEDALS[i] || i + 1}</span>
+         <span class="go-who">
+           <span class="go-cls" style="color:${color}">${icon('cls-' + s.cls)}</span>
+           <span class="go-meta"><span class="go-name"></span>
+             <span class="go-lvl">${t('over.levelShort', { lvl: s.lvl })}</span></span>
+         </span>
+         <span class="go-col go-kills">${s.kills || 0}</span>
+         <span class="go-col">${s.assists || 0}</span>
+         <span class="go-col go-deaths">${s.deaths || 0}</span>`;
+      row.querySelector('.go-name').textContent = s.name || '';
+      board.appendChild(row);
+    });
+
     $('restart-btn').classList.toggle('hidden', !isHost);
     $('go-hint').classList.toggle('hidden', isHost);
     this.show('gameover');
