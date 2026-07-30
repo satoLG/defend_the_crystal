@@ -87,9 +87,7 @@ export class Room {
     if (act.t === 'begin') { if (playerId === this.ownerId) this.begin(); return; }
     // starting a wave / restarting after a defeat is owner-only; everything
     // else (build, jump, pet/weapon swaps, …) is free for any player.
-    if ((act.t === 'start' || act.t === 'restart'
-      || act.t === 'setwave' || act.t === 'devmode')
-      && playerId !== this.ownerId) return;
+    if ((act.t === 'start' || act.t === 'restart') && playerId !== this.ownerId) return;
     this.sim.handleAction(playerId, act);
   }
 

@@ -6,7 +6,7 @@ import {
   CRYSTAL_BREACH_LIMIT, GRID, JUMP, DROPS, SUMMON, BOSSES, SKILLS, NAME_MAX,
   PET, GOLD, petEffects, sanitizePetRef, jumpDurFor,
   WEAPONS, STUN, ORB, weaponEffects, sanitizeWeaponRef, classStarterWeapons,
-  TOWER_SPECIALS, STATUS, BLOOD_COURT, DEV,
+  TOWER_SPECIALS, STATUS, BLOOD_COURT,
 } from '../config.js';
 import {
   Grid, cellToWorld, worldToCell, canJumpFrom, enemyJumpShortcut, idx, inBounds,
@@ -55,8 +55,6 @@ export class Sim {
     this.time = 0;
     this.phase = 'lobby'; // lobby | build | combat | checkpoint | over
     this.wave = 0;
-    this.jumpWave = null; // testing: wave the host picked to start from
-    this.devMode = false; // testing: unlimited crystals, max level, no loss
     this.points = 0;
     this.breaches = 0;
     this.buildT = 0;
@@ -275,8 +273,6 @@ export class Sim {
     for (const p of this.players) p.obst = stock;
     this.phase = 'build';
     this.wave = 0;
-    this.jumpWave = null;
-    this.devMode = false;
     this.buildTimerOn = false; // first wave starts on demand
     this.emit({ t: 'phase', ph: 'build', n: 1 });
   }
@@ -310,49 +306,6 @@ export class Sim {
     this.emit({ t: 'restart' });
   }
 
-  // Testing aid: skip the counter straight to a wave so a specific
-  // fight can be reached without grinding to it. Only before the run has
-  // begun — once wave 1 has marched in, the HP curve, the point pool and
-  // everyone's level are all built on the waves actually played, and
-  // moving the counter under them would just report nonsense.
-  jumpToWave(n) {
-    if (this.wave !== 0 || this.phase !== 'build') return;
-    const target = Math.round(Number(n));
-    if (!Number.isFinite(target)) return;
-    // parked, not applied: the counter has to stay at 0 so the picker
-    // remains open and the host can change their mind before starting
-    this.jumpWave = Math.min(Math.max(target, 1), WAVES.CYCLE);
-  }
-
-  // Testing aid: take the survival pressure off so late waves can
-  // actually be watched. Crystals stay pinned full, every hero jumps to
-  // the level cap, and breaches stop counting toward the loss. Same
-  // window as jumpToWave — arming it mid-run would rewrite progress that
-  // was genuinely earned.
-  setDevMode(on) {
-    if (this.wave !== 0 || this.phase !== 'build') return;
-    this.devMode = !!on;
-    if (!this.devMode) return;
-    this.points = DEV.POINTS;
-    for (const p of this.players) this.maxLevel(p);
-  }
-
-  // walk a hero up to the cap the same way grantXp would, so the stat
-  // growth, the derived stats and the client's level-up feedback all
-  // match a hero that got there by playing
-  maxLevel(p) {
-    while (p.lvl < PLAYER.LEVEL_CAP) {
-      p.lvl += 1;
-      p.xpNext = this.xpNext(p.lvl);
-      p.rawMaxHp = Math.round(p.rawMaxHp * PLAYER.LEVEL_HP_MULT);
-      p.rawAtk *= PLAYER.LEVEL_ATK_MULT;
-    }
-    p.xp = 0;
-    this.applyStats(p);
-    p.hp = p.maxHp;
-    this.emit({ t: 'lvl', id: p.id, lvl: p.lvl });
-  }
-
   startWave() {
     if (this.phase !== 'build' && this.phase !== 'checkpoint') return;
     // the first wave only starts once EVERY hero has walked up from the
@@ -363,8 +316,6 @@ export class Sim {
     }
     // training ends the moment a wave marches in
     for (const id of [...this.trainers]) this.exitTraining(id);
-    // a parked test jump lands here, once, right before the counter ticks
-    if (this.jumpWave) { this.wave = this.jumpWave - 1; this.jumpWave = null; }
     this.wave += 1;
     this.phase = 'combat';
     this.waveStartCount = this.playerCount();
@@ -443,8 +394,6 @@ export class Sim {
       case 'pet': return this.trySetPet(p, act);
       case 'loadout': return this.trySetLoadout(p, act);
       case 'start': if (this.phase === 'build') this.startWave(); return;
-      case 'setwave': return this.jumpToWave(act.n);
-      case 'devmode': return this.setDevMode(act.on);
       case 'cont': return this.setContinue(id);
       case 'restart': if (this.phase === 'over') this.restart(); return;
     }
@@ -898,6 +847,11 @@ export class Sim {
       }
     }
 
+    // blood magic: a ranged drain that heals the caster for a share of
+    // the damage it lands. Drácula gets the full version from his boss
+    // entry; the vampires of his court (wave 61 on) get a weak one.
+    const blood = bossDef?.blood || bloodOf(kind, this.wave);
+
     const e = this.world.add({
       enemy: true, id: nextId(), kind, vehicle, seek,
       hp: stats.hp, maxHp: stats.hp, dmg: stats.dmg, speed: stats.speed,
@@ -924,11 +878,15 @@ export class Sim {
         ? (variant === 'brutus' ? 3 : 0)
         : boss === 1
           ? (opts?.vr || 0)
-          : bloodOf(kind, this.wave) ? 4
+          : blood ? 4
             : (stats.tier === 2 ? 1 : stats.tier === 3 ? 2 : 0),
       // special powers
       archer,
-      jumper: !!def.jumper && !def.flying,
+      // vaulting a wall is the mundane vampire's trick. One that knows
+      // blood magic keeps its distance and drains from range instead, so
+      // it never takes the shortcut — that includes Drácula himself and
+      // every vampire of his court.
+      jumper: !!def.jumper && !def.flying && !blood,
       jump: null,
       jumpCd: ENEMY.JUMP_EVERY * (0.4 + Math.random() * 0.6),
       chainJumps: bossDef?.jumps || 1,
@@ -938,10 +896,7 @@ export class Sim {
       aggroR: bossDef?.aggroR || ENEMY.AGGRO_RADIUS,
       summoner: !!def.summoner, summonCd: SUMMON.FIRST,
       pumpkin: bossDef?.pumpkin || null,
-      // blood magic: a ranged drain that heals the caster for a share of
-      // the damage it lands. Drácula gets the full version from his boss
-      // entry; the vampires of his court (wave 61 on) get a weak one.
-      blood: bossDef?.blood || bloodOf(kind, this.wave),
+      blood,
       // Viúva Negra: a venom lob and the web patches she spins
       venom: bossDef?.venom || null,
       web: bossDef?.web || null,
@@ -1689,14 +1644,6 @@ export class Sim {
   step(dt) {
     this.time += dt;
 
-    // dev mode keeps the crystal pool topped up rather than making every
-    // cost free — the spends still run and still read on screen, they
-    // just never bite
-    if (this.devMode) {
-      this.points = DEV.POINTS;
-      for (const p of this.players) p.obst = DEV.OBSTACLES;
-    }
-
     // web patches fade on their own
     if (this.webs.length) {
       for (const w of this.webs) w.t -= dt;
@@ -2118,14 +2065,12 @@ export class Sim {
         e.seek.target.set(t.x, 0, t.z);
       }
 
-      // breach the crystal — in dev mode it still lands (the hit reads,
-      // the enemy is spent) but the crystal never wears down, so a late
-      // wave can be watched to the end
+      // breach the crystal
       if (dist2d(pos.x, pos.z, CRYSTAL_POS.x, CRYSTAL_POS.z) < ENEMY.BREACH_DIST) {
-        if (!this.devMode) this.breaches += e.breach;
+        this.breaches += e.breach;
         this.emit({ t: 'breach', br: this.breaches, x: rnd2(pos.x), z: rnd2(pos.z) });
         this.removeEnemy(e);
-        if (!this.devMode && this.breaches >= CRYSTAL_BREACH_LIMIT) { this.gameOver(); return; }
+        if (this.breaches >= CRYSTAL_BREACH_LIMIT) { this.gameOver(); return; }
         this.checkWaveCleared();
       }
     }
@@ -2384,8 +2329,6 @@ export class Sim {
   buildSnapshot() {
     return {
       w: this.wave,
-      jw: this.jumpWave || 0, // testing: parked start wave, 0 = none
-      dv: this.devMode ? 1 : 0, // testing mode armed
       ph: this.phase,
       bt: this.buildTimerOn ? rnd2(Math.max(this.buildT, 0)) : -1,
       pts: Math.round(this.points),

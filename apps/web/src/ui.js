@@ -4,14 +4,12 @@ import {
   PETS, PET, petXpNext, petEffects,
   WEAPONS, WEAPON_TIER_MAX, CLASS_WEAPONS,
   weaponEffects, weaponUpgradeCost,
-  WAVES, BOSS_ORDER, SUBBOSSES, PHASES,
 } from '@dtc/shared/config.js';
 import {
   t, applyStaticI18n, getLang, setLang, onLangChange,
   className, classBlurb, classWeaponName, powerName, powerDesc,
   petName, petBlurb, petEffectText, weaponName, weaponBlurb, weaponStatText,
   tierName, towerName, towerSpecName, towerSpecDesc,
-  bossName, enemyName,
 } from './i18n.js';
 import { sfx, setSfxVolume } from './audio.js';
 import { normalizeRoomCode } from '@dtc/shared/utils.js';
@@ -21,9 +19,6 @@ import { music } from './music.js';
 import { isInstalled, hasNativePrompt, promptInstall, onInstallChange } from './pwa.js';
 import { loadRoster, saveRoster, defaultCharacter, petRefOf, grantPetXp, loadoutOf } from './character.js';
 import { getSlots } from './render/customize.js';
-import {
-  DRAGON_FX, loadDragonFx, saveDragonFx,
-} from './render/view.js';
 import { NPCS } from '@dtc/shared/sanctuary.js';
 
 // class accent colours (mirror the 3D CLASS_TINT) used to tint the
@@ -902,7 +897,6 @@ export class UI {
       sfx.click();
       this.cb.onAction({ t: 'start' });
     });
-    this.bindDevWave();
     bindTap($('jump-btn'), () => this.cb.onJump?.());
     bindTap($('skill-btn'), () => this.cb.onSkill?.());
     $('room-chip').addEventListener('click', async () => {
@@ -1731,150 +1725,6 @@ export class UI {
       ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   }
 
-  // ---- testing wave picker ----------------------------------------
-  // Jump straight to any wave of the authored arc so a specific fight
-  // can be inspected without playing up to it. The server only honours
-  // it before the first wave (Sim.jumpToWave); this is just the dial.
-  //
-  // Off unless asked for: the dev server and any build with
-  // VITE_DEV_TOOLS set get it, and `?dev=1` turns it on for one session
-  // anywhere — enough to poke at staging without redeploying it. It is
-  // never a security boundary (the server's own guard is), just a way to
-  // keep debug chrome out of a normal player's screen.
-
-  // what the host is about to walk into, so the pick is informed
-  devWaveSummary(n) {
-    const parts = [];
-    if (n % WAVES.CHECKPOINT_EVERY === 0) {
-      const variant = BOSS_ORDER[(n / WAVES.CHECKPOINT_EVERY - 1) % BOSS_ORDER.length];
-      parts.push(`BOSS <b>${bossName(variant)}</b>`);
-    } else if (n % WAVES.SUBBOSS_EVERY === 0) {
-      const squad = (SUBBOSSES[n] || []).map((s) => enemyName(s.kind));
-      if (squad.length) parts.push(`mini <b>${squad.join(' + ')}</b>`);
-    }
-    let mix = PHASES[0].mix;
-    for (const p of PHASES) {
-      if (n < p.from) break;
-      mix = p.mix;
-    }
-    // heaviest first — the shape of the wave in one glance
-    const kinds = Object.entries(mix)
-      .sort((a, b) => b[1] - a[1])
-      .map(([k]) => enemyName(k));
-    parts.push(kinds.join(', '));
-    return parts.join('<br/>');
-  }
-
-  setDevWave(n) {
-    const v = Math.min(Math.max(Math.round(n) || 1, 1), WAVES.CYCLE);
-    this.devWave = v;
-    $('devwave-range').value = String(v);
-    $('devwave-num').value = String(v);
-    $('devwave-current').textContent = `wave ${v}`;
-    $('devwave-info').innerHTML = this.devWaveSummary(v);
-    return v;
-  }
-
-  bindDevWave() {
-    this.devTools = !!(
-      import.meta.env?.DEV
-      || import.meta.env?.VITE_DEV_TOOLS
-      || new URLSearchParams(location.search).has('dev')
-    );
-    if (!this.devTools) return;
-    this.devWave = 1;
-    const range = $('devwave-range');
-    const num = $('devwave-num');
-    range.max = String(WAVES.CYCLE);
-    num.max = String(WAVES.CYCLE);
-    range.addEventListener('input', () => this.setDevWave(+range.value));
-    num.addEventListener('change', () => this.setDevWave(+num.value));
-    // arm/disarm as it is ticked, so the crystals and the level land
-    // while there is still time to look at them before the wave hits
-    const god = $('devwave-god');
-    god.addEventListener('change', () => {
-      this.cb.onAction({ t: 'devmode', on: god.checked });
-    });
-    bindTap($('devwave-go'), () => {
-      sfx.click();
-      // park the target, then start — the sim applies it on the way in
-      this.cb.onAction({ t: 'devmode', on: god.checked });
-      this.cb.onAction({ t: 'setwave', n: this.devWave });
-      this.cb.onAction({ t: 'start' });
-    });
-    this.setDevWave(1);
-    this.bindDevSkin();
-  }
-
-  // ---- dragon FX editor -------------------------------------------
-  // Dials in where the breath leaves the model and which frame of the
-  // lunge it freezes on. Values persist locally while they're being
-  // tuned; "Copiar JSON" hands back something to paste into DRAGON_FX.
-  // Applies live — start wave 90 with the panel open and drag.
-  bindDevSkin() {
-    const panel = $('devskin');
-    const rows = $('devskin-rows');
-    this.devFx = { ...loadDragonFx() };
-
-    const FIELDS = [
-      ['mouthF', 'boca ↔ frente', 0, 5, 0.05],
-      ['mouthY', 'boca ↕ altura', 0, 6, 0.05],
-      ['mouthS', 'boca ↔ lado', -2, 2, 0.05],
-      ['poseAt', 'frame da pose', 0, 1, 0.02],
-      ['spread', 'concentração', 0, 1, 0.05],
-      ['drop', 'queda do jato', 0, 1.5, 0.05],
-    ];
-    const readouts = {};
-    for (const [key, label, min, max, step] of FIELDS) {
-      const row = document.createElement('label');
-      row.className = 'devskin-row';
-      const name = document.createElement('span');
-      name.textContent = label;
-      row.appendChild(name);
-      const input = document.createElement('input');
-      input.type = 'range';
-      input.min = String(min); input.max = String(max); input.step = String(step);
-      input.value = String(this.devFx[key]);
-      const out = document.createElement('b');
-      out.textContent = String(this.devFx[key]);
-      readouts[key] = { input, out };
-      input.addEventListener('input', () => {
-        this.devFx[key] = +input.value;
-        out.textContent = input.value;
-        saveDragonFx(this.devFx);
-      });
-      row.appendChild(input);
-      row.appendChild(out);
-      rows.appendChild(row);
-    }
-
-    bindTap($('devskin-open'), () => {
-      panel.classList.remove('hidden');
-      $('devwave').classList.add('hidden');
-      $('devskin-note').textContent = 'inicie a wave 90 e ajuste enquanto ele cospe';
-    });
-    bindTap($('devskin-close'), () => panel.classList.add('hidden'));
-    bindTap($('devskin-copy'), async () => {
-      const body = FIELDS.map(([k]) => `  ${k}: ${this.devFx[k]},`).join('\n');
-      const text = `export const DRAGON_FX = {\n${body}\n};`;
-      try {
-        await navigator.clipboard.writeText(text);
-        $('devskin-note').textContent = 'copiado — cole em DRAGON_FX (view.js)';
-      } catch {
-        $('devskin-note').textContent = text;
-      }
-    });
-    bindTap($('devskin-reset'), () => {
-      this.devFx = { ...DRAGON_FX };
-      saveDragonFx(this.devFx);
-      for (const [key] of FIELDS) {
-        readouts[key].input.value = String(this.devFx[key]);
-        readouts[key].out.textContent = String(this.devFx[key]);
-      }
-    });
-  }
-
-
   // called every frame with the freshest snapshot
   updateHud(snap, selfId) {
     if (!snap) return;
@@ -1911,33 +1761,6 @@ export class UI {
       }
     }
 
-    // testing wave picker — same window the server enforces: host only,
-    // build phase, and only while no wave has run yet
-    // The FX editor takes the same corner as the wave picker, and stays
-    // available mid-wave on purpose: the point is dialling the dragon in
-    // WHILE it is breathing. It opens itself the moment one is on the
-    // field and closes when it dies, so the tuning window is never
-    // missed — nothing in the picker is reachable once a wave is running.
-    const dragonUp = !!(this.devTools && this.cb.dragonOnField?.());
-    if (dragonUp !== this._dragonWas) {
-      this._dragonWas = dragonUp;
-      $('devskin').classList.toggle('hidden', !dragonUp);
-    }
-    const skinOpen = !$('devskin').classList.contains('hidden');
-    const devOpen = !!(this.devTools && this.isHost && snap.ph === 'build' && snap.w === 0);
-    $('devwave').classList.toggle('hidden', !devOpen || skinOpen);
-    if (skinOpen && !this.devTools) $('devskin').classList.add('hidden');
-    if (devOpen) {
-      // the box ships ticked but the sim boots with it off, so push the
-      // checkbox's state until the snapshot agrees — one round trip
-      const want = $('devwave-god').checked ? 1 : 0;
-      if ((snap.dv || 0) !== want && this._devSent !== want) {
-        this._devSent = want;
-        this.cb.onAction({ t: 'devmode', on: !!want });
-      } else if ((snap.dv || 0) === want) {
-        this._devSent = null;
-      }
-    }
 
     // start-wave button (lives in the top-right action slot)
     const btn = $('startwave-btn');
