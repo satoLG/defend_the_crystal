@@ -62,6 +62,18 @@ const KEEP = new Set();
 // how many distinct callout textures (text + colour) stay cached
 const FLOAT_TEX_CAP = 160;
 
+// most floating numbers alive at once (each is its own draw call)
+const FLOAT_MAX = 60;
+
+// how each floating number reads, indexed by the sim's DMG kind:
+// a hit you landed, a critical, a hit you took, life restored
+const DMG_LOOK = [
+  { color: 0xfff0d0, scale: 0.85, pre: '' },   // damage dealt
+  { color: 0xffb020, scale: 1.25, pre: '' },   // critical hit
+  { color: 0xff5a4a, scale: 1, pre: '-' },     // damage taken
+  { color: 0x5dff8a, scale: 1, pre: '+' },     // healed
+];
+
 // Release the GL resources of a subtree that is being discarded for
 // good. Anything registered in KEEP (model templates, the renderer's own
 // shared geometries/materials, cached recolor atlases) is skipped — it
@@ -874,6 +886,7 @@ export class GameView {
     this.ghost = null;          // build-mode ghost preview
     this.time = 0;
     this._floatTex = new Map(); // callout text+colour -> texture (LRU)
+    this._floats = [];          // live floating numbers, oldest first
 
     // every model template's geometry/material/texture is permanent —
     // instances share it, so a discarded instance must never dispose it
@@ -2820,9 +2833,19 @@ export class GameView {
         break;
       }
       case 'crit': {
-        // tiger-pet critical hit: punchy ring + floating callout
+        // tiger-pet critical hit: a punchy ring. The callout used to spell
+        // "CRIT!" here, but the damage number now lands on the same spot in
+        // the same beat — so the hit itself says it, bigger and in orange.
         this.burst(ev.x, ev.z, 0.9, 0xffb020);
-        this.spawnFloatText('CRIT!', ev.x, ev.z, 0xffb020);
+        break;
+      }
+      case 'dmg': {
+        const look = DMG_LOOK[ev.k] || DMG_LOOK[0];
+        // hits pile onto the same body — scatter them so a flurry reads as
+        // several numbers instead of one flickering in place
+        const jx = (Math.random() - 0.5) * 0.7;
+        const jz = (Math.random() - 0.5) * 0.5;
+        this.spawnFloatText(look.pre + ev.v, ev.x + jx, ev.z + jz, look.color, look.scale);
         break;
       }
       case 'dreset': {
@@ -3026,8 +3049,16 @@ export class GameView {
     return tex;
   }
 
-  // one-shot rising text callout ("CRIT!", a damage number) in world space
+  // one-shot rising callout (a damage number, a "BLOCK!") in world space
   spawnFloatText(text, x, z, color, scale = 1) {
+    // an AoE landing on a hundred-zombie horde would otherwise put a
+    // hundred sprites on screen at once — each its own draw call. Past the
+    // cap the oldest number is cut short to make room for the newest, so
+    // what's on screen always reflects the hits happening now.
+    while (this._floats.length >= FLOAT_MAX) {
+      const old = this._floats.shift();
+      old.t = old.dur; // torn down (and released) by the next update pass
+    }
     const spr = new THREE.Sprite(new THREE.SpriteMaterial({
       map: this.floatTexture(text, color), depthWrite: false, transparent: true,
     }));
@@ -3036,7 +3067,9 @@ export class GameView {
     spr.position.set(x, terrainY(z) + 1.35, z);
     spr.userData.baseY = terrainY(z);
     this.scene.add(spr);
-    this.effects.push({ type: 'float-text', mesh: spr, t: 0, dur: 0.7 });
+    const fx = { type: 'float-text', mesh: spr, t: 0, dur: 0.7 };
+    this.effects.push(fx);
+    this._floats.push(fx);
   }
 
   // flutter of little black bats swirling around a jumping vampire;
@@ -3657,6 +3690,11 @@ export class GameView {
         this.scene.remove(e.mesh);
         releaseGl(e.mesh);
         this.effects.splice(i, 1);
+        if (e.type === 'float-text') {
+          // they expire in the order they were spawned, so this is index 0
+          const at = this._floats.indexOf(e);
+          if (at >= 0) this._floats.splice(at, 1);
+        }
         continue;
       }
       if (e.type === 'burst') {
@@ -3792,7 +3830,7 @@ export class GameView {
     for (const c of this.corpses) drop(c.actor.group);
     this.players.clear(); this.enemies.clear(); this.towers.clear();
     this.obstacles.clear(); this.graves.clear();
-    this.projectiles = []; this.effects = []; this.corpses = [];
+    this.projectiles = []; this.effects = []; this.corpses = []; this._floats = [];
     this.xpOrbs.count = 0; this.ptsOrbs.count = 0; this.goldOrbs.count = 0;
     this.goldSparkle.count = 0;
     if (this.portalFx) {

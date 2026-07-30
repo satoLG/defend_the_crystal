@@ -21,6 +21,10 @@ const rnd2 = (v) => Math.round(v * 100) / 100;
 // how long a hit still counts toward an assist on the eventual kill
 const ASSIST_WINDOW = 8;
 
+// what a floating number means, so the client can colour and size it:
+// a hit on an enemy, a critical hit, a hit a hero took, HP restored
+export const DMG = { ENEMY: 0, CRIT: 1, PLAYER: 2, HEAL: 3 };
+
 // the weak blood magic a rank-and-file vampire carries once the court
 // has risen (see BLOOD_COURT); null for every other kind and earlier wave
 function bloodOf(kind, wave) {
@@ -344,7 +348,9 @@ export class Sim {
       this.points += bonus;
       for (const p of this.players) {
         if (p.dead) this.respawnPlayer(p);
+        const before = p.hp;
         p.hp = p.maxHp;
+        this.emitDamage(rnd2(p.x), rnd2(p.z), p.hp - before, DMG.HEAL);
       }
       this.emit({ t: 'phase', ph: 'checkpoint', n: this.wave });
       this.emit({ t: 'heal', bonus });
@@ -985,8 +991,10 @@ export class Sim {
       e.dmgBy.set(killer.id, this.time);
     }
     // critical hits (tiger pet): player-dealt damage only, never towers
+    let crit = false;
     if (killer && killer.critCh > 0 && Math.random() < killer.critCh) {
       dmg *= PET.CRIT_MULT;
+      crit = true;
       const pos = e.vehicle.position;
       this.emit({ t: 'crit', x: rnd2(pos.x), z: rnd2(pos.z) });
     }
@@ -997,6 +1005,10 @@ export class Sim {
       dmg *= 1 - armor;
     }
     e.hp -= dmg;
+    {
+      const pos = e.vehicle.position;
+      this.emitDamage(rnd2(pos.x), rnd2(pos.z), dmg, crit ? DMG.CRIT : DMG.ENEMY);
+    }
     // training dummies never die (or aggro, or get knocked around):
     // on depletion they spring straight back to full
     if (e.dummy) {
@@ -1050,6 +1062,15 @@ export class Sim {
       this.removeEnemy(e);
       this.checkWaveCleared();
     }
+  }
+
+  // A floating number over the spot a hit (or a heal) landed. Rounded to
+  // a whole number, and skipped entirely when that rounds to nothing —
+  // there is no point streaming a "0" for every damage-over-time tick.
+  emitDamage(x, z, amount, kind) {
+    const v = Math.round(amount);
+    if (v < 1) return;
+    this.emit({ t: 'dmg', x, z, v, k: kind });
   }
 
   // The kill goes to whoever landed the last blow; everyone ELSE who hurt
@@ -1313,8 +1334,10 @@ export class Sim {
       p.rawMaxHp = Math.round(p.rawMaxHp * PLAYER.LEVEL_HP_MULT);
       p.rawAtk *= PLAYER.LEVEL_ATK_MULT;
       this.applyStats(p);
+      const before = p.hp;
       p.hp = Math.min(p.maxHp, p.hp + (p.maxHp - p.hp) * PLAYER.LEVEL_HEAL);
       this.emit({ t: 'lvl', id: p.id, lvl: p.lvl });
+      this.emitDamage(rnd2(p.x), rnd2(p.z), p.hp - before, DMG.HEAL);
     }
   }
 
@@ -1342,6 +1365,7 @@ export class Sim {
     p.lastDmg = this.time;
     p.invT = PLAYER.HIT_IFRAME; // open the i-frame window
     this.emit({ t: 'hit', id: p.id });
+    this.emitDamage(rnd2(p.x), rnd2(p.z), dmg, DMG.PLAYER);
     if (p.hp <= 0) {
       p.hp = 0;
       p.dead = true;
@@ -1471,6 +1495,9 @@ export class Sim {
       if (healed <= 0) return;
       caster.hp += healed;
       this.emit({ t: 'drain', id: eid, x: rnd2(q.x), z: rnd2(q.z) });
+      // the life he drank, floating over him — not over his victim
+      const cp = caster.vehicle.position;
+      this.emitDamage(rnd2(cp.x), rnd2(cp.z), healed, DMG.HEAL);
     }});
   }
 
