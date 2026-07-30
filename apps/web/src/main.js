@@ -218,7 +218,12 @@ function connectRoom({ create, code, character }) {
   // connection can take ~30-50s while the instance wakes; keep the player
   // informed instead of leaving them on a silent screen.
   net.onStatus = (status) => {
-    if (state.net !== net || state.started) return;
+    if (state.net !== net) return;
+    // a drop long enough to outlive the server's grace window rebuilds the
+    // hero from defaults, so re-declare our combat preferences on every
+    // connect rather than only on the first one
+    if (status === 'connected') sendCombatPrefs();
+    if (state.started) return;
     if (status === 'reconnecting') $status(t('lobby.reconnecting'));
     else if (status === 'error') $status(t('lobby.serverWaking'));
   };

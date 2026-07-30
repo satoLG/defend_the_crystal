@@ -30,6 +30,9 @@ const CLASS_COLORS = {
 // podium marks for the top three of the defeat scoreboard
 const MEDALS = ['🥇', '🥈', '🥉'];
 
+// dedupe window for a button meant to be pressed repeatedly (see bindTap)
+const TAP_REPEAT_MS = 120;
+
 // which glyph the manual-attack button wears, per equipped weapon. The
 // bigger version of a weapon shares its family's shape.
 const WEAPON_ICONS = {
@@ -76,17 +79,24 @@ const $ = (id) => document.getElementById(id);
 // independent pointerdown regardless of how many other fingers are
 // down, so trigger on that (falling back to click for keyboard/
 // assistive-tech activation, which never fires pointerdown).
-const bindTap = (el, fn) => {
+const bindTap = (el, fn, dedupeMs = 500) => {
   // pointerdown fires first (snappy on touch); the browser then fires a
   // synthesized click right after. Dedupe so the handler runs ONCE per
   // tap — otherwise everything bound here double-fires on touch (which,
   // for one-shot actions like "start wave", showed the toast twice).
   // Assistive tech that only emits click still works via the same guard.
+  //
+  // The window has to stay well under the interval between two DELIBERATE
+  // presses of the same button. Half a second is fine for one-shot actions
+  // but would cap the manual attack button at 2 swings a second — an
+  // archer with a crossbow swings at over 3 — so that one passes a short
+  // window. A duplicate slipping through there is harmless anyway: the
+  // sim's cooldown eats it.
   let last = 0;
   const run = (e) => {
     if (e.type === 'pointerdown' && e.pointerType === 'mouse' && e.button !== 0) return;
     const now = performance.now();
-    if (now - last < 500) return; // the paired click after a pointerdown
+    if (now - last < dedupeMs) return; // the paired click after a pointerdown
     last = now;
     if (e.type === 'pointerdown') e.preventDefault();
     fn();
@@ -918,7 +928,7 @@ export class UI {
     });
     bindTap($('jump-btn'), () => this.cb.onJump?.());
     bindTap($('skill-btn'), () => this.cb.onSkill?.());
-    bindTap($('attack-btn'), () => this.cb.onAttack?.());
+    bindTap($('attack-btn'), () => this.cb.onAttack?.(), TAP_REPEAT_MS);
     this.applyAutoAttack();
     $('room-chip').addEventListener('click', async () => {
       try { await navigator.clipboard.writeText(this.roomCode); this.toast(t('lobby.codeCopied'), 'gold'); } catch { /* ok */ }
