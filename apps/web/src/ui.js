@@ -30,6 +30,20 @@ const CLASS_COLORS = {
 // podium marks for the top three of the defeat scoreboard
 const MEDALS = ['🥇', '🥈', '🥉'];
 
+// which glyph the manual-attack button wears, per equipped weapon. The
+// bigger version of a weapon shares its family's shape.
+const WEAPON_ICONS = {
+  axe: 'wpn-axe', greataxe: 'wpn-axe', hammer: 'wpn-hammer',
+  sword: 'wpn-sword', greatsword: 'wpn-sword', spear: 'wpn-spear',
+  bow: 'wpn-bow', greatbow: 'wpn-bow', crossbow: 'wpn-crossbow',
+  staff: 'wpn-staff', wand: 'wpn-wand', orb: 'wpn-orb',
+};
+// fallback while the snapshot hasn't said what's equipped yet
+const CLASS_WEAPON_ICONS = {
+  berserker: 'wpn-axe', tanker: 'wpn-sword',
+  archer: 'wpn-bow', mage: 'wpn-staff',
+};
+
 // per-class stat bars for the character screen (labels are localized keys
 // under statbar.*; kept here so the DOM layer owns its own copy)
 const STAT_BARS = {
@@ -118,6 +132,8 @@ export class UI {
     this.lastSnap = null;
     this.isHost = false;
     this.skillReady = false;   // gated by this character's own 30s cooldown
+    this.attackReady = false;  // basic-attack cooldown, straight off the snapshot
+    this.myWeaponId = null;    // what the manual attack button should wear
     this.myCls = this.character.cls;
     this.shopNear = false;     // standing at Tonho's stall (main.js feeds this)
     this.petTab = 'mine';      // pet panel tab: 'mine' | 'shop'
@@ -902,6 +918,8 @@ export class UI {
     });
     bindTap($('jump-btn'), () => this.cb.onJump?.());
     bindTap($('skill-btn'), () => this.cb.onSkill?.());
+    bindTap($('attack-btn'), () => this.cb.onAttack?.());
+    this.applyAutoAttack();
     $('room-chip').addEventListener('click', async () => {
       try { await navigator.clipboard.writeText(this.roomCode); this.toast(t('lobby.codeCopied'), 'gold'); } catch { /* ok */ }
     });
@@ -942,6 +960,30 @@ export class UI {
   // lit only while the character faces a grid cell it can vault over
   setJumpEnabled(on) {
     $('jump-btn').disabled = !on;
+  }
+
+  // Auto-attack off puts a manual attack button on screen (and shifts jump
+  // up out of its way); on takes it away again. Called on boot and whenever
+  // the setting is flipped, so the HUD can change mid-match.
+  applyAutoAttack() {
+    const manual = !settings.get('autoAttack');
+    $('hud').classList.toggle('manual-atk', manual);
+    $('attack-btn').classList.toggle('hidden', !manual);
+    if (manual) this.paintAttackIcon();
+  }
+
+  // the button wears the symbol of what the hero is actually holding
+  paintAttackIcon() {
+    const wid = this.myWeaponId;
+    $('attack-icon').innerHTML = icon(WEAPON_ICONS[wid] || CLASS_WEAPON_ICONS[this.myCls] || 'wpn-sword');
+  }
+
+  // greyed out while the swing is still on cooldown — mashing it does
+  // nothing anyway (the sim owns the rate), so say so
+  setAttackReady(on) {
+    const btn = $('attack-btn');
+    btn.disabled = !on;
+    btn.classList.toggle('cooling', !on);
   }
 
   // ---------------- placing towers & blocks ----------------
@@ -1817,6 +1859,16 @@ export class UI {
         // paint the skill button in the class's signature colour
         $('skill-btn').style.setProperty('--skill-color', CLASS_COLORS[cls] || '#e9e9ee');
       }
+      // manual attack button (only on screen with auto-attack off): it
+      // wears the equipped weapon and follows the sim's own swing cooldown
+      if (this._atkWpn !== me[23]) {
+        this._atkWpn = me[23];
+        this.myWeaponId = me[23];
+        if (!settings.get('autoAttack')) this.paintAttackIcon();
+      }
+      this.attackReady = (me[29] || 0) <= 0 && dead !== 1;
+      this.setAttackReady(this.attackReady);
+
       const skillCd = me[16] || 0;
       this.skillReady = skillCd <= 0 && dead !== 1;
       $('skill-btn').disabled = !this.skillReady;
@@ -1943,6 +1995,7 @@ export class UI {
       sfx.click();
       $('set-music').value = Math.round(settings.get('musicVol') * 100);
       $('set-sfx').value = Math.round(settings.get('sfxVol') * 100);
+      $('set-autoatk').checked = settings.get('autoAttack');
       $('set-shake').checked = settings.get('shake');
       $('set-shadows').checked = settings.get('shadows');
       paintMutes();
@@ -1976,6 +2029,11 @@ export class UI {
       settings.set('sfxVol', Number(e.target.value) / 100);
       if (settings.get('sfxMuted')) { settings.set('sfxMuted', false); paintMutes(); }
       applySfx();
+    });
+    $('set-autoatk').addEventListener('change', (e) => {
+      settings.set('autoAttack', e.target.checked);
+      this.applyAutoAttack();
+      this.cb.onCombatPrefs?.();
     });
     $('set-shake').addEventListener('change', (e) => settings.set('shake', e.target.checked));
     $('set-shadows').addEventListener('change', (e) => settings.set('shadows', e.target.checked));

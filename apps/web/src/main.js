@@ -128,6 +128,10 @@ async function boot() {
     onAction: sendAction,
     onJump: () => doJump(),
     onSkill: () => doSkill(),
+    onAttack: () => doAttack(),
+    // a combat preference changed — the sim is what actually swings, so
+    // it has to hear about it
+    onCombatPrefs: () => sendCombatPrefs(),
     onBuildMode: (on) => { gs.setBuildMode(on); if (!on) view.clearGhost(); },
     onDragMove: (x, y) => onDragMove(x, y),
     onDragEnd: (item, drop) => onDragEnd(item, drop),
@@ -311,6 +315,7 @@ function enterGame() {
   setTimeout(() => { if (state.started && !state.over) ui.showLocationBanner(); }, introDur * 1000);
   view.beginArrival(introDur + ARRIVAL_LEAD);
   ui.showHud();
+  sendCombatPrefs(); // the sim starts every hero on the defaults
   sfx.notify();
 }
 
@@ -519,6 +524,7 @@ function onKeyAction(action) {
       break;
     case 'jump': doJump(); break;
     case 'skill': doSkill(); break;
+    case 'attack': doAttack(); break;
     case 'startwave':
       // Space jumps when a jump is possible; otherwise it keeps its
       // old job of starting the next wave (owner only; the server enforces it)
@@ -588,6 +594,23 @@ function updateJumpButton() {
 // ---------------------------------------------------------
 // class special attacks
 // ---------------------------------------------------------
+
+// One basic attack, with auto-attack switched off. The sim owns the rate
+// limit (see Sim.tryAttack), so holding the button down or mashing it can
+// never swing faster than the class allows — this only stops the obviously
+// dead presses from going over the wire.
+function doAttack() {
+  const s = state.self;
+  if (!canControlSelf() || s.dead || s.jump || s.dash) return;
+  if (!state.selfInit || !ui.attackReady) return;
+  sendAction({ t: 'atk' });
+}
+
+// push this client's combat preferences to the sim (on join and on change)
+function sendCombatPrefs() {
+  if (!state.started) return;
+  sendAction({ t: 'prefs', auto: settings.get('autoAttack') ? 1 : 0 });
+}
 
 function doSkill() {
   const s = state.self;

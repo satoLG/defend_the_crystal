@@ -12,6 +12,9 @@ const DEFAULTS = {
   sfxMuted: false,
   shake: true,        // camera shake on breaches / hits
   shadows: false,     // realtime shadows
+  // combat. Both default ON — that is how the game has always played;
+  // turning them off hands the aiming and the timing back to the player.
+  autoAttack: true,   // swing on your own at whatever is in range
 };
 
 let state = { ...DEFAULTS };

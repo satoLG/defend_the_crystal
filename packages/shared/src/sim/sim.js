@@ -120,6 +120,10 @@ export class Sim {
       poisonT: 0, poisonDps: 0, poisonTick: 0,
       burnT: 0, burnDps: 0, burnTick: 0,
       slowMove: 1, slowRate: 1, webbed: 0,
+      // client-side combat preferences, mirrored here because the sim is
+      // what actually swings (see tryAttack). Both default ON, which is
+      // the behaviour every existing player already has.
+      autoAtk: true,
       // scoreboard, read back on the defeat screen
       kills: 0, deaths: 0, assists: 0,
       obst: 0, lastInputT: this.time,
@@ -430,6 +434,8 @@ export class Sim {
       case 'jump': return this.tryJump(p, act);
       case 'skill': return this.trySkill(p, act);
       case 'train': return this.tryTrain(p, act);
+      case 'atk': return this.tryAttack(p);
+      case 'prefs': return this.setPrefs(p, act);
       case 'pet': return this.trySetPet(p, act);
       case 'loadout': return this.trySetLoadout(p, act);
       case 'start': if (this.phase === 'build') this.startWave(); return;
@@ -559,6 +565,13 @@ export class Sim {
     const dur = jumpDurFor(info.span);
     p.jumpT = dur;
     this.emit({ t: 'jump', id: p.id, dur });
+  }
+
+  // Combat preferences, pushed by the owning client when it connects and
+  // whenever the player flips a switch. Only fields actually present are
+  // touched, so the action can grow without old clients losing settings.
+  setPrefs(p, act) {
+    if (typeof act?.auto === 'number') p.autoAtk = act.auto === 1;
   }
 
   // ---------------- training mode ----------------
@@ -1805,90 +1818,105 @@ export class Sim {
       // no attacking mid-air or mid-dash
       if (p.jumpT > 0) { p.jumpT = Math.max(p.jumpT - dt, 0); continue; }
       if (p.dashT > 0) { p.dashT = Math.max(p.dashT - dt, 0); continue; }
-      // auto-attack nearest enemy (attacks pass through walls by design)
+      // the swing cooldown always runs down, whether the hero is swinging
+      // on its own or waiting on the player's finger
       p.atkCd -= dt;
-      if (p.atkCd > 0 || this.phase === 'over') continue;
-      let best = null, bestD = Infinity;
-      for (const e of this.enemies) {
-        const d = dist2d(p.x, p.z, e.vehicle.position.x, e.vehicle.position.z);
-        if (d < bestD) { bestD = d; best = e; }
-      }
-      if (!best || bestD > p.range + ENEMY.RADIUS) continue;
-      p.atkCd = 1 / (p.rate * p.slowRate);
-      const tp = best.vehicle.position;
-      p.yaw = Math.atan2(tp.x - p.x, tp.z - p.z);
-      // weapon tier tints the swing/projectile; weapon id lets the view
-      // pick the right melee flourish (spear stab / hammer bash)
-      const wt = p.weapon?.tier || 0, wid = p.weapon?.id;
-      this.emit({ t: 'atk', id: p.id, tx: rnd2(tp.x), tz: rnd2(tp.z), wt, wid });
+      if (p.autoAtk) this.tryAttack(p);
+    }
+  }
 
-      if (p.cls === 'archer') {
-        const ft = bestD / 16;
+  // One basic attack, if one is possible right now. This is the ONLY place
+  // a hero's basic attack happens: the auto-attack loop calls it every
+  // tick, and the manual attack button calls it on every press. The
+  // cooldown lives here, so mashing the button can never out-swing the
+  // class's attack speed — an unusable press just does nothing.
+  //
+  // Finding no target does NOT burn the cooldown: swinging at air costs
+  // you nothing, so the first foe to walk into range is hit immediately.
+  tryAttack(p) {
+    if (p.dead || p.jumpT > 0 || p.dashT > 0) return false;
+    if (p.atkCd > 0 || this.phase === 'over') return false;
+    let best = null, bestD = Infinity;
+    for (const e of this.enemies) {
+      const d = dist2d(p.x, p.z, e.vehicle.position.x, e.vehicle.position.z);
+      if (d < bestD) { bestD = d; best = e; }
+    }
+    if (!best || bestD > p.range + ENEMY.RADIUS) return false;
+    p.atkCd = 1 / (p.rate * p.slowRate);
+    const tp = best.vehicle.position;
+    p.yaw = Math.atan2(tp.x - p.x, tp.z - p.z);
+    // weapon tier tints the swing/projectile; weapon id lets the view
+    // pick the right melee flourish (spear stab / hammer bash)
+    const wt = p.weapon?.tier || 0, wid = p.weapon?.id;
+    this.emit({ t: 'atk', id: p.id, tx: rnd2(tp.x), tz: rnd2(tp.z), wt, wid });
+
+    if (p.cls === 'archer') {
+      const ft = bestD / 16;
+      this.emit({
+        t: 'shoot', k: 'arrow', wt,
+        f: [rnd2(p.x), 1.0, rnd2(p.z)], to: [rnd2(tp.x), 0.7, rnd2(tp.z)], ft: rnd2(ft),
+      });
+      // with the hog pet even arrows carry a punch
+      const kb = p.kbDealt || 0;
+      const id = best.id, dmg = p.atk, pid = p.id, ox = p.x, oz = p.z;
+      this.pending.push({ at: this.time + ft, fn: () => {
+        const e = this.enemies.entities.find((n) => n.id === id);
+        if (!e) return;
+        const [kx, kz] = kbAway(ox, oz, e.vehicle.position, kb);
+        this.damageEnemy(e, dmg, kx, kz, pid);
+      }});
+    } else if (p.cls === 'mage' && p.bolts > 0) {
+      // arcane orb: no blast — several guided bolts split across the
+      // nearest enemies in range (cycling when there are fewer foes)
+      const foes = [];
+      for (const e of this.enemies) {
+        const ep = e.vehicle.position;
+        const d = dist2d(p.x, p.z, ep.x, ep.z);
+        if (d <= p.range + ENEMY.RADIUS) foes.push({ e, d });
+      }
+      foes.sort((a, b) => a.d - b.d);
+      const targets = foes.slice(0, p.bolts);
+      for (let i = 0; i < p.bolts; i++) {
+        const f = targets[i % targets.length];
+        const bp = f.e.vehicle.position;
+        const ft = Math.max(f.d / 14, 0.12) + i * 0.05; // staggered volley
         this.emit({
-          t: 'shoot', k: 'arrow', wt,
-          f: [rnd2(p.x), 1.0, rnd2(p.z)], to: [rnd2(tp.x), 0.7, rnd2(tp.z)], ft: rnd2(ft),
+          t: 'shoot', k: 'magic', wt,
+          f: [rnd2(p.x), 1.15, rnd2(p.z)], to: [rnd2(bp.x), 0.6, rnd2(bp.z)], ft: rnd2(ft),
         });
-        // with the hog pet even arrows carry a punch
-        const kb = p.kbDealt || 0;
-        const id = best.id, dmg = p.atk, pid = p.id, ox = p.x, oz = p.z;
+        const id = f.e.id, dmg = p.atk * ORB.BOLT_MULT, pid = p.id, ox = p.x, oz = p.z;
         this.pending.push({ at: this.time + ft, fn: () => {
           const e = this.enemies.entities.find((n) => n.id === id);
           if (!e) return;
-          const [kx, kz] = kbAway(ox, oz, e.vehicle.position, kb);
+          const [kx, kz] = kbAway(ox, oz, e.vehicle.position, 0.5);
           this.damageEnemy(e, dmg, kx, kz, pid);
         }});
-      } else if (p.cls === 'mage' && p.bolts > 0) {
-        // arcane orb: no blast — several guided bolts split across the
-        // nearest enemies in range (cycling when there are fewer foes)
-        const foes = [];
-        for (const e of this.enemies) {
-          const ep = e.vehicle.position;
-          const d = dist2d(p.x, p.z, ep.x, ep.z);
-          if (d <= p.range + ENEMY.RADIUS) foes.push({ e, d });
-        }
-        foes.sort((a, b) => a.d - b.d);
-        const targets = foes.slice(0, p.bolts);
-        for (let i = 0; i < p.bolts; i++) {
-          const f = targets[i % targets.length];
-          const bp = f.e.vehicle.position;
-          const ft = Math.max(f.d / 14, 0.12) + i * 0.05; // staggered volley
-          this.emit({
-            t: 'shoot', k: 'magic', wt,
-            f: [rnd2(p.x), 1.15, rnd2(p.z)], to: [rnd2(bp.x), 0.6, rnd2(bp.z)], ft: rnd2(ft),
-          });
-          const id = f.e.id, dmg = p.atk * ORB.BOLT_MULT, pid = p.id, ox = p.x, oz = p.z;
-          this.pending.push({ at: this.time + ft, fn: () => {
-            const e = this.enemies.entities.find((n) => n.id === id);
-            if (!e) return;
-            const [kx, kz] = kbAway(ox, oz, e.vehicle.position, 0.5);
-            this.damageEnemy(e, dmg, kx, kz, pid);
-          }});
-        }
-      } else if (p.cls === 'mage') {
-        const cx = tp.x, cz = tp.z, dmg = p.atk, r = p.aoe, pid = p.id, kb = p.kbPower;
-        this.emit({
-          t: 'shoot', k: 'magic', wt,
-          f: [rnd2(p.x), 1.15, rnd2(p.z)], to: [rnd2(cx), 0.5, rnd2(cz)], ft: 0.35,
-        });
-        this.emit({ t: 'aoe', x: rnd2(cx), z: rnd2(cz), r, k: 'mage', ft: 0.35, wt });
-        this.pending.push({ at: this.time + 0.35, fn: () => {
-          for (const e of [...this.enemies.entities]) {
-            const ep = e.vehicle.position;
-            const d = dist2d(cx, cz, ep.x, ep.z);
-            if (d <= r + ENEMY.RADIUS) {
-              const n = Math.max(d, 0.2);
-              this.damageEnemy(e, dmg, ((ep.x - cx) / n) * kb, ((ep.z - cz) / n) * kb, pid);
-            }
-          }
-        }});
-      } else {
-        // melee: berserker / tanker — instant hit + knockback
-        const n = Math.max(bestD, 0.2);
-        const kx = ((tp.x - p.x) / n) * p.kbPower;
-        const kz = ((tp.z - p.z) / n) * p.kbPower;
-        this.damageEnemy(best, p.atk, kx, kz, p.id);
       }
+    } else if (p.cls === 'mage') {
+      const cx = tp.x, cz = tp.z, dmg = p.atk, r = p.aoe, pid = p.id, kb = p.kbPower;
+      this.emit({
+        t: 'shoot', k: 'magic', wt,
+        f: [rnd2(p.x), 1.15, rnd2(p.z)], to: [rnd2(cx), 0.5, rnd2(cz)], ft: 0.35,
+      });
+      this.emit({ t: 'aoe', x: rnd2(cx), z: rnd2(cz), r, k: 'mage', ft: 0.35, wt });
+      this.pending.push({ at: this.time + 0.35, fn: () => {
+        for (const e of [...this.enemies.entities]) {
+          const ep = e.vehicle.position;
+          const d = dist2d(cx, cz, ep.x, ep.z);
+          if (d <= r + ENEMY.RADIUS) {
+            const n = Math.max(d, 0.2);
+            this.damageEnemy(e, dmg, ((ep.x - cx) / n) * kb, ((ep.z - cz) / n) * kb, pid);
+          }
+        }
+      }});
+    } else {
+      // melee: berserker / tanker — instant hit + knockback
+      const n = Math.max(bestD, 0.2);
+      const kx = ((tp.x - p.x) / n) * p.kbPower;
+      const kz = ((tp.z - p.z) / n) * p.kbPower;
+      this.damageEnemy(best, p.atk, kx, kz, p.id);
     }
+    return true;
   }
 
   stepEnemies(dt) {
@@ -2448,6 +2476,9 @@ export class Sim {
         // status the Black Widow inflicts (index 28): 1 poisoned,
         // 2 webbed — the client tints and marks the hero from this
         (p.poisonT > 0 ? 1 : 0) | (p.webbed ? 2 : 0) | (p.burnT > 0 ? 4 : 0),
+        // basic-attack cooldown (index 29) — the manual attack button
+        // greys out on it, the way the skill button does on index 16
+        rnd2(Math.max(p.atkCd, 0)),
       ]),
       en: this.enemies.entities.map((e) => [
         e.id, e.kind, rnd2(e.vehicle.position.x), rnd2(e.vehicle.position.z),

@@ -557,6 +557,28 @@ input:focus { border-color: var(--gold); }
   bottom: calc(max(10px, env(safe-area-inset-bottom)) + 180px);
 }
 
+/* ---------- manual attack button ---------- */
+/* Only present when auto-attack is switched off. It takes the jump
+   button's corner (the most reachable spot — it's the one you press
+   constantly) and pushes jump up a row; see #hud.manual-atk below. */
+#attack-btn {
+  position: absolute; right: 14px;
+  bottom: calc(max(10px, env(safe-area-inset-bottom)) + 100px);
+  width: 62px; height: 62px; border-radius: 50%;
+  background: radial-gradient(circle at 50% 36%, #3a2320, #171113);
+  border: 2px solid var(--panel-border);
+  color: #ff9d7a; cursor: pointer; font-family: inherit;
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+  touch-action: none;
+}
+#attack-btn .ico { width: 2rem; height: 2rem; }
+#attack-btn:disabled { opacity: 0.35; cursor: default; }
+#attack-btn:not(:disabled) { border-color: #ff9d7a; }
+#attack-btn:not(:disabled):active { transform: scale(0.92); }
+/* the swing is on cooldown: dimmed and unpressable until it comes back */
+#attack-btn.cooling { opacity: 0.45; }
+
 /* ---------- jump button ---------- */
 #jump-btn {
   position: absolute; right: 14px;
@@ -578,6 +600,10 @@ input:focus { border-color: var(--gold); }
 #jump-btn:not(:disabled):active { transform: scale(0.92); }
 @keyframes jump-ready {
   50% { box-shadow: 0 0 18px rgba(242, 242, 245, 0.65); }
+}
+/* manual-attack mode: attack takes the corner, jump moves a row up */
+#hud.manual-atk #jump-btn {
+  bottom: calc(max(10px, env(safe-area-inset-bottom)) + 172px);
 }
 
 /* ---------- class special attack button (next to jump) ---------- */

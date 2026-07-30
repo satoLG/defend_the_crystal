@@ -257,6 +257,7 @@ const STRINGS = {
       stats: 'View character stats', petDetails: 'Pet details',
       jump: 'Jump over the block ahead (J / Space)',
       skill: 'Class special attack (K)',
+      attack: 'Attack (H)',
       copyCode: 'Copy code', shareLink: 'Share link', rename: 'Rename',
       muteMusic: 'Mute music', muteSfx: 'Mute sound effects',
       randomize: 'Randomize colours',
@@ -276,7 +277,7 @@ const STRINGS = {
     respawn: { youFell: 'You fell…' },
     settings: {
       music: 'Music', sfx: 'Sound effects', cameraShake: 'Camera shake',
-      shadows: 'Shadows',
+      shadows: 'Shadows', autoAttack: 'Auto-attack',
     },
     stat: {
       health: 'Health', attack: 'Attack', magicPower: 'Magic power',
@@ -510,6 +511,7 @@ const STRINGS = {
       stats: 'Ver atributos do personagem', petDetails: 'Detalhes do pet',
       jump: 'Pule sobre o bloco à frente (J / Espaço)',
       skill: 'Ataque especial da classe (K)',
+      attack: 'Atacar (H)',
       copyCode: 'Copiar código', shareLink: 'Compartilhar link', rename: 'Renomear',
       muteMusic: 'Silenciar música', muteSfx: 'Silenciar efeitos sonoros',
       randomize: 'Cores aleatórias',
@@ -529,7 +531,7 @@ const STRINGS = {
     respawn: { youFell: 'Você caiu…' },
     settings: {
       music: 'Música', sfx: 'Efeitos sonoros', cameraShake: 'Tremor de câmera',
-      shadows: 'Sombras',
+      shadows: 'Sombras', autoAttack: 'Ataque automático',
     },
     stat: {
       health: 'Vida', attack: 'Ataque', magicPower: 'Poder mágico',

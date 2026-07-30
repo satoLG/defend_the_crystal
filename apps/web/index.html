@@ -275,6 +275,12 @@
         </button>
       </div>
 
+      <!-- manual basic attack: only on screen while auto-attack is off,
+           and it takes the jump button's spot (jump shifts up) -->
+      <button id="attack-btn" class="hidden" disabled data-i18n-title="tip.attack" title="Attack (H)">
+        <span id="attack-icon"><i data-icon="wpn-sword"></i></span>
+      </button>
+
       <button id="jump-btn" disabled data-i18n-title="tip.jump" title="Jump over the block ahead (J / Space)">
         <i data-icon="jump"></i>
       </button>
@@ -380,6 +386,10 @@
           <label for="set-sfx"><i data-icon="speaker"></i> <span data-i18n="settings.sfx">Sound effects</span></label>
           <input type="range" id="set-sfx" min="0" max="100" />
           <button id="mute-sfx" class="btn small mute-btn" data-i18n-title="tip.muteSfx" title="Mute sound effects"></button>
+        </div>
+        <div class="setting-row toggle">
+          <label for="set-autoatk" data-i18n="settings.autoAttack">Auto-attack</label>
+          <input type="checkbox" id="set-autoatk" />
         </div>
         <div class="setting-row toggle">
           <label for="set-shake" data-i18n="settings.cameraShake">Camera shake</label>

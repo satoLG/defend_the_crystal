@@ -17,7 +17,7 @@ import { sfx } from '../audio.js';
 // rules live here.
 // ============================================================
 
-const PL = { ID: 0, CLS: 1, X: 2, Z: 3, YAW: 4, HP: 5, MHP: 6, LVL: 7, XP: 8, XPN: 9, MOV: 10, DEAD: 11, RESP: 12, OBST: 13, KILLS: 14, NAME: 15, SKCD: 16, WALL: 17, ATK: 18, SPD: 19, PET: 20, PETNAME: 21, PETLVL: 22, WPN: 23, WPNT: 24, SHD: 25, SHDT: 26, RANGE: 27, ST: 28 };
+const PL = { ID: 0, CLS: 1, X: 2, Z: 3, YAW: 4, HP: 5, MHP: 6, LVL: 7, XP: 8, XPN: 9, MOV: 10, DEAD: 11, RESP: 12, OBST: 13, KILLS: 14, NAME: 15, SKCD: 16, WALL: 17, ATK: 18, SPD: 19, PET: 20, PETNAME: 21, PETLVL: 22, WPN: 23, WPNT: 24, SHD: 25, SHDT: 26, RANGE: 27, ST: 28, ATKCD: 29 };
 const EN = { ID: 0, KIND: 1, X: 2, Z: 3, YAW: 4, HP: 5, MHP: 6, SCALE: 7, BOSS: 8, MOV: 9, ST: 10, VR: 11 };
 
 // EN.ST status bitmask (mirrors buildSnapshot): slow|burn|poison|stun
