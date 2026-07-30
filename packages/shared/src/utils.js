@@ -25,3 +25,10 @@ export function angleLerp(a, b, t) {
   if (d < -Math.PI) d += Math.PI * 2;
   return a + d * t;
 }
+
+// shortest angle between two headings, always 0..PI
+export function angleGap(a, b) {
+  let d = Math.abs((b - a) % (Math.PI * 2));
+  if (d > Math.PI) d = Math.PI * 2 - d;
+  return d;
+}

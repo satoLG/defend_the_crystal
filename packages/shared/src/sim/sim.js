@@ -14,7 +14,7 @@ import {
 } from './grid.js';
 import { PORTAL, CROSS_Z, NPCS, DUMMIES, TRAIN, findColliderJump } from '../sanctuary.js';
 import { buildWavePlan, enemyStats, cycleOf } from './waves.js';
-import { clamp, dist2d, nextId } from '../utils.js';
+import { clamp, dist2d, angleGap, nextId } from '../utils.js';
 
 const rnd2 = (v) => Math.round(v * 100) / 100;
 
@@ -24,6 +24,12 @@ const ASSIST_WINDOW = 8;
 // what a floating number means, so the client can colour and size it:
 // a hit on an enemy, a critical hit, a hit a hero took, HP restored
 export const DMG = { ENEMY: 0, CRIT: 1, PLAYER: 2, HEAL: 3 };
+
+// With auto-aim off the hero only swings at what it is actually facing:
+// how far off its heading a foe may sit and still be a valid target.
+// Generous (a 120-degree window) so pointing roughly at something is
+// enough — this is a thumbstick, not a mouse.
+const MANUAL_AIM_ARC = Math.PI / 3;
 
 // the weak blood magic a rank-and-file vampire carries once the court
 // has risen (see BLOOD_COURT); null for every other kind and earlier wave
@@ -123,7 +129,7 @@ export class Sim {
       // client-side combat preferences, mirrored here because the sim is
       // what actually swings (see tryAttack). Both default ON, which is
       // the behaviour every existing player already has.
-      autoAtk: true,
+      autoAtk: true, autoAim: true,
       // scoreboard, read back on the defeat screen
       kills: 0, deaths: 0, assists: 0,
       obst: 0, lastInputT: this.time,
@@ -572,6 +578,7 @@ export class Sim {
   // touched, so the action can grow without old clients losing settings.
   setPrefs(p, act) {
     if (typeof act?.auto === 'number') p.autoAtk = act.auto === 1;
+    if (typeof act?.aim === 'number') p.autoAim = act.aim === 1;
   }
 
   // ---------------- training mode ----------------
@@ -1836,15 +1843,22 @@ export class Sim {
   tryAttack(p) {
     if (p.dead || p.jumpT > 0 || p.dashT > 0) return false;
     if (p.atkCd > 0 || this.phase === 'over') return false;
+    // Auto-aim picks the nearest foe outright and turns the hero onto it.
+    // Aiming by hand, the hero keeps whatever heading the player steered
+    // and only what lies within its firing arc counts as a target.
     let best = null, bestD = Infinity;
     for (const e of this.enemies) {
-      const d = dist2d(p.x, p.z, e.vehicle.position.x, e.vehicle.position.z);
-      if (d < bestD) { bestD = d; best = e; }
+      const ep = e.vehicle.position;
+      const d = dist2d(p.x, p.z, ep.x, ep.z);
+      if (d >= bestD) continue;
+      if (!p.autoAim &&
+          angleGap(p.yaw, Math.atan2(ep.x - p.x, ep.z - p.z)) > MANUAL_AIM_ARC) continue;
+      bestD = d; best = e;
     }
     if (!best || bestD > p.range + ENEMY.RADIUS) return false;
     p.atkCd = 1 / (p.rate * p.slowRate);
     const tp = best.vehicle.position;
-    p.yaw = Math.atan2(tp.x - p.x, tp.z - p.z);
+    if (p.autoAim) p.yaw = Math.atan2(tp.x - p.x, tp.z - p.z);
     // weapon tier tints the swing/projectile; weapon id lets the view
     // pick the right melee flourish (spear stab / hammer bash)
     const wt = p.weapon?.tier || 0, wid = p.weapon?.id;

@@ -1996,6 +1996,7 @@ export class UI {
       $('set-music').value = Math.round(settings.get('musicVol') * 100);
       $('set-sfx').value = Math.round(settings.get('sfxVol') * 100);
       $('set-autoatk').checked = settings.get('autoAttack');
+      $('set-autoaim').checked = settings.get('autoAim');
       $('set-shake').checked = settings.get('shake');
       $('set-shadows').checked = settings.get('shadows');
       paintMutes();
@@ -2033,6 +2034,10 @@ export class UI {
     $('set-autoatk').addEventListener('change', (e) => {
       settings.set('autoAttack', e.target.checked);
       this.applyAutoAttack();
+      this.cb.onCombatPrefs?.();
+    });
+    $('set-autoaim').addEventListener('change', (e) => {
+      settings.set('autoAim', e.target.checked);
       this.cb.onCombatPrefs?.();
     });
     $('set-shake').addEventListener('change', (e) => settings.set('shake', e.target.checked));

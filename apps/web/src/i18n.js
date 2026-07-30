@@ -277,7 +277,7 @@ const STRINGS = {
     respawn: { youFell: 'You fell…' },
     settings: {
       music: 'Music', sfx: 'Sound effects', cameraShake: 'Camera shake',
-      shadows: 'Shadows', autoAttack: 'Auto-attack',
+      shadows: 'Shadows', autoAttack: 'Auto-attack', autoAim: 'Auto-aim',
     },
     stat: {
       health: 'Health', attack: 'Attack', magicPower: 'Magic power',
@@ -531,7 +531,7 @@ const STRINGS = {
     respawn: { youFell: 'Você caiu…' },
     settings: {
       music: 'Música', sfx: 'Efeitos sonoros', cameraShake: 'Tremor de câmera',
-      shadows: 'Sombras', autoAttack: 'Ataque automático',
+      shadows: 'Sombras', autoAttack: 'Ataque automático', autoAim: 'Mira automática',
     },
     stat: {
       health: 'Vida', attack: 'Ataque', magicPower: 'Poder mágico',

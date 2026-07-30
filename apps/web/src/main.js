@@ -609,7 +609,11 @@ function doAttack() {
 // push this client's combat preferences to the sim (on join and on change)
 function sendCombatPrefs() {
   if (!state.started) return;
-  sendAction({ t: 'prefs', auto: settings.get('autoAttack') ? 1 : 0 });
+  sendAction({
+    t: 'prefs',
+    auto: settings.get('autoAttack') ? 1 : 0,
+    aim: settings.get('autoAim') ? 1 : 0,
+  });
 }
 
 function doSkill() {
@@ -824,7 +828,8 @@ const FACE_STICK = 0.8;
 // [id, kind, x, z, ...]). Mirrors the sim's auto-attack acquisition, with
 // hysteresis so it commits to whatever it's already turned toward.
 function foeToFace(x, z, range) {
-  if (!range) return null;
+  // auto-aim IS this turn — off, the hero simply looks where you steer
+  if (!range || !settings.get('autoAim')) { state.self.faceId = null; return null; }
   const en = state.snaps.latest()?.en;
   if (!en) return null;
   const maxD = range + ENEMY.RADIUS + FACE_MARGIN;

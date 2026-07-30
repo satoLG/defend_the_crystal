@@ -15,6 +15,7 @@ const DEFAULTS = {
   // combat. Both default ON — that is how the game has always played;
   // turning them off hands the aiming and the timing back to the player.
   autoAttack: true,   // swing on your own at whatever is in range
+  autoAim: true,      // turn to face the nearest foe before swinging
 };
 
 let state = { ...DEFAULTS };
