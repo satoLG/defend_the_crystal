@@ -6,17 +6,24 @@ import {
   CRYSTAL_BREACH_LIMIT, GRID, JUMP, DROPS, SUMMON, BOSSES, SKILLS, NAME_MAX,
   PET, GOLD, petEffects, sanitizePetRef, jumpDurFor,
   WEAPONS, STUN, ORB, weaponEffects, sanitizeWeaponRef, classStarterWeapons,
-  TOWER_SPECIALS, STATUS,
+  TOWER_SPECIALS, STATUS, BLOOD_COURT,
 } from '../config.js';
 import {
   Grid, cellToWorld, worldToCell, canJumpFrom, enemyJumpShortcut, idx, inBounds,
   computeDashEnd, CRYSTAL_POS, HALF_W, HALF_H,
 } from './grid.js';
 import { PORTAL, CROSS_Z, NPCS, DUMMIES, TRAIN, findColliderJump } from '../sanctuary.js';
-import { buildWavePlan, enemyStats } from './waves.js';
+import { buildWavePlan, enemyStats, cycleOf } from './waves.js';
 import { clamp, dist2d, nextId } from '../utils.js';
 
 const rnd2 = (v) => Math.round(v * 100) / 100;
+
+// the weak blood magic a rank-and-file vampire carries once the court
+// has risen (see BLOOD_COURT); null for every other kind and earlier wave
+function bloodOf(kind, wave) {
+  if (kind !== 'vampire') return null;
+  return cycleOf(wave).wave >= BLOOD_COURT.fromWave ? { ...BLOOD_COURT } : null;
+}
 
 // A knockback vector of magnitude `mag` that pushes a body at `pos` straight
 // away from the origin (fx,fz) the hit came from — i.e. BACKWARD along the
@@ -55,6 +62,7 @@ export class Sim {
     this.spawnQueue = [];   // [{kind, at(abs time), boss, variant, horde}]
     this.spawnIdx = 0;
     this.graves = [];       // tombs raised by the gravedigger, still spawning
+    this.webs = [];         // Black Widow web patches, fading on their own
     this.fires = [];        // burning ground patches (cannon napalm special)
     this.drops = [];        // XP/point orbs on the ground, per-player
     this.pending = [];      // scheduled callbacks [{at, fn}]
@@ -99,6 +107,12 @@ export class Sim {
       lvl: 1, xp: 0, xpNext: this.xpNext(1),
       dead: false, respawnT: 0, atkCd: 0, lastDmg: -99, invT: 0, jumpT: 0,
       skillCd: 0, wallT: 0, dashT: 0,
+      // enemy-inflicted status: the Black Widow's venom eats HP over
+      // time, and her webs drag both the stride and the swing. Factors
+      // are 1 when clean, so they can be multiplied in unconditionally.
+      poisonT: 0, poisonDps: 0, poisonTick: 0,
+      burnT: 0, burnDps: 0, burnTick: 0,
+      slowMove: 1, slowRate: 1, webbed: 0,
       kills: 0, obst: 0, lastInputT: this.time,
     });
     this.applyStats(p);
@@ -230,7 +244,7 @@ export class Sim {
     // than its walk speed, so the anti-teleport clamp opens up
     const speed = p.dashT > 0
       ? (SKILLS.berserker.cells * GRID.CELL) / SKILLS.berserker.dur
-      : p.speed;
+      : p.speed * p.slowMove; // webs drag the stride
     const maxStep = speed * dt * 1.8 + 0.6;
     const d = dist2d(p.x, p.z, x, z);
     if (d > maxStep) {
@@ -277,6 +291,7 @@ export class Sim {
     this.breaches = 0;
     this.spawnQueue = [];
     this.graves = [];
+    this.webs = [];
     this.fires = [];
     this.pending = [];
     this.drops = [];
@@ -304,7 +319,10 @@ export class Sim {
     this.wave += 1;
     this.phase = 'combat';
     this.waveStartCount = this.playerCount();
-    const plan = buildWavePlan(this.wave, this.waveStartCount);
+    const plan = buildWavePlan(
+      this.wave, this.waveStartCount,
+      this.players.entities.map((p) => p.cls),
+    );
     this.spawnQueue = plan.map((s) => ({ ...s, at: this.time + s.at }));
     this.emit({ t: 'wave', n: this.wave });
     this.emit({ t: 'phase', ph: 'combat', n: this.wave });
@@ -755,15 +773,41 @@ export class Sim {
   // gravedigger's tombs; otherwise it walks in from a top spawn pad.
   // `horde` marks a Zombie Horde trooper color ('green'|'blue'|'red');
   // `tier` (2|3) the mid/large power stages of later waves.
-  spawnEnemy(kind, boss, variant = null, at = null, horde = null, tier = 1) {
+  spawnEnemy(kind, boss, variant = null, at = null, horde = null, tier = 1, opts = null) {
     const def = ENEMIES[kind];
     const s = GRID.SPAWNS[this.spawnIdx++ % GRID.SPAWNS.length];
     const w = at || cellToWorld(s.c, s.r);
     // walk-in spawns start hidden inside the dark woods north of the
     // board and march down out of the penumbra
     if (!at) w.z = -HALF_H - 2.5 - Math.random() * 2.5;
-    const stats = enemyStats(kind, boss, this.wave, this.waveStartCount, variant, horde, tier);
+    const stats = enemyStats(kind, boss, this.wave, this.waveStartCount, variant, horde, tier, opts);
     const bossDef = boss === 2 ? BOSSES[variant] : null;
+
+    // The Sombra is not its own creature: it is the party's strongest
+    // hero, copied. Class, loadout and stats all come off that hero, so
+    // it fights with whatever they brought rather than with a stat block
+    // someone guessed at.
+    let mirror = null;
+    if (bossDef?.mirrorsHero) {
+      const hero = this.players.entities
+        .slice()
+        .sort((a, b) => b.lvl - a.lvl || b.maxHp - a.maxHp)[0];
+      if (hero) {
+        mirror = { cls: hero.cls, weapon: hero.weapon, shield: hero.shield };
+        // Size it by how hard that hero HITS, not by how much HP they
+        // carry: mirroring HP would make the fight twice as long for a
+        // tanker as for a mage purely because of the class. Off their
+        // sustained damage, it takes about the same time for anyone.
+        const dps = Math.max(hero.atk * hero.rate, 1);
+        stats.hp = dps * bossDef.duel;
+        stats.dmg = hero.atk * bossDef.dmgMult;
+        // it stalks: a hero's own pace on a body three times the size
+        // read as a sprint, and there was no reading its wind-ups
+        stats.speed = hero.speed * bossDef.speedMult;
+      }
+    }
+    // one of its shades wears a class too, just a small weak one
+    if (opts?.shade) mirror = { cls: opts.shade, weapon: null, shield: null };
 
     const vehicle = new Vehicle();
     vehicle.position.set(w.x + (Math.random() - 0.5) * 0.8, 0, w.z + (Math.random() - 0.5) * 0.5);
@@ -788,6 +832,25 @@ export class Sim {
       archer.range += 1.5;
       archer.multishot = true;
     }
+    // A mirrored hero fights the way that hero does. Without this the
+    // Sombra walked up and swung at everything, however the class it
+    // wore actually attacks — the archer has to shoot, the mage has to
+    // cast. Melee classes keep the default close-quarters behaviour.
+    if (mirror) {
+      const base = CLASSES[mirror.cls];
+      if (base && base.range > 3) {
+        archer = {
+          range: base.range, rate: base.rate, projSpeed: 14,
+          proj: base.aoe ? 'magic' : 'arrow',
+          aoe: base.aoe || 0,
+        };
+      }
+    }
+
+    // blood magic: a ranged drain that heals the caster for a share of
+    // the damage it lands. Drácula gets the full version from his boss
+    // entry; the vampires of his court (wave 61 on) get a weak one.
+    const blood = bossDef?.blood || bloodOf(kind, this.wave);
 
     const e = this.world.add({
       enemy: true, id: nextId(), kind, vehicle, seek,
@@ -805,21 +868,60 @@ export class Sim {
       horde, // 'green' | 'blue' | 'red' | null
       variant: boss === 2 ? variant : null,
       // visual-variant code for the snapshot: 1 stage-2 look, 2 stage-3
-      // look (recolored hide + size), 3 Brutus (props); 0 plain
+      // look (recolored hide + size), 3 Brutus (props); 0 plain.
+      // Authored sub-bosses name their own look (the blue zombie, the
+      // red orc) instead of inheriting one from a power tier.
+      // 4 marks a vampire of Drácula's court, so the client hands it the
+      // blood orb — it outranks the power-stage look, which a court
+      // vampire never wears anyway
       vr: boss === 2
         ? (variant === 'brutus' ? 3 : 0)
-        : (stats.tier === 2 ? 1 : stats.tier === 3 ? 2 : 0),
+        : boss === 1
+          ? (opts?.vr || 0)
+          : blood ? 4
+            : (stats.tier === 2 ? 1 : stats.tier === 3 ? 2 : 0),
       // special powers
       archer,
-      jumper: !!def.jumper && !def.flying,
+      // vaulting a wall is the mundane vampire's trick. One that knows
+      // blood magic keeps its distance and drains from range instead, so
+      // it never takes the shortcut — that includes Drácula himself and
+      // every vampire of his court.
+      jumper: !!def.jumper && !def.flying && !blood,
       jump: null,
       jumpCd: ENEMY.JUMP_EVERY * (0.4 + Math.random() * 0.6),
       chainJumps: bossDef?.jumps || 1,
       chainLeft: 0, chainT: 0,
+      // most enemies notice a hero at ENEMY.AGGRO_RADIUS; a boss meant to
+      // hunt the party needs to see further than 3 units
+      aggroR: bossDef?.aggroR || ENEMY.AGGRO_RADIUS,
       summoner: !!def.summoner, summonCd: SUMMON.FIRST,
       pumpkin: bossDef?.pumpkin || null,
+      blood,
+      // Viúva Negra: a venom lob and the web patches she spins
+      venom: bossDef?.venom || null,
+      web: bossDef?.web || null,
+      webCd: bossDef?.web ? 2.5 : 0,
+      // Dragão: a flame cone breathed down from its mouth
+      breath: bossDef?.breath || null,
+      breathT: 0,
+      // one of the Sombra's shades — carries the class it echoes
+      shade: opts?.shade || null,
+      mirror,
+      // the Sombra casts the mirrored hero's power on a timer
+      skillCd: bossDef?.skillCd || 0,
+      skillT: bossDef?.skillCd || 0,
+      armorBoostT: 0,
     });
     const ev = { t: 'spawn', id: e.id, kind, boss };
+    // several bosses share a body (Zé do Caixão and Drácula are both
+    // vampires, Brutus and the Sombra both orcs), so the overhead label
+    // can't be looked up from the kind — carry the variant itself
+    if (boss === 2) ev.variant = variant;
+    // the Sombra and its shades render as a hero, not as their kind.
+    // Sent on the event rather than in the snapshot row: at most a
+    // handful exist per wave, and every enemy would otherwise pay for
+    // the extra fields on every tick.
+    if (mirror) ev.mirror = mirror;
     if (at) { ev.g = 1; ev.x = rnd2(w.x); ev.z = rnd2(w.z); } // rose from a tomb
     this.emit(ev);
     // carry the boss VARIANT / enemy KIND so clients localize the name &
@@ -848,7 +950,11 @@ export class Sim {
       this.emit({ t: 'crit', x: rnd2(pos.x), z: rnd2(pos.z) });
     }
     // heavy armor (Brutus): flat reduction on every hit, any source
-    if (e.armor > 0) dmg *= 1 - e.armor;
+    if (e.armor > 0) {
+      // the mirrored tanker's Taunt doubles its guard while it holds
+      const armor = Math.min(e.armorBoostT > 0 ? e.armor * 2 : e.armor, 0.85);
+      dmg *= 1 - armor;
+    }
     e.hp -= dmg;
     // training dummies never die (or aggro, or get knocked around):
     // on depletion they spring straight back to full
@@ -1091,6 +1197,55 @@ export class Sim {
     return false;
   }
 
+  // venom on a hero: HP ticking away for a while, stacking by taking
+  // the strongest of the two rather than adding them up
+  poisonPlayer(p, dps, dur) {
+    if (p.dead) return;
+    p.poisonDps = Math.max(p.poisonDps, dps);
+    p.poisonT = Math.max(p.poisonT, dur);
+  }
+
+  // the dragon's breath leaves heroes alight, the way the flamethrower
+  // tower leaves enemies alight
+  burnPlayer(p, dps, dur) {
+    if (p.dead) return;
+    p.burnDps = Math.max(p.burnDps, dps);
+    p.burnT = Math.max(p.burnT, dur);
+  }
+
+  // per-frame status upkeep: venom damage, and the web factors recomputed
+  // from whichever patches the hero is standing in right now
+  tickPlayerStatus(p, dt) {
+    if (p.poisonT > 0) {
+      p.poisonT = Math.max(p.poisonT - dt, 0);
+      p.poisonTick += dt;
+      if (p.poisonTick >= 0.5) {
+        this.damagePlayer(p, p.poisonDps * p.poisonTick, 0, 0);
+        p.poisonTick = 0;
+      }
+      if (p.poisonT === 0) p.poisonDps = 0;
+    }
+    if (p.burnT > 0) {
+      p.burnT = Math.max(p.burnT - dt, 0);
+      p.burnTick += dt;
+      if (p.burnTick >= 0.5) {
+        this.damagePlayer(p, p.burnDps * p.burnTick, 0, 0);
+        p.burnTick = 0;
+      }
+      if (p.burnT === 0) p.burnDps = 0;
+    }
+    // webs don't stack — the thickest patch underfoot wins
+    let move = 1, rate = 1;
+    for (const w of this.webs) {
+      if (dist2d(p.x, p.z, w.x, w.z) > w.r) continue;
+      move = Math.min(move, w.moveF);
+      rate = Math.min(rate, w.rateF);
+    }
+    p.slowMove = move;
+    p.slowRate = rate;
+    p.webbed = move < 1 ? 1 : 0;
+  }
+
   grantXp(p, xp) {
     if (p.lvl >= PLAYER.LEVEL_CAP) return;
     p.xp += xp;
@@ -1218,8 +1373,10 @@ export class Sim {
   shootArrowAt(e, p, dist) {
     const pos = e.vehicle.position;
     const ft = Math.max(dist / e.archer.projSpeed, 0.08);
+    // bone throwers lob a tumbling bone; archers loose a flat arrow
+    const proj = e.archer.proj || 'arrow';
     this.emit({
-      t: 'shoot', k: 'arrow',
+      t: 'shoot', k: proj, lob: proj === 'bone' ? 1 : 0,
       f: [rnd2(pos.x), 1.1, rnd2(pos.z)], to: [rnd2(p.x), 0.8, rnd2(p.z)], ft: rnd2(ft),
     });
     const id = p.id, dmg = e.dmg, fx = pos.x, fz = pos.z;
@@ -1228,6 +1385,235 @@ export class Sim {
       if (!q || q.dead) return;
       const n = Math.max(dist2d(fx, fz, q.x, q.z), 0.2);
       this.damagePlayer(q, dmg, ((q.x - fx) / n) * 1.1, ((q.z - fz) / n) * 1.1);
+    }});
+  }
+
+  // blood magic: a bolt that damages the target and feeds the caster
+  // back a share of what it took (capped at its own missing HP)
+  drainAt(e, p, dist) {
+    const pos = e.vehicle.position;
+    const b = e.blood;
+    const ft = Math.max(dist / b.projSpeed, 0.08);
+    this.emit({
+      t: 'shoot', k: 'blood',
+      f: [rnd2(pos.x), 1.2, rnd2(pos.z)], to: [rnd2(p.x), 0.9, rnd2(p.z)], ft: rnd2(ft),
+    });
+    const id = p.id, eid = e.id, fx = pos.x, fz = pos.z;
+    this.pending.push({ at: this.time + ft, fn: () => {
+      const q = this.getPlayer(id);
+      if (!q || q.dead) return;
+      const before = q.hp;
+      const n = Math.max(dist2d(fx, fz, q.x, q.z), 0.2);
+      this.damagePlayer(q, b.dmg, ((q.x - fx) / n) * 0.8, ((q.z - fz) / n) * 0.8);
+      // heal off what actually landed, so a blocked or absorbed hit
+      // feeds him nothing
+      const dealt = Math.max(before - q.hp, 0);
+      const caster = this.enemies.entities.find((n) => n.id === eid);
+      if (!caster || caster.hp <= 0 || dealt <= 0) return;
+      const healed = Math.min(dealt * b.leech, caster.maxHp - caster.hp);
+      if (healed <= 0) return;
+      caster.hp += healed;
+      this.emit({ t: 'drain', id: eid, x: rnd2(q.x), z: rnd2(q.z) });
+    }});
+  }
+
+  // Viúva Negra: a venom sac that splashes and keeps eating HP after
+  spitVenomAt(e, p, dist) {
+    const pos = e.vehicle.position;
+    const v = e.venom;
+    const ft = Math.max(dist / v.projSpeed, 0.1);
+    this.emit({
+      t: 'shoot', k: 'venom', lob: 1,
+      f: [rnd2(pos.x), 1.0, rnd2(pos.z)], to: [rnd2(p.x), 0.2, rnd2(p.z)], ft: rnd2(ft),
+    });
+    const cx = p.x, cz = p.z;
+    this.pending.push({ at: this.time + ft, fn: () => {
+      this.emit({ t: 'aoe', x: rnd2(cx), z: rnd2(cz), r: v.aoe, k: 'venom' });
+      for (const q of this.players) {
+        if (q.dead || dist2d(cx, cz, q.x, q.z) > v.aoe) continue;
+        const n = Math.max(dist2d(cx, cz, q.x, q.z), 0.2);
+        this.damagePlayer(q, v.dmg, ((q.x - cx) / n) * 0.7, ((q.z - cz) / n) * 0.7);
+        this.poisonPlayer(q, v.dps, v.dur);
+      }
+    }});
+  }
+
+  // Viúva Negra: a patch of web on the ground. It fades on its own, and
+  // while a hero stands in it they move and swing slower.
+  spinWeb(e) {
+    const pos = e.vehicle.position;
+    // drop it on whoever is closest, so it lands where the fight is
+    let best = null, bestD = Infinity;
+    for (const q of this.players) {
+      if (q.dead) continue;
+      const d = dist2d(pos.x, pos.z, q.x, q.z);
+      if (d < bestD) { bestD = d; best = q; }
+    }
+    const x = best ? best.x : pos.x, z = best ? best.z : pos.z;
+    // Thrown, not conjured. She turns her back to the target first — the
+    // web comes out of the spinnerets, so she fires it over her tail —
+    // and it flies as its own effect, growing as it goes, rather than a
+    // patch blinking into existence under the hero's feet.
+    const d = dist2d(pos.x, pos.z, x, z);
+    const ft = Math.max(d / 9, 0.25);
+    e.yaw = Math.atan2(pos.x - x, pos.z - z); // back to the target
+    this.emit({
+      t: 'webshot',
+      f: [rnd2(pos.x), 0.7, rnd2(pos.z)], to: [rnd2(x), 0.1, rnd2(z)],
+      ft: rnd2(ft), r: e.web.r,
+    });
+    this.pending.push({ at: this.time + ft, fn: () => {
+      this.webs.push({ x, z, r: e.web.r, t: e.web.dur, moveF: e.web.moveF, rateF: e.web.rateF });
+      this.emit({ t: 'web', x: rnd2(x), z: rnd2(z), r: e.web.r, dur: e.web.dur });
+    }});
+  }
+
+  // Dragão: the flamethrower's cone, breathed from a mouth held high.
+  // The lunge plays FIRST and the fire only starts once the head is
+  // thrown forward and held there (`windup`) — pouring flame through the
+  // wind-up read as the animation and the effect being unrelated.
+  breatheFire(e) {
+    const b = e.breath;
+    // the client freezes the lunge on its final frame for the wind-up
+    // plus the whole plume
+    e.breathT = b.windup + b.dur;
+    this.emit({
+      t: 'lunge', id: e.id, hold: rnd2(b.windup + b.dur), windup: rnd2(b.windup),
+    });
+
+    this.pending.push({ at: this.time + b.windup, fn: () => {
+      if (e.hp <= 0) return;
+      const pos = e.vehicle.position;
+      this.emit({
+        t: 'breath', id: e.id, x: rnd2(pos.x), z: rnd2(pos.z),
+        yaw: rnd2(e.yaw), r: b.r, arc: b.arc, dur: b.dur,
+      });
+      // damage ticks for as long as the plume is up, so walking out of
+      // it actually saves you — and everything it washes over keeps
+      // burning after, the way the flamethrower tower's spray does
+      const ticks = Math.max(1, Math.round(b.dur / 0.3));
+      for (let i = 1; i <= ticks; i++) {
+        this.pending.push({ at: this.time + i * 0.3, fn: () => {
+          if (e.hp <= 0) return;
+          const o = e.vehicle.position;
+          for (const q of this.players) {
+            if (q.dead) continue;
+            const dx = q.x - o.x, dz = q.z - o.z;
+            const d = Math.hypot(dx, dz);
+            if (d > b.r) continue;
+            // inside the cone the dragon is facing
+            const ang = Math.atan2(dx, dz);
+            let diff = ang - e.yaw;
+            while (diff > Math.PI) diff -= Math.PI * 2;
+            while (diff < -Math.PI) diff += Math.PI * 2;
+            if (Math.abs(diff) > b.arc) continue;
+            this.damagePlayer(q, b.dps * 0.3, 0, 0);
+            this.burnPlayer(q, b.burnDps, b.burnDur);
+          }
+        }});
+      }
+    }});
+  }
+
+  // The Sombra casts its hero's own power back at the party. The
+  // player-side SKILLS functions can't be reused directly — they read a
+  // player entity and damage `this.enemies`, i.e. exactly the wrong side
+  // of the fight — so each one is mirrored here against the heroes.
+  shadowSkill(e) {
+    const cls = e.mirror?.cls;
+    const pos = e.vehicle.position;
+    const alive = this.players.entities.filter((p) => !p.dead);
+    if (!cls || !alive.length) return;
+    const nearest = alive
+      .map((p) => ({ p, d: dist2d(pos.x, pos.z, p.x, p.z) }))
+      .sort((a, b) => a.d - b.d);
+
+    if (cls === 'berserker') {
+      // charges through, flinging whoever is on the line
+      const S = SKILLS.berserker;
+      const reach = S.cells * GRID.CELL;
+      for (const { p, d } of nearest) {
+        if (d > reach) continue;
+        const n = Math.max(d, 0.2);
+        this.damagePlayer(p, e.dmg * S.dmgMult, ((p.x - pos.x) / n) * S.kb, ((p.z - pos.z) / n) * S.kb);
+      }
+      e.vehicle.position.x += Math.sin(e.yaw) * reach * 0.5;
+      e.vehicle.position.z += Math.cos(e.yaw) * reach * 0.5;
+      this.emit({ t: 'eskill', id: e.id, cls, x: rnd2(pos.x), z: rnd2(pos.z), yaw: rnd2(e.yaw) });
+      return;
+    }
+    if (cls === 'tanker') {
+      // hunkers down: the same doubled defense, on the boss
+      const S = SKILLS.tanker;
+      e.armorBoostT = S.dur;
+      this.emit({ t: 'eskill', id: e.id, cls, x: rnd2(pos.x), z: rnd2(pos.z), dur: S.dur });
+      return;
+    }
+    if (cls === 'archer') {
+      // three volleys, spread over whoever is closest
+      const S = SKILLS.archer;
+      const shoot = () => {
+        if (e.hp <= 0) return;
+        const live = this.players.entities.filter((p) => !p.dead);
+        for (let i = 0; i < S.arrows && live.length; i++) {
+          const p = live[i % live.length];
+          this.shootArrowAt(
+            { ...e, archer: { projSpeed: 13, proj: 'arrow' } },
+            p, dist2d(pos.x, pos.z, p.x, p.z),
+          );
+        }
+      };
+      shoot();
+      for (let b = 1; b < S.bursts; b++) {
+        this.pending.push({ at: this.time + b * S.gap, fn: shoot });
+      }
+      this.emit({ t: 'eskill', id: e.id, cls, x: rnd2(pos.x), z: rnd2(pos.z) });
+      return;
+    }
+    if (cls === 'mage') {
+      // one huge blast centred on the closest hero
+      const S = SKILLS.mage;
+      const target = nearest[0].p;
+      const r = 1.9 * S.aoeMult;
+      const cx = target.x, cz = target.z;
+      this.emit({
+        t: 'shoot', k: 'magic', big: 1, lob: 1,
+        f: [rnd2(pos.x), 1.2, rnd2(pos.z)], to: [rnd2(cx), 0.4, rnd2(cz)], ft: S.flightT,
+      });
+      this.pending.push({ at: this.time + S.flightT, fn: () => {
+        this.emit({ t: 'aoe', x: rnd2(cx), z: rnd2(cz), r, k: 'mage' });
+        for (const p of this.players) {
+          if (p.dead) continue;
+          const d = dist2d(cx, cz, p.x, p.z);
+          if (d > r) continue;
+          const n = Math.max(d, 0.2);
+          this.damagePlayer(p, e.dmg * S.dmgMult, ((p.x - cx) / n) * 2, ((p.z - cz) / n) * 2);
+        }
+      }});
+      this.emit({ t: 'eskill', id: e.id, cls, x: rnd2(pos.x), z: rnd2(pos.z) });
+    }
+  }
+
+  // an arcane blast, the way the mage throws one — used by the Sombra
+  // when it wears that class
+  castBlastAt(e, p, dist) {
+    const pos = e.vehicle.position;
+    const a = e.archer;
+    const ft = Math.max(dist / a.projSpeed, 0.12);
+    const cx = p.x, cz = p.z, r = a.aoe || 1.9;
+    this.emit({
+      t: 'shoot', k: 'magic',
+      f: [rnd2(pos.x), 1.2, rnd2(pos.z)], to: [rnd2(cx), 0.5, rnd2(cz)], ft: rnd2(ft),
+    });
+    this.pending.push({ at: this.time + ft, fn: () => {
+      this.emit({ t: 'aoe', x: rnd2(cx), z: rnd2(cz), r, k: 'mage' });
+      for (const q of this.players) {
+        if (q.dead) continue;
+        const d = dist2d(cx, cz, q.x, q.z);
+        if (d > r) continue;
+        const n = Math.max(d, 0.2);
+        this.damagePlayer(q, e.dmg, ((q.x - cx) / n) * 1.2, ((q.z - cz) / n) * 1.2);
+      }
     }});
   }
 
@@ -1258,6 +1644,12 @@ export class Sim {
   step(dt) {
     this.time += dt;
 
+    // web patches fade on their own
+    if (this.webs.length) {
+      for (const w of this.webs) w.t -= dt;
+      this.webs = this.webs.filter((w) => w.t > 0);
+    }
+
     // scheduled impacts / delayed damage
     if (this.pending.length) {
       const due = this.pending.filter((s) => s.at <= this.time);
@@ -1277,7 +1669,7 @@ export class Sim {
         const s = this.spawnQueue.shift();
         // the Zombie Horde announces itself once, on its first spawn
         if (s.announce) this.emit({ t: 'boss', variant: s.announce });
-        this.spawnEnemy(s.kind, s.boss, s.variant, null, s.horde || null, s.tier || 1);
+        this.spawnEnemy(s.kind, s.boss, s.variant, null, s.horde || null, s.tier || 1, s);
       }
     }
 
@@ -1320,6 +1712,7 @@ export class Sim {
       if (this.time - p.lastDmg > PLAYER.REGEN_DELAY && p.hp < p.maxHp) {
         p.hp = Math.min(p.maxHp, p.hp + p.maxHp * PLAYER.REGEN_RATE * (p.regenMult || 1) * dt);
       }
+      this.tickPlayerStatus(p, dt);
       // no attacking mid-air or mid-dash
       if (p.jumpT > 0) { p.jumpT = Math.max(p.jumpT - dt, 0); continue; }
       if (p.dashT > 0) { p.dashT = Math.max(p.dashT - dt, 0); continue; }
@@ -1332,7 +1725,7 @@ export class Sim {
         if (d < bestD) { bestD = d; best = e; }
       }
       if (!best || bestD > p.range + ENEMY.RADIUS) continue;
-      p.atkCd = 1 / p.rate;
+      p.atkCd = 1 / (p.rate * p.slowRate);
       const tp = best.vehicle.position;
       p.yaw = Math.atan2(tp.x - p.x, tp.z - p.z);
       // weapon tier tints the swing/projectile; weapon id lets the view
@@ -1538,7 +1931,7 @@ export class Sim {
         let best = null, bestD = Infinity;
         for (const p of alive) {
           const d = dist2d(pos.x, pos.z, p.x, p.z);
-          if (d < bestD && d < ENEMY.AGGRO_RADIUS && this.canAggro(e, p, d)) {
+          if (d < bestD && d < (e.aggroR || ENEMY.AGGRO_RADIUS) && this.canAggro(e, p, d)) {
             bestD = d; best = p;
           }
         }
@@ -1579,11 +1972,26 @@ export class Sim {
       }
 
       e.atkCd -= dt;
+      if (e.armorBoostT > 0) e.armorBoostT = Math.max(e.armorBoostT - dt, 0);
 
-      // ranged attackers (skeleton archers / the pumpkin boss) hold
-      // position and fire as long as any character is inside range —
+      // the Sombra throws its hero's own skill back at the party
+      if (e.skillCd > 0 && this.phase !== 'over') {
+        e.skillT -= dt;
+        if (e.skillT <= 0) { e.skillT = e.skillCd; this.shadowSkill(e); }
+      }
+
+      // the Black Widow spins webs on her own beat, independent of
+      // whatever she is spitting at
+      if (e.web && alive.length && this.phase !== 'over') {
+        e.webCd -= dt;
+        if (e.webCd <= 0) { e.webCd = 1 / e.web.rate; this.spinWeb(e); }
+      }
+
+      // ranged attackers (skeleton archers, bone throwers, the pumpkin
+      // boss, anything casting blood magic) hold position and fire as
+      // long as any character is inside range —
       // shots pass through walls, same as the characters' attacks do
-      const ranged = e.archer || e.pumpkin;
+      const ranged = e.archer || e.pumpkin || e.blood || e.venom || e.breath;
       let engaged = false;
       if (ranged && alive.length && this.phase !== 'over') {
         const rng = ranged.range;
@@ -1597,13 +2005,29 @@ export class Sim {
           foes.sort((a, b) => a.d - b.d);
           const aim = foes[0];
           e.seek.target.copy(pos);
-          e.vehicle.velocity.multiplyScalar(0.6);
+          // a breathing dragon keeps gliding slowly onto its target
+          // instead of stopping dead like the other ranged attackers
+          e.vehicle.velocity.multiplyScalar(e.breath ? 0.85 : 0.6);
           e.yaw = Math.atan2(aim.p.x - pos.x, aim.p.z - pos.z);
           if (e.atkCd <= 0) {
             e.atkCd = 1 / ranged.rate;
-            this.emit({ t: 'atk', id: e.id, tx: rnd2(aim.p.x), tz: rnd2(aim.p.z), r: 1 });
+            // the dragon's lunge event drives its own animation; an
+            // `atk` on top of it played the head-butt a SECOND time
+            if (!e.breath) {
+              this.emit({ t: 'atk', id: e.id, tx: rnd2(aim.p.x), tz: rnd2(aim.p.z), r: 1 });
+            }
             if (e.pumpkin) {
               this.throwPumpkinAt(e, aim.p, aim.d);
+            } else if (e.breath) {
+              this.breatheFire(e);
+            } else if (e.venom) {
+              this.spitVenomAt(e, aim.p, aim.d);
+            } else if (e.blood) {
+              // Drácula reaches everyone at once; his court picks one
+              if (e.blood.allTargets) for (const f of foes) this.drainAt(e, f.p, f.d);
+              else this.drainAt(e, aim.p, aim.d);
+            } else if (e.archer.proj === 'magic') {
+              this.castBlastAt(e, aim.p, aim.d);
             } else if (e.archer.multishot) {
               for (const f of foes) this.shootArrowAt(e, f.p, f.d); // volley at everyone
             } else {
@@ -1923,7 +2347,8 @@ export class Sim {
         Math.round(p.atk),
         // pet-affected move speed (clients predict with it) + the
         // companion itself, so every peer can render & label it
-        rnd2(p.speed), p.pet?.id || '', p.pet?.name || '', p.pet?.lvl || 0,
+        // already webbed-down, so the owning client predicts the drag
+        rnd2(p.speed * p.slowMove), p.pet?.id || '', p.pet?.name || '', p.pet?.lvl || 0,
         // equipped weapon & shield (+ tiers) so every peer renders the
         // right prop with the right gold/crystal finish
         p.weapon?.id || '', p.weapon?.tier || 0,
@@ -1931,6 +2356,9 @@ export class Sim {
         // attack range (index 27) — the owning client turns to face any
         // foe inside it, so it needs the wave/weapon-adjusted value
         rnd2(p.range),
+        // status the Black Widow inflicts (index 28): 1 poisoned,
+        // 2 webbed — the client tints and marks the hero from this
+        (p.poisonT > 0 ? 1 : 0) | (p.webbed ? 2 : 0) | (p.burnT > 0 ? 4 : 0),
       ]),
       en: this.enemies.entities.map((e) => [
         e.id, e.kind, rnd2(e.vehicle.position.x), rnd2(e.vehicle.position.z),

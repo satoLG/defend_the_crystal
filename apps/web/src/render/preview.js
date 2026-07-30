@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { instantiate } from './assets.js';
-import { attachProps, CLASS_PROPS } from './view.js';
+import { attachProps, CLASS_PROPS, applyBodyTint } from './view.js';
 import { buildTexture, applyTexture } from './customize.js';
 import { CLASSES } from '@dtc/shared/config.js';
 
@@ -88,6 +88,29 @@ export class CharacterPreview {
     this.charPivot.add(inst.group);
     this.charPivot.rotation.y = 0.3;
     this.setColors(this.colors);
+  }
+
+  // Same turntable, showing an enemy body instead of a hero class —
+  // used by the dev overlay to dial in Drácula's look against the very
+  // same applyBodyTint() the match uses, so the preview cannot drift
+  // from what actually spawns.
+  setEnemy(modelKey, look, propSpecs) {
+    if (this.actor) this.charPivot.remove(this.actor.group);
+    this.cls = null;
+    const inst = instantiate(modelKey, { cloneMaterials: true, shadows: false });
+    const mixer = new THREE.AnimationMixer(inst.group);
+    const idle = inst.animations.find((c) => c.name === 'idle') || inst.animations[0];
+    if (idle) mixer.clipAction(idle).play();
+    if (propSpecs) attachProps(inst.group, propSpecs);
+    applyBodyTint(inst.group, look);
+    this.actor = { group: inst.group, mixer, modelKey };
+    this.charPivot.add(inst.group);
+    this.charPivot.rotation.y = 0.3;
+  }
+
+  // retint in place — cheap enough to run on every slider drag
+  setLook(look) {
+    if (this.actor) applyBodyTint(this.actor.group, look);
   }
 
   setColors(colors) {

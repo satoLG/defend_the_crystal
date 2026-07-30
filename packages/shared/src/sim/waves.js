@@ -1,21 +1,30 @@
 import {
   ENEMIES, ENEMY, WAVES, SUBBOSS, BOSS, BOSSES, BOSS_ORDER, SCALING, scaleFor,
-  SUBBOSS_ORDER, HORDE, TIERS, TIER_PLAN,
+  SUBBOSSES, SUBBOSS_ESCORT, SUBBOSS_ESCORT_COUNT, PHASES, HORDE, TIERS, TIER_PLAN,
 } from '../config.js';
 
 // ============================================================
 // Wave composition: which enemies spawn, when, and how strong.
 // ============================================================
 
-// deterministic-ish weighting: newer ranks get more common as waves go by
-function rankWeights(wave) {
-  const w = {};
-  for (const [kind, def] of Object.entries(ENEMIES)) {
-    if (kind === 'keeper' || wave < def.fromWave) continue;
-    const age = wave - def.fromWave; // waves since this rank appeared
-    w[kind] = 1 + Math.min(age * 0.35, 3);
+// Waves 1..CYCLE are authored; after that the arc repeats with tougher
+// enemies. `wave` is the position inside the arc (what decides the
+// composition, the boss and the volume), `lap` how many full runs are
+// already behind us (what decides the extra punch).
+export function cycleOf(wave) {
+  const n = WAVES.CYCLE;
+  return { wave: ((wave - 1) % n) + 1, lap: Math.floor((wave - 1) / n) };
+}
+
+// the authored mix for this point of the arc — the last PHASES entry
+// whose `from` we've reached
+function phaseMix(cycleWave) {
+  let mix = PHASES[0].mix;
+  for (const p of PHASES) {
+    if (cycleWave < p.from) break;
+    mix = p.mix;
   }
-  return w;
+  return mix;
 }
 
 function pickWeighted(weights) {
@@ -35,24 +44,60 @@ export function waveHpMult(wave, playerCount) {
 
 // Returns a spawn plan: [{kind, at, boss}] sorted by spawn time (seconds
 // from wave start). boss: 0 normal, 1 sub-boss, 2 boss.
-export function buildWavePlan(wave, playerCount) {
-  const weights = rankWeights(wave);
-  const count = Math.max(3, Math.round(
-    (WAVES.BASE_COUNT + wave * WAVES.COUNT_PER_WAVE) * scaleFor(SCALING.enemyCount, playerCount)
-  ));
+// `classes` lists the classes of the heroes in the match — only the
+// Sombra needs it, to field one shade per class in play.
+export function buildWavePlan(wave, playerCount, classes = []) {
+  // everything below reads the position inside the authored arc, so a
+  // lap-2 wave 105 fields exactly what wave 5 fields — just meaner
+  const { wave: cw } = cycleOf(wave);
   const window = Math.min(
     WAVES.SPAWN_WINDOW_MAX,
-    WAVES.SPAWN_WINDOW_BASE + wave * WAVES.SPAWN_WINDOW_PER_WAVE
+    WAVES.SPAWN_WINDOW_BASE + cw * WAVES.SPAWN_WINDOW_PER_WAVE
   );
+  const isBossWave = cw % WAVES.CHECKPOINT_EVERY === 0;
+  const isSubBossWave = !isBossWave && cw % WAVES.SUBBOSS_EVERY === 0;
 
-  // stage-2/3 rollout: nothing above stage 1 through wave 10, then the
-  // stage-2 share ramps up slowly; stage 3 trickles in hard-capped per
-  // wave so giants stay rare (see TIER_PLAN)
-  const t2p = wave < TIER_PLAN.T2_FROM ? 0
-    : Math.min((wave - TIER_PLAN.T2_FROM + 1) * TIER_PLAN.T2_RAMP, TIER_PLAN.T2_MAX);
-  const t3p = wave < TIER_PLAN.T3_FROM ? 0
-    : Math.min((wave - TIER_PLAN.T3_FROM + 1) * TIER_PLAN.T3_RAMP, TIER_PLAN.T3_MAX);
-  let t3left = wave < TIER_PLAN.T3_FROM ? 0 : wave < TIER_PLAN.T3_CAP_1 ? 1 : 2;
+  const plan = isBossWave ? bossWave(cw, playerCount, window, classes)
+    : isSubBossWave ? subBossWave(cw, playerCount, window)
+      : mixedWave(cw, playerCount, window);
+
+  plan.sort((a, b) => a.at - b.at);
+  return plan;
+}
+
+// Expand a list of {kind, n, tier} entries into spawns. A boss wave is
+// a set piece, not a trickle: the whole escort walks in together in the
+// first moments and the boss is right behind it, rather than the party
+// standing around while a queue drains. `spanned` keeps a little
+// stagger so they don't all materialise on the same frame.
+function spread(entries, playerCount, spanned = BOSS_ESCORT_SPAN, from = 0.4) {
+  const out = [];
+  const scale = scaleFor(SCALING.enemyCount, playerCount);
+  for (const e of entries) {
+    const n = Math.max(1, Math.round((e.n ?? 1) * scale));
+    for (let i = 0; i < n; i++) out.push({ ...e, n: undefined, kind: e.kind, boss: 0, tier: e.tier || 1 });
+  }
+  out.forEach((s, i) => {
+    s.at = from + (spanned * i) / Math.max(out.length, 1) + Math.random() * 0.25;
+  });
+  return out;
+}
+
+// seconds the whole escort of a boss wave takes to walk in
+const BOSS_ESCORT_SPAN = 3;
+
+// an ordinary wave: the phase's mix, rolled per spawn, with the stage-2
+// and stage-3 giants trickling in as the arc goes on
+function mixedWave(cw, playerCount, window) {
+  const weights = phaseMix(cw);
+  const count = Math.max(3, Math.round(
+    (WAVES.BASE_COUNT + cw * WAVES.COUNT_PER_WAVE) * scaleFor(SCALING.enemyCount, playerCount)
+  ));
+  const t2p = cw < TIER_PLAN.T2_FROM ? 0
+    : Math.min((cw - TIER_PLAN.T2_FROM + 1) * TIER_PLAN.T2_RAMP, TIER_PLAN.T2_MAX);
+  const t3p = cw < TIER_PLAN.T3_FROM ? 0
+    : Math.min((cw - TIER_PLAN.T3_FROM + 1) * TIER_PLAN.T3_RAMP, TIER_PLAN.T3_MAX);
+  let t3left = cw < TIER_PLAN.T3_FROM ? 0 : cw < TIER_PLAN.T3_CAP_1 ? 1 : 2;
 
   const plan = [];
   for (let i = 0; i < count; i++) {
@@ -65,42 +110,71 @@ export function buildWavePlan(wave, playerCount) {
       boss: 0, tier,
     });
   }
+  return plan;
+}
 
-  const isBossWave = wave % WAVES.CHECKPOINT_EVERY === 0;
-  const isSubBossWave = !isBossWave && wave % WAVES.SUBBOSS_EVERY === 0;
-  if (isSubBossWave) {
-    // fixed rotation over EVERY mob kind (waves 5, 15, 25, …): no
-    // repeats until the whole roster has had its turn
-    const nth = Math.floor(wave / WAVES.SUBBOSS_EVERY / 2); // 5→0, 15→1, 25→2…
-    plan.push({ kind: SUBBOSS_ORDER[nth % SUBBOSS_ORDER.length], at: window * 0.6, boss: 1 });
-  }
-  if (isBossWave) {
-    // checkpoint bosses rotate through BOSS_ORDER
-    const variant = BOSS_ORDER[(wave / WAVES.CHECKPOINT_EVERY - 1) % BOSS_ORDER.length];
-    if (BOSSES[variant].horde) {
-      // the Zombie Horde replaces the whole wave: 100 zombies pouring
-      // in over a short window. Colors: green (plain), blue (revives
-      // twice), red (revives three times), shuffled together.
-      const troops = [];
-      for (let i = 0; i < HORDE.GREEN; i++) troops.push(null);
-      for (let i = 0; i < HORDE.BLUE; i++) troops.push('blue');
-      for (let i = 0; i < HORDE.RED; i++) troops.push('red');
-      for (let i = troops.length - 1; i > 0; i--) {
-        const j = (Math.random() * (i + 1)) | 0;
-        [troops[i], troops[j]] = [troops[j], troops[i]];
-      }
-      const hordePlan = troops.map((tint, i) => ({
-        kind: BOSSES[variant].kind, boss: 0, variant, horde: tint || 'green',
-        at: 1 + (HORDE.WINDOW * i) / troops.length + Math.random() * 0.3,
-      }));
-      hordePlan.sort((a, b) => a.at - b.at);
-      hordePlan[0].announce = variant; // banner on first spawn (localized client-side)
-      return hordePlan;
+// a sub-boss wave fields only the squad's own kin, so the fight reads as
+// "the blue zombie and his zombies" rather than as a mixed crowd
+function subBossWave(cw, playerCount, window) {
+  const squad = SUBBOSSES[cw] || [];
+  const escort = SUBBOSS_ESCORT[cw]
+    || squad.map((s) => ({ kind: s.kind, n: SUBBOSS_ESCORT_COUNT / squad.length }));
+  // sub-bosses keep some of the wave's pacing — they are a step up, not
+  // a set piece — but nothing like the old drip
+  const plan = spread(escort, playerCount, Math.min(window * 0.5, 8));
+  const last = plan.reduce((m, s) => Math.max(m, s.at), 0);
+  squad.forEach((s, i) => {
+    plan.push({ ...s, at: last + 0.8 + i * 0.9, boss: 1 });
+  });
+  return plan;
+}
+
+// a boss wave is the boss plus its own authored escort — never the
+// phase mix, so the checkpoint reads as that boss's fight
+function bossWave(cw, playerCount, window, classes) {
+  const variant = BOSS_ORDER[(cw / WAVES.CHECKPOINT_EVERY - 1) % BOSS_ORDER.length];
+  const def = BOSSES[variant];
+
+  if (def.horde) {
+    // the Zombie Horde replaces the whole wave: 100 zombies pouring
+    // in over a short window. Colors: green (plain), blue (revives
+    // twice), red (revives three times), shuffled together.
+    const troops = [];
+    for (let i = 0; i < HORDE.GREEN; i++) troops.push(null);
+    for (let i = 0; i < HORDE.BLUE; i++) troops.push('blue');
+    for (let i = 0; i < HORDE.RED; i++) troops.push('red');
+    for (let i = troops.length - 1; i > 0; i--) {
+      const j = (Math.random() * (i + 1)) | 0;
+      [troops[i], troops[j]] = [troops[j], troops[i]];
     }
-    plan.push({ kind: BOSSES[variant].kind, at: window * 0.7, boss: 2, variant });
+    const hordePlan = troops.map((tint, i) => ({
+      kind: def.kind, boss: 0, variant, horde: tint || 'green',
+      at: 1 + (HORDE.WINDOW * i) / troops.length + Math.random() * 0.3,
+    }));
+    hordePlan.sort((a, b) => a.at - b.at);
+    hordePlan[0].announce = variant; // banner on first spawn (localized client-side)
+    return hordePlan;
   }
 
-  plan.sort((a, b) => a.at - b.at);
+  const plan = spread(def.escort || [], playerCount);
+
+  // the Sombra's escort is built from who is actually playing: one
+  // small shade wearing each class in the party
+  if (def.shades) {
+    const seen = [...new Set(classes)];
+    let i = 0;
+    for (const cls of seen) {
+      for (let k = 0; k < def.shades.n; k++, i++) {
+        plan.push({ kind: def.kind, boss: 0, variant, shade: cls, at: 0.4 + i * 0.5 });
+      }
+    }
+  }
+
+  // the boss follows its escort in, and when it comes alone it is on
+  // the field almost as soon as the wave starts — there is nothing to
+  // wait for
+  const last = plan.reduce((m, s) => Math.max(m, s.at), 0);
+  plan.push({ kind: def.kind, at: (plan.length ? last : 0) + 0.6, boss: 2, variant });
   return plan;
 }
 
@@ -108,14 +182,17 @@ export function buildWavePlan(wave, playerCount) {
 // trooper ('green' | 'blue' | 'red'): weaker individually, and the
 // blue/red ones rise again after falling. `tier` (2|3) marks the
 // mid/large power stages regular enemies grow into on later waves.
-export function enemyStats(kind, boss, wave, playerCount, variant, horde = null, tier = 1) {
+export function enemyStats(kind, boss, wave, playerCount, variant, horde = null, tier = 1, opts = null) {
   const def = ENEMIES[kind];
   const hpMult = waveHpMult(wave, playerCount);
   const speed = def.speed * (1 + ENEMY.SPEED_PER_WAVE * (wave - 1));
+  // HP already climbs with the raw wave number forever; damage is flat,
+  // so each completed lap of the authored arc adds its own bite
+  const dmgMult = 1 + WAVES.LAP_DMG * cycleOf(wave).lap;
   if (horde) {
     return {
       hp: def.hp * hpMult * HORDE.hpMult,
-      dmg: def.dmg * HORDE.dmgMult,
+      dmg: def.dmg * HORDE.dmgMult * dmgMult,
       speed: speed * HORDE.speedMult,
       pts: Math.max(1, Math.round(def.pts * HORDE.ptsMult)),
       xp: Math.max(1, Math.round(def.xp * HORDE.xpMult)),
@@ -128,28 +205,49 @@ export function enemyStats(kind, boss, wave, playerCount, variant, horde = null,
     const v = BOSSES[variant] || {};
     return {
       hp: def.hp * hpMult * (v.hpMult || 1),
-      dmg: def.dmg * (v.dmgMult || 1),
+      dmg: def.dmg * (v.dmgMult || 1) * dmgMult,
       speed: speed * (v.speedMult || 1),
-      pts: BOSS.pts, xp: BOSS.xp, scale: BOSS.scale, breach: BOSS.breach,
-      armor: v.armor || 0, // Brutus: flat damage reduction on every hit
+      pts: BOSS.pts, xp: BOSS.xp, breach: BOSS.breach,
+      // a few bosses need more presence than the shared boss size gives
+      // them (the spider is squat, the dragon reads small in the air)
+      scale: BOSS.scale * (v.scale || 1),
+      armor: v.armor || 0, // flat damage reduction on every hit
+    };
+  }
+  // one of the Sombra's shades: a small, weak echo of a hero class
+  if (opts?.shade) {
+    const s = BOSSES.sombra.shades;
+    return {
+      hp: def.hp * hpMult * (BOSSES.sombra.hpMult || 1) * s.hpMult,
+      dmg: def.dmg * (BOSSES.sombra.dmgMult || 1) * s.dmgMult * dmgMult,
+      speed, pts: def.pts * 3, xp: def.xp * 3,
+      scale: s.scale, breach: 1, tier: 1,
     };
   }
   if (boss === 1) {
+    // a wave's SUBBOSSES entry may dial the size down (the grey archer,
+    // the three gravediggers) or hand out extra lives (the red zombie)
     return {
-      hp: def.hp * hpMult * SUBBOSS.hpMult, dmg: def.dmg * SUBBOSS.dmgMult, speed: speed * 0.85,
+      hp: def.hp * hpMult * SUBBOSS.hpMult,
+      dmg: def.dmg * SUBBOSS.dmgMult * dmgMult,
+      speed: speed * 0.85,
       pts: def.pts * SUBBOSS.ptsMult, xp: def.xp * SUBBOSS.xpMult,
-      scale: SUBBOSS.scale, breach: SUBBOSS.breach,
+      scale: opts?.scale || SUBBOSS.scale, breach: SUBBOSS.breach,
+      revives: opts?.revives || 0,
     };
   }
   const t = TIERS[tier];
   if (t) {
     return {
       hp: def.hp * hpMult * t.hp,
-      dmg: def.dmg * t.dmg,
+      dmg: def.dmg * t.dmg * dmgMult,
       speed: speed * (t.speedMult || 1),
       pts: def.pts * t.pts, xp: def.xp * t.xp,
       scale: t.scale, breach: 1, tier,
     };
   }
-  return { hp: def.hp * hpMult, dmg: def.dmg, speed, pts: def.pts, xp: def.xp, scale: 1, breach: 1, tier: 1 };
+  return {
+    hp: def.hp * hpMult, dmg: def.dmg * dmgMult, speed,
+    pts: def.pts, xp: def.xp, scale: 1, breach: 1, tier: 1,
+  };
 }

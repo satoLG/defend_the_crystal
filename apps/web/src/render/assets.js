@@ -45,6 +45,12 @@ const MANIFEST = {
   'enemy-orc': M('enemies/orc.glb', { char: true }),
   'enemy-vampire': M('enemies/vampire.glb', { char: true }),
   'enemy-keeper': M('enemies/keeper.glb', { char: true }),
+  // beast enemies (Quaternius) — skinned rather than node-animated, and
+  // authored several units across, so they size by their own footprint
+  // instead of the humanoid { char } factor
+  'enemy-bat': M('enemies/bat.glb', { h: 1.0 }),
+  'enemy-spider': M('enemies/spider.glb', { fp: 1.5 }),
+  'enemy-dragon': M('enemies/dragon.glb', { fp: 2.0 }),
   // towers
   'tower-ballista': M('towers/ballista.glb', { tile: true }),
   'tower-cannon': M('towers/cannon.glb', { tile: true }),
@@ -78,6 +84,9 @@ const MANIFEST = {
   'prop-pumpkin': M('props/pumpkin.glb', { h: 0.55 }),
   'prop-shovel': M('props/shovel.glb', { raw: true }),
   'prop-coffin': M('props/coffin.glb', { raw: true }),
+  // the Black Widow's web patches — laid flat on the ground, sized to
+  // the patch radius at spawn time
+  'prop-cobweb': M('props/cobweb.glb', { fp: 1.0 }),
   // obstacles — big and chunky so they read as impassable
   'obstacle-barrel': M('obstacles/barrel.glb', { fp: 1.6 }),
   'obstacle-rocks': M('env/rocks-tall.glb', { h: 1.5 }),

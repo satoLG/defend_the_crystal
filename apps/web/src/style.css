@@ -506,6 +506,7 @@ input:focus { border-color: var(--gold); }
   display: flex; flex-direction: column; align-items: flex-end; gap: 6px;
   z-index: 11;
 }
+
 #hud-action .btn {
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
   text-align: center;

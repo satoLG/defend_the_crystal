@@ -411,8 +411,12 @@ const STRINGS = {
         abobrado: { name: 'Pumpkinhead', flavor: 'Take cover — pumpkins incoming!' },
         horda: { name: 'The Zombie Horde', flavor: 'A hundred zombies flood the field!' },
         brutus: { name: 'Brutus', flavor: 'The slowest, toughest brute of them all.' },
+        dracula: { name: 'Dracula', flavor: 'Every drop he spills, he drinks back!' },
+        viuvanegra: { name: 'Black Widow', flavor: 'Venom and webs — you will not outrun her.' },
+        dragao: { name: 'Dark Dragon', flavor: 'It rains fire from above!' },
+        sombra: { name: "The Hero's Shadow", flavor: 'Your own strength, turned against you.' },
       },
-      enemy: { keeper: 'Gravedigger' },
+      enemy: { keeper: 'Gravedigger', bonethrower: 'Bone Thrower' },
     },
     power: {
       berserker: { name: 'Rampage Dash', desc: 'Rampage Dash — charge through the horde, striking everything in your path.' },
@@ -720,7 +724,7 @@ const STRINGS = {
       enemy: {
         skeleton: 'Esqueleto', zombie: 'Zumbi', ghost: 'Fantasma',
         skelarcher: 'Arqueiro Esqueleto', orc: 'Orc', vampire: 'Vampiro',
-        keeper: 'Coveiro',
+        keeper: 'Coveiro', bonethrower: 'Lança-Osso', bat: 'Morcego',
       },
       // config boss names are already Portuguese, but they must be
       // repeated here: the lookup falls through pt -> en BEFORE the config
@@ -732,6 +736,10 @@ const STRINGS = {
         abobrado: { name: 'Abobrado', flavor: 'Cuidado — abóboras chegando!' },
         horda: { name: 'A Horda Zumbi', flavor: 'Cem zumbis inundam o campo!' },
         brutus: { name: 'Brutus', flavor: 'O bruto mais lento e resistente de todos.' },
+        dracula: { name: 'Drácula', flavor: 'Cada gota que ele derrama, ele bebe de volta!' },
+        viuvanegra: { name: 'Viúva Negra', flavor: 'Veneno e teias — você não vai correr dela.' },
+        dragao: { name: 'Dragão das Trevas', flavor: 'Chove fogo lá de cima!' },
+        sombra: { name: 'Sombra do Herói', flavor: 'Sua própria força, virada contra você.' },
       },
     },
     power: {

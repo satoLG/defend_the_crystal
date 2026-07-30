@@ -1761,6 +1761,7 @@ export class UI {
       }
     }
 
+
     // start-wave button (lives in the top-right action slot)
     const btn = $('startwave-btn');
     if (snap.ph === 'build') {

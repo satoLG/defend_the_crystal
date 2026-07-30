@@ -158,22 +158,37 @@ at full strength.
 
 ### Enemies
 
-Skeletons (fast fodder), zombies (slow, tanky), 👻 ghosts (*fly straight
-over your maze*), skeleton archers (stop and shoot arrows at your
-characters), orcs (heavy), and vampires (fast **and** heavy — every few
-seconds they *vault over your walls* in a swarm of bats when it's a
-shortcut). Sub-bosses (every 5th wave) are scaled-up versions of the
-strongest rank alive — bigger, meaner, worth more.
+Skeletons (fast fodder), zombies (slow, tanky), bone throwers (slow and
+frail, but they lob bones from the back), 👻 ghosts (*fly straight over
+your maze*), bats (small and quick), skeleton archers (stop and shoot
+arrows at your characters), orcs (heavy), and vampires (fast **and**
+heavy — every few seconds they *vault over your walls* in a swarm of bats
+when it's a shortcut).
 
-Every 10th wave a **named boss** stomps in, on rotation:
+Which of them turn up is **authored per phase**, not random: zombies
+alone at first, skeletons from wave 5, bone throwers from 11, archers
+from 21, ghosts from 31, the first bats alongside Zé do Caixão on 40,
+then a wave-41 orc surge, and the full roster from 51 on — leaning on
+ghosts through the 50s and on vampires and bats through the 60s.
+Sub-bosses (every 5th wave) are authored too, one per wave.
 
-- **Coveiro** — the giant gravedigger raises tombs out of the ground
-  mid-path that keep disgorging zombies and skeletons
-- **Tiro Cego** — a giant skeleton archer that volleys arrows at *every*
-  character at once
-- **Zé do Caixão** — a giant vampire hauling his own coffin; chains two
-  wall-vaults back to back before the cooldown kicks in
-- **Abobrado** — a giant ghost lobbing carved pumpkins with area damage
+Every 10th wave a **named boss** stomps in:
+
+| Wave | Boss | |
+| --- | --- | --- |
+| 10 | **Coveiro** | the giant gravedigger raises tombs mid-path that keep disgorging zombies and skeletons |
+| 20 | **A Horda Zumbi** | not a boss but an infestation — a hundred zombies flood the field |
+| 30 | **Tiro Cego** | a giant skeleton archer that volleys arrows at *every* character at once |
+| 40 | **Zé do Caixão** | a giant vampire hauling his own coffin; chains two wall-vaults back to back |
+| 50 | **Brutus** | the slowest, toughest brute of them all, behind heavy armor |
+| 60 | **Abobrado** | a giant ghost lobbing carved pumpkins with area damage |
+| 70 | **Drácula** | blood magic at range — every hit he lands heals him back |
+| 80 | **Viúva Negra** | venom plus webs that bog down whoever stands in them |
+| 90 | **Dragão das Trevas** | breathes fire straight down from above |
+| 100 | **Sombra do Herói** | the run's own strongest hero, in black, swinging their kit back at you |
+
+Past wave 100 the whole arc runs again — same composition, same bosses,
+but the enemies keep getting stronger every lap.
 
 ## Controls
 
