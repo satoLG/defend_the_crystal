@@ -898,6 +898,11 @@ export class Sim {
       }
     }
 
+    // blood magic: a ranged drain that heals the caster for a share of
+    // the damage it lands. Drácula gets the full version from his boss
+    // entry; the vampires of his court (wave 61 on) get a weak one.
+    const blood = bossDef?.blood || bloodOf(kind, this.wave);
+
     const e = this.world.add({
       enemy: true, id: nextId(), kind, vehicle, seek,
       hp: stats.hp, maxHp: stats.hp, dmg: stats.dmg, speed: stats.speed,
@@ -924,11 +929,15 @@ export class Sim {
         ? (variant === 'brutus' ? 3 : 0)
         : boss === 1
           ? (opts?.vr || 0)
-          : bloodOf(kind, this.wave) ? 4
+          : blood ? 4
             : (stats.tier === 2 ? 1 : stats.tier === 3 ? 2 : 0),
       // special powers
       archer,
-      jumper: !!def.jumper && !def.flying,
+      // vaulting a wall is the mundane vampire's trick. One that knows
+      // blood magic keeps its distance and drains from range instead, so
+      // it never takes the shortcut — that includes Drácula himself and
+      // every vampire of his court.
+      jumper: !!def.jumper && !def.flying && !blood,
       jump: null,
       jumpCd: ENEMY.JUMP_EVERY * (0.4 + Math.random() * 0.6),
       chainJumps: bossDef?.jumps || 1,
@@ -938,10 +947,7 @@ export class Sim {
       aggroR: bossDef?.aggroR || ENEMY.AGGRO_RADIUS,
       summoner: !!def.summoner, summonCd: SUMMON.FIRST,
       pumpkin: bossDef?.pumpkin || null,
-      // blood magic: a ranged drain that heals the caster for a share of
-      // the damage it lands. Drácula gets the full version from his boss
-      // entry; the vampires of his court (wave 61 on) get a weak one.
-      blood: bossDef?.blood || bloodOf(kind, this.wave),
+      blood,
       // Viúva Negra: a venom lob and the web patches she spins
       venom: bossDef?.venom || null,
       web: bossDef?.web || null,

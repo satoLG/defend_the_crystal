@@ -616,7 +616,7 @@ export const ENEMY = {
   BREACH_DIST: 1.0,      // how close to the crystal counts as a breach
   HP_PER_WAVE: 0.16,     // +16% HP per wave past the first
   SPEED_PER_WAVE: 0.006, // slight creep
-  JUMP_EVERY: 10,        // seconds between vampire shortcut hops
+  JUMP_EVERY: 30,        // seconds between vampire shortcut hops
   // flow-dist saved for a hop to count as a shortcut (an orthogonal
   // step costs 2 — going around a lone tower only saves 2, so single
   // towers never trigger hops, real wall lines do)
@@ -686,8 +686,10 @@ export const BOSSES = {
   // Drácula fights like a mage, but every bolt of blood magic he lands
   // feeds him: `leech` is the share of the damage dealt that he heals.
   // Unlike his court he hits EVERY character at once (`allTargets`).
+  // No shortcut hops: knowing blood magic is what takes them away, so he
+  // walks the path like everything else and drains from where he stands.
   dracula:  { kind: 'vampire', name: 'Drácula',
-              hpMult: 11, dmgMult: 2.4, speedMult: 0.95, armor: 0.3, jumps: 2,
+              hpMult: 11, dmgMult: 2.4, speedMult: 0.95, armor: 0.3,
               blood: { range: 9, rate: 0.6, dmg: 34, projSpeed: 11, leech: 0.6, allTargets: true },
               escort: [{ kind: 'vampire', n: 2 }, { kind: 'bat', n: 4, tier: 2 }] },
   // the Black Widow softens the field before she bites: venom that eats
