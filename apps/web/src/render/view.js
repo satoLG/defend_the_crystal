@@ -227,9 +227,9 @@ const DRACULA_LOOK_KEY = 'dtc-dracula-look';
 // dev overlay (`?dev=1` -> Dragão) which writes this same shape.
 export const DRAGON_FX = {
   mouthF: 2.0,   // forward from its centre, toward the snout
-  mouthY: 2.4,   // height of the mouth
+  mouthY: 1.9,   // height of the mouth
   mouthS: 0.0,   // sideways nudge, when the head sits off-centre
-  poseAt: 1.0,   // where in the lunge clip to freeze (0..1 of its length)
+  poseAt: 0.3,   // where in the lunge clip to freeze (0..1 of its length)
   spread: 0.55,  // how much of the cone the embers hug near the head
   drop: 0.85,    // how hard the plume falls toward the ground
 };
