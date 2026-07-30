@@ -292,19 +292,34 @@ function startMatch() {
   state.net?.send('act', { t: 'begin' });
 }
 
+// How long after the intro's black screen clears the portal flares open.
+// The temple title card runs for 2.6s from that same moment, so a short
+// lead puts the whole arrival (portal + step-out, ~1.1s) INSIDE the card
+// instead of making the player wait for it to fade first.
+const ARRIVAL_LEAD = 0.55;
+
 function enterGame() {
   state.started = true;
   state.over = false;
   // black screen typing the crystal's plea, then a "Crystal Temple"
   // title card as the scene fades in, and the hero steps out of the
-  // portal the moment that card clears — no dead wait
+  // portal while that card is still up — no dead wait
   const introDur = ui.playIntro();
-  // the title card appears right as the black screen clears, and the
-  // hero steps out of the portal the moment the card fades
   setTimeout(() => { if (state.started && !state.over) ui.showLocationBanner(); }, introDur * 1000);
-  view.beginArrival(introDur + 2.6);
+  view.beginArrival(introDur + ARRIVAL_LEAD);
   ui.showHud();
   sfx.notify();
+}
+
+// The hero is not controllable until the portal has actually put them on
+// the ground: no walking, jumping, casting or building while the arrival
+// animation is still running (or while the intro is holding it armed).
+function selfArriving() {
+  return !!view?.isArriving(selfId);
+}
+
+function canControlSelf() {
+  return state.started && !state.over && !selfArriving();
 }
 
 function sendAction(act) {
@@ -390,7 +405,7 @@ function dragCellAt(x, y) {
 }
 
 function onDragMove(x, y) {
-  if (!state.started || state.over || !ui.dragItem) return;
+  if (!canControlSelf() || !ui.dragItem) return;
   const cell = dragCellAt(x, y);
   if (!cell) return view.clearGhost();
   view.setGhost(ui.dragItem, cell.c, cell.r, canPlaceLocal(ui.dragItem, cell.c, cell.r));
@@ -400,7 +415,7 @@ function onDragMove(x, y) {
 // go over the HUD or off the board is a silent cancel; releasing on a
 // red (invalid) tile answers with the error buzz.
 function onDragEnd(item, drop) {
-  if (!drop || !state.started || state.over) return;
+  if (!drop || !canControlSelf()) return;
   const cell = dragCellAt(drop.x, drop.y);
   if (!cell) return;
   if (canPlaceLocal(item, cell.c, cell.r)) {
@@ -424,7 +439,7 @@ function afterPlace(item) {
 }
 
 function onCanvasTap(x, y, pointerType, button) {
-  if (!state.started) return;
+  if (!state.started || selfArriving()) return;
   if (button === 2) return; // right-click cancels via contextmenu
   const cell = cellFromPointer(x, y);
   const offBoard = !cell ||
@@ -484,7 +499,7 @@ function towerRangeOf(row) {
 }
 
 function onKeyAction(action) {
-  if (!state.started) return;
+  if (!state.started || selfArriving()) return;
   switch (action) {
     case 'build': ui.selectItem(ui.selectedItem ? null : 'obstacle'); break;
     case 'card0': ui.selectCardByIndex(0); break;
@@ -539,7 +554,7 @@ function findAnyJump() {
 
 function doJump() {
   const s = state.self;
-  if (!state.started || state.over || s.dead || s.jump || s.dash) return false;
+  if (!canControlSelf() || s.dead || s.jump || s.dash) return false;
   if (!state.selfInit) return false;
   const info = findAnyJump();
   if (!info) return false;
@@ -557,7 +572,7 @@ function doJump() {
 let jumpWasEnabled = null;
 function updateJumpButton() {
   const s = state.self;
-  const ok = state.started && !state.over && !s.dead && !s.jump && !s.dash &&
+  const ok = canControlSelf() && !s.dead && !s.jump && !s.dash &&
     state.selfInit &&
     (!!findJump(clientGridRef(), s.x, s.z, localJumpCells()) ||
       (state.allowPlaza && !!findColliderJump(s.x, s.z, PLAYER.RADIUS)));
@@ -573,7 +588,7 @@ function updateJumpButton() {
 
 function doSkill() {
   const s = state.self;
-  if (!state.started || state.over || s.dead || s.jump || s.dash) return;
+  if (!canControlSelf() || s.dead || s.jump || s.dash) return;
   if (!state.selfInit) return;
   if (!ui.skillReady) return;
   // the berserker's dash moves the character, and movement is
@@ -721,7 +736,7 @@ function handleEvent(ev) {
       { // the party re-enters through the portal after the plea + title
         const dur = ui.playIntro();
         setTimeout(() => { if (state.started && !state.over) ui.showLocationBanner(); }, dur * 1000);
-        view.beginArrival(dur + 2.6);
+        view.beginArrival(dur + ARRIVAL_LEAD);
       }
       ui.toast(t('toast.newDefense'), 'gold');
       break;
@@ -892,7 +907,11 @@ function frame(t) {
   const freeRoam = phase === 'checkpoint' || (phase === 'build' && waveN === 0);
   state.allowPlaza = !state.started || state.over || freeRoam;
 
-  if (state.started && !state.over) stepSelf(dt);
+  // no self-prediction while the hero is still stepping out of the portal:
+  // the spawn animation owns the model until it lands
+  const arriving = selfArriving();
+  if (arriving) state.self.moving = false;
+  else if (state.started && !state.over) stepSelf(dt);
   updateJumpButton();
 
   if (state.started) {
@@ -957,8 +976,8 @@ function frame(t) {
 
   // standing at Tonho's stall in the plaza unlocks buying at the shop
   // (vendors are only reachable while the sanctuary is open anyway)
-  const canRoam = state.started && !state.over && !state.self.dead && freeRoam &&
-    state.selfInit;
+  const canRoam = state.started && !state.over && !arriving && !state.self.dead &&
+    freeRoam && state.selfInit;
   const atShop = canRoam &&
     dist2d(state.self.x, state.self.z, PET_SHOP_POS.x, PET_SHOP_POS.z) < PET_SHOP_RADIUS;
   ui.setShopNear(atShop);

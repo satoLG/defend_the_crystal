@@ -1982,6 +1982,18 @@ export class GameView {
     }
   }
 
+  // Is this hero still coming through the portal? True from the moment an
+  // arrival is armed until the pop-in animation has finished putting the
+  // model on the ground. Controls stay locked for exactly this window, so
+  // nobody walks off while their own body is still materializing. It always
+  // clears on its own (the arrival timer fires, then spawnT runs out), so
+  // this can never strand a player.
+  isArriving(id) {
+    if (this.arrivalArmed) return true;
+    const a = this.players.get(id);
+    return !!a && (!!a.arrivalPending || a.spawnT != null);
+  }
+
   fireArrival() {
     this.arrivalArmed = false;
     let any = false;
