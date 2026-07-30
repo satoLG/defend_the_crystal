@@ -375,6 +375,7 @@ const STRINGS = {
     },
     toast: {
       joined: '{name} joined the defense!', left: '{name} left.',
+      graphicsRestored: 'Graphics restored',
       noBlocks: 'No blocks left — earn more each wave',
       notEnoughCrystals: 'Not enough crystals', spotTaken: 'That spot is taken',
       cantBuildThere: "Can't build there", cantBlockPath: "You can't fully block the path!",
@@ -627,6 +628,7 @@ const STRINGS = {
     },
     toast: {
       joined: '{name} entrou na defesa!', left: '{name} saiu.',
+      graphicsRestored: 'Gráficos restaurados',
       noBlocks: 'Sem blocos — ganhe mais a cada onda',
       notEnoughCrystals: 'Cristais insuficientes', spotTaken: 'Esse lugar já está ocupado',
       cantBuildThere: 'Não dá para construir aí', cantBlockPath: 'Você não pode bloquear todo o caminho!',

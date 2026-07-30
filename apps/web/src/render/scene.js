@@ -30,6 +30,28 @@ export class GameScene {
   constructor(canvas) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+
+    // The driver can take the WebGL context away mid-match — a phone under
+    // memory pressure after a long run is the usual reason. Calling
+    // preventDefault is what lets the browser hand it back at all; without
+    // it the canvas simply stays dead. Coming back, every material and
+    // texture is marked for re-upload: one that misses that samples black,
+    // which is how a character ends up a silhouette after the screen
+    // flashes. Rendering pauses while the context is gone so the frames in
+    // between raise no GL errors.
+    this.contextLost = false;
+    this.onContextLost = null;
+    this.onContextRestored = null;
+    canvas.addEventListener('webglcontextlost', (e) => {
+      e.preventDefault();
+      this.contextLost = true;
+      this.onContextLost?.();
+    });
+    canvas.addEventListener('webglcontextrestored', () => {
+      this.contextLost = false;
+      this.refreshGpuResources();
+      this.onContextRestored?.();
+    });
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -1211,7 +1233,27 @@ export class GameScene {
     }
   }
 
-  render() { this.renderer.render(this.scene, this.camera); }
+  render() {
+    if (this.contextLost) return;
+    this.renderer.render(this.scene, this.camera);
+  }
+
+  // Push everything currently in the scene back onto the GPU. three.js
+  // re-initializes its own state on a context restore, but a material or
+  // texture that isn't flagged can come back unbound and render as flat
+  // black — so flag all of them and let the next frame re-upload.
+  refreshGpuResources() {
+    const seen = new Set();
+    this.scene.traverse((o) => {
+      const mats = Array.isArray(o.material) ? o.material : o.material ? [o.material] : [];
+      for (const m of mats) {
+        if (!m || seen.has(m)) continue;
+        seen.add(m);
+        for (const v of Object.values(m)) if (v && v.isTexture) v.needsUpdate = true;
+        m.needsUpdate = true;
+      }
+    });
+  }
 
   crystalBreachFx() {
     this.crystalHurt = 1;

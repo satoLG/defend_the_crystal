@@ -203,6 +203,31 @@ export function getTemplate(key) {
   return t;
 }
 
+// Every geometry, material and texture the loaded templates own.
+//
+// instantiate() hands out clones that still SHARE all of this: SkeletonUtils
+// reuses the geometries outright, and even a cloned material keeps pointing
+// at the template's textures. So when a throwaway thing built from a model
+// (a corpse, an arrow, a burst) is torn down and its GL resources released,
+// everything in this set has to be left alone — disposing it would blank
+// out every future instance of that model.
+export function sharedResources() {
+  const keep = new Set();
+  const noteMaterial = (m) => {
+    if (!m || keep.has(m)) return;
+    keep.add(m);
+    for (const v of Object.values(m)) if (v && v.isTexture) keep.add(v);
+  };
+  for (const t of Object.values(templates)) {
+    t.group.traverse((o) => {
+      if (o.geometry) keep.add(o.geometry);
+      if (Array.isArray(o.material)) o.material.forEach(noteMaterial);
+      else noteMaterial(o.material);
+    });
+  }
+  return keep;
+}
+
 // Fresh instance. cloneMaterials lets us flash hit feedback
 // without affecting every other actor sharing the material.
 export function instantiate(key, { cloneMaterials = false, shadows = true } = {}) {

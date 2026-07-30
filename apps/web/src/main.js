@@ -152,6 +152,9 @@ async function boot() {
 
   await loadAssets((f) => ui.loadProgress(f));
   gs = new GameScene(canvas);
+  // a dropped WebGL context used to look like the game breaking (white
+  // flashes, then black models); say what happened and confirm the recovery
+  gs.onContextRestored = () => ui.toast(t('toast.graphicsRestored'), 'gold');
   gs.shakeEnabled = settings.get('shake');
   gs.setShadows(settings.get('shadows'));
   settings.onChange((k, v) => {
