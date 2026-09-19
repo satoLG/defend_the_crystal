@@ -6,6 +6,7 @@ import {
   PLAZA_COLUMNS, PLAZA_LANTERNS, PET_STALL_CELLS,
 } from '@dtc/shared/sanctuary.js';
 import { instantiate } from './assets.js';
+import { withArcadeTexture } from './arcade-textures.js';
 
 // ============================================================
 // Static world: renderer, portrait-friendly camera that always
@@ -139,6 +140,8 @@ export class GameScene {
     };
     const grass = grabTile('env-tile');
     const dirt = grabTile('env-tile-dirt');
+    grass.mat = withArcadeTexture(grass.mat, 'grass', 1 / CELL, 0.9);
+    dirt.mat = withArcadeTexture(dirt.mat, 'dirt', 1 / CELL, 0.85);
     const tileTop = grass.top;
 
     // decide per cell: dirt trails wander from both spawns down to the
@@ -241,9 +244,11 @@ export class GameScene {
       }
     }
 
-    // untextured stone material: the tile shape with a plain gray face
-    // (kept dim — the crystal and fountain lights land right on it)
-    const stoneMat = new THREE.MeshStandardMaterial({ color: 0x878b9e, roughness: 0.95 });
+    // Cool flagstones keep the plaza readable under the crystal's cyan light.
+    const stoneMat = withArcadeTexture(
+      new THREE.MeshStandardMaterial({ color: 0x878b9e, roughness: 0.95 }),
+      'stone', 1 / CELL, 0.9
+    );
 
     const m = new THREE.Matrix4();
     for (const kind of [0, 1, 2]) {
@@ -297,10 +302,10 @@ export class GameScene {
     // just above it. It comes in TWO shelves now: the plateau the board
     // sits on (north) and the sunken sanctuary level (south), meeting at
     // the stair line — the cliff faces below cover the seam.
-    const baseMat = new THREE.MeshStandardMaterial({
+    const baseMat = withArcadeTexture(new THREE.MeshStandardMaterial({
       color: 0x2b3a1f, roughness: 1,
       polygonOffset: true, polygonOffsetFactor: 2, polygonOffsetUnits: 2,
-    });
+    }), 'grass', 1 / CELL, 0.5);
     const baseNorth = new THREE.Mesh(new THREE.PlaneGeometry(240, 135), baseMat);
     baseNorth.rotation.x = -Math.PI / 2;
     baseNorth.position.set(0, -tileTop - 0.06, STAIRS.TOP - 135 / 2 + 0.4);
@@ -318,7 +323,7 @@ export class GameScene {
     // the floor); they also sit clearly above the offset base.
     const patchGeo = new THREE.CircleGeometry(1, 10);
     const patchMats = [0x33482a, 0x263420, 0x39502e, 0x2b3b22].map(
-      (col) => new THREE.MeshStandardMaterial({ color: col, roughness: 1 })
+      (col) => withArcadeTexture(new THREE.MeshStandardMaterial({ color: col, roughness: 1 }), 'grass', 1, 0.5)
     );
     for (let i = 0; i < 90; i++) {
       const a = rng() * Math.PI * 2;
@@ -370,7 +375,7 @@ export class GameScene {
     const stepMats = [
       new THREE.MeshStandardMaterial({ color: 0x8b8fa4, roughness: 0.95 }),
       new THREE.MeshStandardMaterial({ color: 0x7d8296, roughness: 0.95 }),
-    ];
+    ].map(material => withArcadeTexture(material, 'stone', 1 / CELL, 0.75));
     const W = PLAZA.HALF_W * 2 + 0.4; // a small lip past the plaza width
     const stepD = STAIRS.FLIGHT / STAIRS.STEPS;
     // every tread is a full-height box rising from the sanctuary floor,
@@ -480,12 +485,12 @@ export class GameScene {
     const g = new THREE.Group();
     g.position.set(FOUNTAIN.x, -ELEV, FOUNTAIN.z);
 
-    const stone = new THREE.MeshStandardMaterial({
+    const stone = withArcadeTexture(new THREE.MeshStandardMaterial({
       color: 0x9298ac, roughness: 0.9, flatShading: true,
-    });
-    const stoneDark = new THREE.MeshStandardMaterial({
+    }), 'stone', 1 / CELL, 0.6);
+    const stoneDark = withArcadeTexture(new THREE.MeshStandardMaterial({
       color: 0x767b8e, roughness: 1, flatShading: true,
-    });
+    }), 'stone', 1 / CELL, 0.6);
     const R = FOUNTAIN.r;
 
     // octagonal outer wall + flat rim cap
