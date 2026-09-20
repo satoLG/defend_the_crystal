@@ -10,6 +10,7 @@ import { withArcadeTexture } from './arcade-textures.js';
 import { bakeTilePalette } from './terrain-palette.js';
 import { createFountain } from './fountain.js';
 import { renderBudget, spatialBatches } from './render-budget.js';
+import { createStairVerge } from './stair-verge.js';
 
 // ============================================================
 // Static world: renderer, portrait-friendly camera that always
@@ -332,8 +333,7 @@ export class GameScene {
 
   // two full-width flights of stone steps drop from the battlefield
   // plateau down to the sanctuary floor, with a landing between them;
-  // dark cliff faces run along the drop on both flanks so the seam
-  // between the two ground shelves never shows bare
+  // continuous forest verges seal the ground beneath both foliage borders
   buildStairs() {
     const g = new THREE.Group();
     const stepMats = [
@@ -362,13 +362,7 @@ export class GameScene {
     }
     this.scene.add(g);
 
-    // cliff faces flanking the drop (outside the stairs' width)
-    const cliffMat = new THREE.MeshStandardMaterial({ color: 0x232032, roughness: 1 });
-    for (const side of [-1, 1]) {
-      const wall = new THREE.Mesh(new THREE.PlaneGeometry(46, ELEV + 0.8), cliffMat);
-      wall.position.set(side * (PLAZA.HALF_W + 0.2 + 23), -ELEV / 2 + 0.1, STAIRS.TOP + 0.02);
-      this.scene.add(wall);
-    }
+    this.scene.add(createStairVerge());
   }
 
   // the crystal's pedestal and its colonnade are the ONLY props on the
@@ -672,11 +666,15 @@ export class GameScene {
         specs[specs.length - 1].s = 1.05;
       }
       // Low saplings fill the gap below the taller canopies without adding
-      // draw calls or obstructing the walkable stair width.
+      // draw calls or changing stair collision/navigation.
       for (let z = STAIRS.TOP + 0.2; z <= STAIRS.BOTTOM + 0.5; z += 0.65) {
         push(side * (PLAZA.HALF_W + 0.55), z, 0.7);
         const sapling = specs[specs.length - 1];
-        sapling.s = 0.62;
+        // Broad, partly buried lower boughs overlap the stair lip in the
+        // normal south-facing camera, rather than exposing thin trunks.
+        sapling.s = 0.72;
+        sapling.spread = 1.65;
+        sapling.y -= 0.35;
         sapling.crooked = false;
       }
     }
@@ -714,7 +712,7 @@ export class GameScene {
           Math.max(Math.abs(box.min.z), Math.abs(box.max.z)),
         );
         const visible = list.filter((t, index) => {
-          const radius = horizontalRadius * t.s;
+          const radius = horizontalRadius * t.s * (t.spread || 1);
           const dx = Math.max(0, Math.abs(t.x) - HALF_W);
           const dz = Math.max(0, -HALF_H - t.z, t.z - southZ);
           // Preserve the dense clearing edge; thin only the shaded backdrop
@@ -727,7 +725,8 @@ export class GameScene {
           inst.name = 'forest-chunk';
           batch.forEach((t, i) => {
             q.setFromAxisAngle(up, t.rot);
-            m.compose(p.set(t.x, t.y, t.z), q, s3.setScalar(t.s));
+            const spread = t.s * (t.spread || 1);
+            m.compose(p.set(t.x, t.y, t.z), q, s3.set(spread, t.s, spread));
             inst.setMatrixAt(i, m);
             inst.setColorAt(i, col.setScalar(t.dark));
           });
