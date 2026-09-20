@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as skeletonClone } from 'three/addons/utils/SkeletonUtils.js';
 import { GRID } from '@dtc/shared/config.js';
+import { textureModel } from './arcade-textures.js';
 
 // ============================================================
 // Loads every GLB once, normalizes scale (Kenney kits use
@@ -168,6 +169,7 @@ export async function loadAssets(onProgress) {
 
   for (const key of keys) {
     templates[key] = prepare(raw[key], MANIFEST[key].norm, tileFactor, charFactor);
+    textureModel(templates[key].group, key);
   }
   return templates;
 }
