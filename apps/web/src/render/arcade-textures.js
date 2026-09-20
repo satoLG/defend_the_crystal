@@ -1,4 +1,6 @@
 import * as THREE from 'three';
+import { addForestShade } from './forest-shade.js';
+import { bakeTilePalette } from './terrain-palette.js';
 
 // Small, deterministic detail maps multiply the existing palette rather than
 // replacing it. Kenney's UVs often point into a single colour swatch: project
@@ -86,10 +88,16 @@ function detailTexture(kind) {
 
 // A subclass keeps the shader hook when existing game code clones a material
 // for hit flashes, ghosts, character previews or per-instance tinting.
-class ArcadeMaterial extends THREE.MeshStandardMaterial {
-  customProgramCacheKey() { return 'dtc-arcade-detail-v1'; }
+class ForestMaterial extends THREE.MeshStandardMaterial {
+  customProgramCacheKey() { return 'dtc-forest-v2'; }
+  onBeforeCompile(shader) { addForestShade(shader); }
+}
+
+class ArcadeMaterial extends ForestMaterial {
+  customProgramCacheKey() { return 'dtc-arcade-forest-v2'; }
 
   onBeforeCompile(shader) {
+    addForestShade(shader);
     const { kind, scale, strength } = this.userData.arcade;
     shader.uniforms.arcadeDetail = { value: detailTexture(kind) };
     shader.uniforms.arcadeScale = { value: scale };
@@ -133,17 +141,37 @@ export function withArcadeTexture(source, kind, scale = 1, strength = 0.75) {
 export function textureModel(group, key) {
   // Terrain gets a consistent world-sized treatment in scene.js. Keep magic
   // crystals, projectiles and translucent effects clean and immediately legible.
-  if (/tile|crystal|ammo-|cobweb|ghost/.test(key)) return;
+  if (/tile/.test(key)) return;
+  const clean = /crystal|ammo-|cobweb|ghost/.test(key);
   const stone = /rocks|altar|bowl|pillar|column|statue|obelisk|gravestone|arena-wall|arena-block|tower-base/.test(key);
   const wood = /barrel|coffin|dungeon-stall|arena-rack|tower-ballista|tower-catapult/.test(key);
   const kind = stone ? 'stone' : wood ? 'wood' : 'grain';
   group.traverse((mesh) => {
-    if (!mesh.isMesh || /head/i.test(mesh.name)) return;
+    if (!mesh.isMesh) return;
     mesh.geometry.computeBoundingBox();
     const span = mesh.geometry.boundingBox.getSize(new THREE.Vector3());
     const scale = 1 / Math.max(span.x, span.y, span.z, 0.001);
     const decorate = material => {
-      if (!material.isMeshStandardMaterial || material.isMeshPhysicalMaterial || material.transparent) return material;
+      if (!material.isMeshStandardMaterial || material.isMeshPhysicalMaterial) return material;
+      if (clean || /head/i.test(mesh.name) || material.transparent) return new ForestMaterial().copy(material);
+      if (key.startsWith('env-pine')) {
+        // Resolve the foliage palette once. The orange underside swatches
+        // above the trunk become shaded green, keeping brown at the roots.
+        mesh.geometry = mesh.geometry.clone();
+        material = bakeTilePalette(mesh.geometry, material);
+        const colors = mesh.geometry.attributes.color;
+        const pos = mesh.geometry.attributes.position;
+        const box = mesh.geometry.boundingBox;
+        for (let i = 0; colors && i < colors.count; i++) {
+          let r = colors.getX(i), g = colors.getY(i), b = colors.getZ(i);
+          if (g > r) { r *= 1.05; g *= 0.92; b *= 0.34; }
+          else if (pos.getY(i) > box.min.y + span.y * 0.22) {
+            const light = Math.max(r, g, b);
+            r = light * 0.12; g = light * 0.30; b = light * 0.035;
+          }
+          colors.setXYZ(i, r, g, b);
+        }
+      }
       return withArcadeTexture(material, kind, scale, stone ? 0.6 : wood ? 0.65 : 0.48);
     };
     mesh.material = Array.isArray(mesh.material) ? mesh.material.map(decorate) : decorate(mesh.material);
