@@ -9,6 +9,7 @@ import { instantiate } from './assets.js';
 import { withArcadeTexture } from './arcade-textures.js';
 import { bakeTilePalette } from './terrain-palette.js';
 import { createFountain } from './fountain.js';
+import { renderBudget, spatialBatches } from './render-budget.js';
 
 // ============================================================
 // Static world: renderer, portrait-friendly camera that always
@@ -31,8 +32,13 @@ function camDirFromAngles(pitch, yaw) {
 
 export class GameScene {
   constructor(canvas) {
-    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.renderBudget = renderBudget({
+      coarsePointer: window.matchMedia('(pointer: coarse)').matches,
+      deviceMemory: navigator.deviceMemory,
+      pixelRatio: window.devicePixelRatio,
+    });
+    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: this.renderBudget.antialias });
+    this.renderer.setPixelRatio(this.renderBudget.pixelRatio);
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -97,7 +103,7 @@ export class GameScene {
     this.moon = moon;
     moon.position.set(-10, 24, -6);
     moon.castShadow = true;
-    moon.shadow.mapSize.set(1024, 1024);
+    moon.shadow.mapSize.setScalar(this.renderBudget.shadowSize);
     const s = 20;
     moon.shadow.camera.left = -s; moon.shadow.camera.right = s;
     moon.shadow.camera.top = s * 1.7; moon.shadow.camera.bottom = -s * 1.7;
@@ -699,16 +705,36 @@ export class GameScene {
     ]) {
       if (!list.length) continue;
       for (const part of grabParts(key)) {
-        const inst = new THREE.InstancedMesh(part.geo, part.mat, list.length);
-        inst.frustumCulled = false;
-        list.forEach((t, i) => {
-          q.setFromAxisAngle(up, t.rot);
-          m.compose(p.set(t.x, t.y, t.z), q, s3.setScalar(t.s));
-          inst.setMatrixAt(i, m);
-          inst.setColorAt(i, col.setScalar(t.dark));
+        part.geo.computeBoundingBox();
+        // Only omit trees whose entire transformed bounds are beyond the
+        // shader's fully black region. Preserve every visible canopy edge.
+        const box = part.geo.boundingBox;
+        const horizontalRadius = Math.hypot(
+          Math.max(Math.abs(box.min.x), Math.abs(box.max.x)),
+          Math.max(Math.abs(box.min.z), Math.abs(box.max.z)),
+        );
+        const visible = list.filter((t, index) => {
+          const radius = horizontalRadius * t.s;
+          const dx = Math.max(0, Math.abs(t.x) - HALF_W);
+          const dz = Math.max(0, -HALF_H - t.z, t.z - southZ);
+          // Preserve the dense clearing edge; thin only the shaded backdrop
+          // on constrained devices. Deterministic, so cameras never pop trees.
+          if (this.renderBudget.compact && Math.hypot(dx, dz) > 3 && index % 2) return false;
+          return Math.hypot(dx, dz) <= 7 + radius;
         });
-        inst.instanceColor.needsUpdate = true;
-        this.scene.add(inst);
+        for (const batch of spatialBatches(visible)) {
+          const inst = new THREE.InstancedMesh(part.geo, part.mat, batch.length);
+          inst.name = 'forest-chunk';
+          batch.forEach((t, i) => {
+            q.setFromAxisAngle(up, t.rot);
+            m.compose(p.set(t.x, t.y, t.z), q, s3.setScalar(t.s));
+            inst.setMatrixAt(i, m);
+            inst.setColorAt(i, col.setScalar(t.dark));
+          });
+          inst.instanceColor.needsUpdate = true;
+          inst.computeBoundingSphere();
+          this.scene.add(inst);
+        }
       }
     }
   }
