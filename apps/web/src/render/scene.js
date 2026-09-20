@@ -7,6 +7,8 @@ import {
 } from '@dtc/shared/sanctuary.js';
 import { instantiate } from './assets.js';
 import { withArcadeTexture } from './arcade-textures.js';
+import { bakeTilePalette } from './terrain-palette.js';
+import { createFountain } from './fountain.js';
 
 // ============================================================
 // Static world: renderer, portrait-friendly camera that always
@@ -140,8 +142,8 @@ export class GameScene {
     };
     const grass = grabTile('env-tile');
     const dirt = grabTile('env-tile-dirt');
-    grass.mat = withArcadeTexture(grass.mat, 'grass', 1 / CELL, 0.9);
-    dirt.mat = withArcadeTexture(dirt.mat, 'dirt', 1 / CELL, 0.85);
+    grass.mat = withArcadeTexture(bakeTilePalette(grass.geo, grass.mat), 'grass', 1 / CELL, 0.9);
+    dirt.mat = withArcadeTexture(bakeTilePalette(dirt.geo, dirt.mat), 'dirt', 1 / CELL, 0.85);
     const tileTop = grass.top;
 
     // decide per cell: dirt trails wander from both spawns down to the
@@ -477,99 +479,12 @@ export class GameScene {
     }
   }
 
-  // the fountain at the heart of the plaza: a wide stone basin sitting
-  // straight on the paving (no pedestal), a low center column with an
-  // upper bowl, shimmering water and pulsing jets — animated only while
-  // the sanctuary is on camera (see setSanctuaryActive)
+  // Hollow basin and animated water share the sanctuary visibility lifecycle.
   buildChafariz() {
-    const g = new THREE.Group();
-    g.position.set(FOUNTAIN.x, -ELEV, FOUNTAIN.z);
-
-    const stone = withArcadeTexture(new THREE.MeshStandardMaterial({
-      color: 0x9298ac, roughness: 0.9, flatShading: true,
-    }), 'stone', 1 / CELL, 0.6);
-    const stoneDark = withArcadeTexture(new THREE.MeshStandardMaterial({
-      color: 0x767b8e, roughness: 1, flatShading: true,
-    }), 'stone', 1 / CELL, 0.6);
-    const R = FOUNTAIN.r;
-
-    // octagonal outer wall + flat rim cap
-    const wall = new THREE.Mesh(new THREE.CylinderGeometry(R + 0.1, R + 0.22, 0.52, 8), stone);
-    wall.position.y = 0.26;
-    wall.receiveShadow = true;
-    g.add(wall);
-    const rim = new THREE.Mesh(new THREE.TorusGeometry(R + 0.02, 0.09, 6, 8), stoneDark);
-    rim.rotation.x = -Math.PI / 2;
-    rim.position.y = 0.54;
-    g.add(rim);
-
-    // basin water: a custom shader for a light, simple water look — a
-    // calm blue body with a soft WHITE foam ring at the rim and gentle
-    // concentric ripples. Cheap (one plane, a few sin() in the frag).
-    const waterMat = new THREE.ShaderMaterial({
-      transparent: true, depthWrite: false,
-      uniforms: { uT: { value: 0 } },
-      vertexShader: `
-        varying vec2 vUv;
-        void main() {
-          vUv = uv * 2.0 - 1.0;
-          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-        }`,
-      fragmentShader: `
-        varying vec2 vUv;
-        uniform float uT;
-        void main() {
-          float r = length(vUv);
-          if (r > 1.0) discard;
-          // gentle ripples travelling outward
-          float ripple = 0.5 + 0.5 * sin(r * 22.0 - uT * 2.2);
-          vec3 deep = vec3(0.29, 0.62, 0.80);
-          vec3 shallow = vec3(0.55, 0.82, 0.92);
-          vec3 col = mix(deep, shallow, ripple * 0.5);
-          // soft white foam hugging the rim
-          float foam = smoothstep(0.80, 0.99, r);
-          foam *= 0.6 + 0.4 * sin(atan(vUv.y, vUv.x) * 18.0 + uT * 1.5);
-          col = mix(col, vec3(1.0), clamp(foam, 0.0, 0.9));
-          gl_FragColor = vec4(col, 0.92);
-        }`,
-    });
-    const water = new THREE.Mesh(new THREE.CircleGeometry(R - 0.08, 32), waterMat);
-    water.rotation.x = -Math.PI / 2;
-    water.position.y = 0.42;
-    g.add(water);
-
-    // center column + small upper bowl with its own little water disc
-    const col = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.24, 0.85, 8), stoneDark);
-    col.position.y = 0.62;
-    g.add(col);
-    const bowl = instantiate('env-bowl').group;
-    bowl.scale.setScalar(0.5);
-    bowl.position.y = 1.0;
-    g.add(bowl);
-    const upWater = new THREE.Mesh(new THREE.CircleGeometry(0.3, 20), waterMat);
-    upWater.rotation.x = -Math.PI / 2;
-    upWater.position.y = 1.24;
-    g.add(upWater);
-
-    // a single slim jet bubbling up from the upper bowl (the four odd
-    // side-streams were removed)
-    const jet = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.05, 0.03, 0.42, 6),
-      new THREE.MeshBasicMaterial({
-        color: 0xbfeeff, transparent: true, opacity: 0.4,
-        blending: THREE.AdditiveBlending, depthWrite: false,
-      })
-    );
-    jet.position.y = 1.46;
-    g.add(jet);
-
-    // cool glow so the water reads as water from afar
-    const glow = new THREE.PointLight(0x66c8e8, 5, 7, 2);
-    glow.position.y = 1.6;
-    g.add(glow);
-
-    this.scene.add(g);
-    this.waters.push({ waterMat, jet, phase: 0.7 });
+    const fountain = createFountain(FOUNTAIN.r, CELL);
+    fountain.group.position.set(FOUNTAIN.x, -ELEV, FOUNTAIN.z);
+    this.scene.add(fountain.group);
+    this.waters.push(fountain);
   }
 
   buildCrystal() {
@@ -1174,14 +1089,12 @@ export class GameScene {
     }
     this.crystalLight.intensity = 26 + Math.sin(this.time * 2.2) * 7 + this.crystalHurt * 40;
 
-    // fountain water: advance the ripple/foam shader + bob the jet —
+    // fountain water: advance the ripple/foam and falling-stream shaders —
     // skipped entirely while the sanctuary is off-camera mid-wave
     if (this.sanctuaryActive) {
       for (const w of this.waters) {
         w.waterMat.uniforms.uT.value = this.time;
-        const k = 1 + Math.sin(this.time * 5 + w.phase) * 0.12;
-        w.jet.scale.set(1, k, 1);
-        w.jet.material.opacity = 0.32 + Math.sin(this.time * 5 + w.phase) * 0.1;
+        w.flowMat.uniforms.uT.value = this.time;
       }
     }
 
